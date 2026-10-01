@@ -27,7 +27,8 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 
 ```
 StockLab/
-├── generate_sector_trend.py    # 命令行入口：生成板块走势网页
+├── scripts/                    # 辅助与入口脚本
+│   └── generate_sector_trend.py # 命令行入口：生成板块走势网页
 ├── config.ini                  # 配置：月数、输出路径、基准与板块清单
 ├── AGENT.md                    # 本文档（项目永久上下文与设计契约）
 ├── templates/
@@ -41,7 +42,7 @@ StockLab/
 │   │   └── type_utils.py       #   safe_float / safe_int 类型安全转换
 │   ├── datasource/             # 数据源接入层
 │   │   ├── tencent_client.py   #   【腾讯直连行情网关】TencentMarketClient（统一接入股票/ETF/指数）
-│   │   └── stock_fetcher.py    #   【个股多源数据服务】StockDataFetcher（三级容错策略 + 估值对齐）
+│   │   └── stock_data.py       #   【个股多源数据服务】MarketDataService（三级容错策略 + 估值对齐）
 │   └── visualizer/             # 可视化 / Web 呈现层
 │       ├── page_generator.py   #   模板填充 → HTML
 │       └── sector_trend.py     #   SectorTrendVisualizer 端到端编排
@@ -51,14 +52,14 @@ StockLab/
 ## 分层与依赖方向
 
 ```
-入口脚本 (generate_sector_trend.py)  /  测试 (tests/test_data_interfaces.py)
+入口脚本 (scripts/generate_sector_trend.py)  /  测试 (tests/test_data_interfaces.py)
         │
         ▼
 stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
 ```
 
 - `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换）。
-- `stocklab/datasource`：对外数据获取。通用的 K 线时序与批量并发抓取走 `TencentMarketClient`（`tencent_client.py`，不区分股票、ETF 与指数）；单股估值综合走 `StockDataFetcher`（`stock_fetcher.py`）的多源容错。
+- `stocklab/datasource`：对外数据获取。通用的 K 线时序与批量并发抓取走 `TencentMarketClient`（`tencent_client.py`，不区分股票、ETF 与指数）；单股估值综合走 `MarketDataService`（`stock_data.py`）的多源容错。
 - `stocklab/visualizer`：把数据渲染成网页。
 - 顶层入口脚本只做「参数解析 + 调用库」，不含业务逻辑；自检脚本放在 tests/ 下。
 
@@ -68,7 +69,7 @@ stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
 - 抹平资产类型差异，完全统一支持 A 股个股、行业/宽基 ETF 以及大盘指数。
 - 提供 `fetch_kline` (全要素 OHLCV)、`fetch_monthly_close` (月末收盘序列)、`fetch_multi_monthly_close` (多标的并发抓取) 与 `fetch_name` (名称查询)。
 
-**单股深度数据与估值（`stocklab/datasource/stock_fetcher.py` - `StockDataFetcher`）** 三级容错，价格与 PE 各自独立降级：
+**单股深度数据与估值（`stocklab/datasource/stock_data.py` - `MarketDataService`）** 三级容错，价格与 PE 各自独立降级：
 
 | 数据 | 主 | 备 |
 |------|----|----|
@@ -76,7 +77,7 @@ stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
 | PE-TTM | AkShare（百度股市通） | BaoStock（日线降采样） |
 | 公司简称 | 腾讯直连 (TencentMarketClient) | AkShare → BaoStock |
 
-> `stock_fetcher.py` 内部组合复用 `TencentMarketClient` 作为其腾讯直连与基础行情的底层驱动，实现职责分层并消除跨模块重复代码。
+> `stock_data.py` 内部组合复用 `TencentMarketClient` 作为其腾讯直连与基础行情的底层驱动，实现职责分层并消除跨模块重复代码。
 
 **统一数据契约**：所有单股数据源标准化为三列常量 —— `TRADE_DATE_COLUMN` / `CLOSE_PRICE_COLUMN` / `PE_TTM_COLUMN`。
 
@@ -84,10 +85,10 @@ stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
 
 ```bash
 # 生成板块走势网页（默认读取 config.ini）
-./venv/bin/python generate_sector_trend.py
+./venv/bin/python scripts/generate_sector_trend.py
 
 # 自定义月数与输出路径
-./venv/bin/python generate_sector_trend.py --months 60 --output output/trend_5y.html
+./venv/bin/python scripts/generate_sector_trend.py --months 60 --output output/trend_5y.html
 
 # 全链路自检（可选股票代码，默认 000001.SZ）
 ./venv/bin/python tests/test_data_interfaces.py 000001.SZ

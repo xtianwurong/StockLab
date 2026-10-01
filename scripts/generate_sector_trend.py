@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - A 股核心板块纯正 ETF 与主板 10 年月线走势网页生成器 (generate_sector_trend.py)
+StockLab - A 股核心板块纯正 ETF 与主板 10 年月线走势网页生成器 (scripts/generate_sector_trend.py)
 ==============================================================================
 
 【说明】
@@ -10,7 +10,11 @@ StockLab - A 股核心板块纯正 ETF 与主板 10 年月线走势网页生成�
 
 import argparse
 import logging
+import os
 import sys
+
+# 将项目根目录加入模块搜索路径，保证直接运行脚本时能 import stocklab
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stocklab.common.config import load_ini_config
 from stocklab.visualizer import SectorTrendVisualizer

@@ -31,7 +31,7 @@ from stocklab import (
     TRADE_DATE_COLUMN,
     SectorTrendVisualizer,
     StockDataFetchParams,
-    StockDataFetcher,
+    MarketDataService,
     TencentMarketClient,
     safe_float,
     safe_int,
@@ -91,13 +91,13 @@ def run_generic_market_client_test():
     print("  -> TencentMarketClient 通用跨资产接入测试全部通过！")
 
 
-def run_realtime_quote_test(fetcher: StockDataFetcher, stock_code: str):
+def run_realtime_quote_test(service, stock_code):
     """测试腾讯实时行情快照接口"""
     print("\n" + "=" * 65)
     print(f"【阶段二：测试腾讯实时行情快照】目标股票：{stock_code}")
     print("=" * 65)
 
-    quote = fetcher.fetch_realtime_quote(stock_code)
+    quote = service.fetch_realtime_quote(stock_code)
     if quote is None:
         print(f"-> [警告] 未能获取 {stock_code} 的实时行情")
         return
@@ -120,7 +120,7 @@ def run_realtime_quote_test(fetcher: StockDataFetcher, stock_code: str):
     print(f"  * 市值规模: 流通市值: {circ_mv_str} | 总市值: {total_mv_str}")
 
 
-def run_historical_data_test(fetcher: StockDataFetcher, stock_code: str):
+def run_historical_data_test(service, stock_code):
     """测试历史月线价格与 PE-TTM 对齐获取"""
     print("\n" + "=" * 65)
     print(f"【阶段三：测试月线历史与估值对齐】目标股票：{stock_code}")
@@ -129,15 +129,15 @@ def run_historical_data_test(fetcher: StockDataFetcher, stock_code: str):
     params = StockDataFetchParams(stock_code)
 
     # 1. 验证公司名称查询
-    stock_name = fetcher.fetch_stock_name(stock_code)
+    stock_name = service.fetch_stock_name(stock_code)
     print(f"1. 公司简称查询结果: {stock_name if stock_name else '(未获取到名称)'}")
 
     # 2. 验证月线价格三级容错
     print("\n2. 测试月线收盘价获取 (fetch_monthly_close_prices)...")
-    price_df = fetcher.fetch_monthly_close_prices(params)
+    price_df = service.fetch_monthly_close_prices(params)
     if not price_df.empty:
         print(f"   -> 成功获取 {len(price_df)} 条月线价格")
-        print(f"   -> 实际生效数据源: {fetcher.used_source_name}")
+        print(f"   -> 实际生效数据源: {service.used_source_name}")
         print("   -> 最新 3 个月样本:")
         for _, row in price_df.tail(3).iterrows():
             print(f"      {row[TRADE_DATE_COLUMN].strftime('%Y-%m-%d')}: {row[CLOSE_PRICE_COLUMN]:.2f} 元")
@@ -146,7 +146,7 @@ def run_historical_data_test(fetcher: StockDataFetcher, stock_code: str):
 
     # 3. 验证「月线价格 + PE-TTM」综合对齐
     print("\n3. 测试月度价格与 PE-TTM 综合对齐 (fetch_monthly_price_and_pe)...")
-    combined_df = fetcher.fetch_monthly_price_and_pe(params)
+    combined_df = service.fetch_monthly_price_and_pe(params)
     if not combined_df.empty:
         has_pe = combined_df[PE_TTM_COLUMN].notna().any()
         print(f"   -> 综合数据共 {len(combined_df)} 条，是否包含有效 PE-TTM: {has_pe}")
@@ -194,13 +194,13 @@ def main():
     # 1. 验证通用行情客户端 (股票/ETF/指数不区分)
     run_generic_market_client_test()
 
-    fetcher = StockDataFetcher()
+    service = MarketDataService()
 
     # 2. 验证腾讯实时行情快照
-    run_realtime_quote_test(fetcher, stock_code)
+    run_realtime_quote_test(service, stock_code)
 
     # 3. 验证历史月线与时序对齐
-    run_historical_data_test(fetcher, stock_code)
+    run_historical_data_test(service, stock_code)
 
     # 4. 验证板块 ETF 与主板网页图表生成
     run_sector_web_generation_test()

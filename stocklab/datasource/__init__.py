@@ -2,12 +2,12 @@
 StockLab 数据源接入层 (stocklab.datasource)
 """
 
-from .stock_fetcher import (
+from .stock_data import (
     CLOSE_PRICE_COLUMN,
     PE_TTM_COLUMN,
     TRADE_DATE_COLUMN,
+    MarketDataService,
     StockDataFetchParams,
-    StockDataFetcher,
     StockRealtimeQuote,
 )
 from .tencent_client import (
@@ -17,7 +17,7 @@ from .tencent_client import (
 
 __all__ = [
     "TencentMarketClient",
-    "StockDataFetcher",
+    "MarketDataService",
     "StockRealtimeQuote",
     "StockDataFetchParams",
     "TRADE_DATE_COLUMN",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 股票行情与估值抓取模块 (stocklab.datasource.stock_fetcher)
+StockLab - 股票市场数据服务模块 (stocklab.datasource.stock_data)
 ==============================================================================
 
 【模块职责】
@@ -21,8 +21,8 @@ StockLab - 股票行情与估值抓取模块 (stocklab.datasource.stock_fetcher)
   - 数据模型与参数类：
       * StockRealtimeQuote  : 股票实时盘口行情数据快照对象
       * StockDataFetchParams: 历史取数参数（股票代码、复权类型、重试次数、重试间隔）
-  - 核心编排器：
-      * StockDataFetcher    : 统一取数入口（月线价格、月线价格+估值、公司简称查询、实时行情查询）
+  - 核心服务类：
+      * MarketDataService   : 统一数据服务入口（月线价格、月线价格+估值、公司简称查询、实时行情查询）
 
 【内部设计与实现细节（私有保护，外部请勿直接依赖）】
   - _StockDataSource      : 数据源抽象基类（类似 C++ 抽象类，声明纯虚方法接口）
@@ -63,7 +63,7 @@ _logger = logging.getLogger(__name__)
 # 最小对外暴露清单 (__all__)
 # ============================================================================
 # Python 约定：只有列入 __all__ 的符号才被视作公共 API。
-# 当外部使用 `from stocklab.datasource.stock_fetcher import *` 时，仅有以下 6 个符号会被导入，
+# 当外部使用 `from stocklab.datasource.stock_data import *` 时，仅有以下 6 个符号会被导入，
 # 模块内以 '_' 开头的内部类与函数均被有效隐藏，保持接口的简洁与稳定性。
 __all__ = [
     "TRADE_DATE_COLUMN",
@@ -71,7 +71,7 @@ __all__ = [
     "PE_TTM_COLUMN",
     "StockRealtimeQuote",
     "StockDataFetchParams",
-    "StockDataFetcher",
+    "MarketDataService",
 ]
 
 # ============================================================================
@@ -809,9 +809,9 @@ class _TencentDataSource(_StockDataSource):
 # ============================================================================
 # 取数编排调度器 (Fetch Orchestrator & Strategy Manager)
 # ============================================================================
-class StockDataFetcher:
+class MarketDataService:
     """
-    股票数据取数编排器 (Orchestrator)
+    股票市场数据服务类 (Market Data Service)
 
     【职责划分】
       统筹调度 AkShare、BaoStock 与 腾讯财经 三大数据源通道：
