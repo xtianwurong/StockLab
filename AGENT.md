@@ -23,42 +23,50 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 
 ---
 
-## 目录结构
-
-```
+## 目录结构```
 StockLab/
-├── scripts/                    # 辅助与入口脚本
-│   ├── generate_sector_trend.py # 命令行入口：生成板块走势网页
-│   └── sync_market_data.py     # 数据同步入口：全市场数据同步到本地 DuckDB
-├── config.ini                  # 配置：月数、输出路径、基准与板块清单
-├── requirements.txt            # 运行依赖（版本用 == 锁定）
-├── AGENT.md                    # 本文档（项目永久上下文与设计契约）
-├── templates/
-│   └── dashboard.html          # 网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
-├── output/                     # 生成的 HTML 产物（运行时自动创建）
-├── data/                       # 本地 DuckDB 数据库（运行时自动创建，不入库）
-├── tests/
-│   └── test_data_interfaces.py # 数据接口测试（数据源 / 名称 / 实时行情 / 网页生成）
-├── stocklab/                   # 核心库包
-│   ├── common/                 # 通用基础层
-│   │   ├── config.py           #   config.ini 解析
-│   │   └── type_conversion.py  #   safe_float / safe_int 类型安全转换
-│   ├── datasource/             # 数据源接入层（只负责「从外部取数」）
-│   │   ├── tencent_client.py   #   【腾讯直连行情网关】TencentMarketClient（统一接入股票/ETF/指数）
-│   │   ├── stock_data.py       #   【个股多源数据服务】MarketDataService（三级容错策略 + 估值对齐）
-│   │   └── market_provider.py  #   【全市场数据 Provider】MarketDataProvider（全市场批量数据获取）
-│   ├── persistence/            # 本地数据持久化层（只负责「往本地存数」）
-│   │   ├── storage/            #   数据存储基础设施
-│   │   │   ├── duckdb.py       #     DuckDB 连接管理
-│   │   │   └── schema.py       #     Schema 定义与初始化
-│   │   └── repository/         #   数据访问层
-│   │       ├── security.py        #     securities 表读写
-│   │       ├── daily_price.py     #     daily_prices 表读写
-│   │       └── daily_valuation.py #     daily_valuations 表读写
-│   └── visualizer/             # 可视化 / Web 呈现层
-│       ├── page_generator.py   #   模板填充 → HTML
-│       └── sector_trend.py     #   SectorTrendVisualizer 端到端编排
-└── venv/                       # Python 虚拟环境（不入库）
+├── .gitignore                          # Git 忽略规则（__pycache__ / venv / output / data / .workbuddy）
+├── AGENT.md                            # 本文档（项目永久上下文与设计契约）
+├── config.ini                          # 运行配置：月数、输出路径、超时、基准与板块清单
+├── requirements.txt                    # 运行依赖（版本用 == 锁定）
+├── stocklab/                           # ── 核心库包 ──
+│   ├── __init__.py                     #   顶层公共 API 汇总（12 项 __all__ 收敛对外暴露面）
+│   ├── common/                         #   通用基础层
+│   │   ├── __init__.py                 #     导出 safe_float / safe_int / load_ini_config
+│   │   ├── config.py                   #     config.ini 解析与逐级向上查找
+│   │   └── type_conversion.py          #     safe_float / safe_int 类型安全转换
+│   ├── datasource/                     #   数据源接入层（只负责「从外部取数」）
+│   │   ├── __init__.py                 #     导出个股服务与腾讯网关的公共 API
+│   │   ├── tencent_client.py           #     【腾讯直连行情网关】TencentMarketClient（股票/ETF/指数统一接入）
+│   │   ├── stock_data.py               #     【个股多源数据服务】MarketDataService（三级容错 + 估值独立降级）
+│   │   └── market_provider.py          #     【全市场数据 Provider】MarketDataProvider（全市场批量取数）
+│   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
+│   │   ├── __init__.py                 #     本层统一出口（Database + 三个 Repository）
+│   │   ├── storage/                    #     数据存储基础设施
+│   │   │   ├── __init__.py             #       导出 Database / initialize_database
+│   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with）
+│   │   │   └── schema.py               #       DDL 唯一定义与 initialize_database()
+│   │   └── repository/                 #     数据访问层（表级 SQL 封装）
+│   │       ├── __init__.py             #       导出三个 Repository
+│   │       ├── security.py             #       reference.securities 读写
+│   │       ├── daily_price.py          #       market.daily_prices 读写
+│   │       └── daily_valuation.py      #       market.daily_valuations 读写
+│   └── visualizer/                     #   可视化 / Web 呈现层
+│       ├── __init__.py                 #     导出编排类与网页生成类
+│       ├── sector_trend.py             #     SectorTrendVisualizer 端到端编排
+│       └── page_generator.py           #     SectorWebPageGenerator 模板填充 → HTML
+├── scripts/                            # ── 入口脚本（只做参数解析 + 调用库）──
+│   ├── generate_sector_trend.py        #     命令行入口：生成板块走势网页
+│   └── sync_market_data.py             #     命令行入口：全市场数据同步到本地 DuckDB
+├── tests/                              # ── 自检脚本 ──
+│   └── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
+├── templates/                          # ── 静态资源 ──
+│   └── dashboard.html                  #     网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
+├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
+│   └── stocklab.duckdb                 #     本地 DuckDB 单文件数据库
+├── output/                             # ── 同上 ──
+│   └── sector_etf_trend.html           #     自包含交互式网页产物
+└── venv/                               # ── 同上（Python 虚拟环境）──
 ```
 
 ## 分层与依赖方向
@@ -73,12 +81,14 @@ StockLab/
                                        （只对本地落库；零内部依赖）
 ```
 
-| 包 | 实际 import 清单 | 说明 |
-|----|------------------|------|
-| `stocklab.common` | `configparser` / `math` / `os` / `re` | 通用工具，不依赖任何 StockLab 模块 |
-| `stocklab.datasource` | `common` + `akshare` / `baostock` / `pandas` / `requests` | 只出不进 |
-| `stocklab.persistence` | `logging` / `os` / `pandas` / `duckdb` | 只进不出，**不依赖 `common`**（配置解析在持久化层无意义） |
-| `stocklab.visualizer` | `common` + `datasource` | 只做渲染 |
+| 包 | 依赖的 StockLab 包 | 第三方库 | 标准库 |
+|----|------------------|---------|--------|
+| `stocklab.common` | 无 | 无 | `configparser` `math` `os` `types` |
+| `stocklab.datasource` | `common`（层内互引 `datasource`） | `akshare` `baostock` `pandas` `requests` | `concurrent.futures` `contextlib` `datetime` `io` `logging` `time` |
+| `stocklab.persistence` | 无（仅层内 `persistence.storage`） | `duckdb` `pandas` | `logging` `os` |
+| `stocklab.visualizer` | `common` `datasource`（层内互引 `visualizer`） | 无 | `datetime` `json` `logging` `os` |
+
+> `stocklab.persistence` **不依赖 `common`**：持久化层无配置语义，解析 `config.ini` 对它没有意义。
 
 - `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换）。
 - `stocklab/datasource`：**只负责对外取数**，不感知本地存储。
@@ -122,6 +132,16 @@ StockLab/
 > **已知演进债（阶段二）**：当前存在两条并行数据通路——`visualizer` 直连腾讯抓实时数据出图，`persistence` 只被写入、尚无读取方。阶段一为「不破坏现有功能」而刻意保持现状；后续应让板块走势支持从本地仓库出图，使建库的分析价值兑现。
 
 **统一数据契约**：所有单股数据源标准化为三列常量 —— `TRADE_DATE_COLUMN` / `CLOSE_PRICE_COLUMN` / `PE_TTM_COLUMN`。
+
+**数据载体类（`stocklab/__init__.py` 对外暴露的其余三类）**：
+
+| 类 | 所在文件 | 设计模式 | 说明 |
+|----|---------|---------|------|
+| `StockDataFetchParams` | `datasource/stock_data.py` | 参数对象 (Parameter Object) | 收拢 `stock_code` / `adjust_type`（`qfq`/`hfq`/不复权）/ `retry_count` / `retry_interval_seconds`，后续新增控制项不改方法签名 |
+| `StockRealtimeQuote` | `datasource/stock_data.py` | 简单实体类 (POD) | 18 个带默认初值的字段：现价、昨收、今开、最高、最低、涨跌额/幅、成交量/额、换手率、PE-TTM、PB、总/流通市值、行情时间；提供 `to_dict()` |
+| `SectorWebPageGenerator` | `visualizer/page_generator.py` | 模板视图生成器 | 提取全标的月份并集 → 对齐缺失数据 → 填充 `dashboard.html` 的 `__DATA_PAYLOAD__` → 落盘单文件 HTML |
+
+`MarketDataService` 另有一个状态字段 `used_source_name`，记录本次价格查询实际命中的数据源标识（如 `akshare` / `baostock` / `tencent`），供上层日志展示。
 
 ## 数据库设计（DuckDB）
 
@@ -276,15 +296,15 @@ pip install -r requirements.txt
 > 国内网络可用清华源加速：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt`
 > `requirements.txt` 用 `==` 锁定版本（Python 3.14.4 / venv 环境实测对齐）。
 
-| 库 | 用途 |
-|----|------|
-| akshare | A 股月线 / PE / 公司信息（东方财富、百度股市通接口） |
-| baostock | 备用历史行情与 PE |
-| pandas | 数据清洗与时序对齐 |
-| requests | 腾讯直连 HTTP（实时行情、公司名称、板块 K 线） |
-| duckdb | 本地分析型数据仓库（全市场 A 股数据持久化） |
+| 库 | 版本 | 用途 |
+|----|------|------|
+| akshare | 1.18.97 | A 股月线 / PE / 公司信息（东方财富、百度股市通接口） |
+| baostock | 0.9.4 | 备用历史行情与 PE |
+| pandas | 3.0.6 | 数据清洗与时序对齐 |
+| requests | 2.34.2 | 腾讯直连 HTTP（实时行情、公司名称、板块 K 线） |
+| duckdb | 1.4.3 | 本地分析型数据仓库（全市场 A 股数据持久化） |
 
-> numpy / matplotlib 为传递或历史依赖，当前代码不直接 import（已实测确认全库无 `import numpy` / `import matplotlib`）。
+> `numpy` 与 `matplotlib` **不在 requirements.txt 中**，是 akshare / pandas 带入的传递依赖（实测环境：numpy 2.5.3、matplotlib 3.11.2）。全库无 `import numpy` / `import matplotlib`，绘图一律由前端 ECharts 在浏览器内完成。
 
 ## 配置说明（config.ini）
 
@@ -301,12 +321,13 @@ pip install -r requirements.txt
 ## 注意事项
 
 1. 需要网络可用；数据来自公开接口。
-2. 涉及 matplotlib 图表时，macOS 字体使用 PingFang SC / Arial Unicode MS。
+2. 绘图由前端 ECharts 在浏览器内完成，Python 侧不产出图片。若将来引入服务端绘图，macOS 字体需指定 PingFang SC / Arial Unicode MS。
 3. 腾讯接口返回 `~` 分隔长串，读取时编码必须设为 `gbk`。
 4. DuckDB 的 `system` 是保留字，同步状态表使用 `sys` schema。
-5. 全市场数据同步耗时较长，建议使用 `--incremental` 模式进行日常更新。
+5. 全市场数据同步耗时较长（全历史回补约 5400 次请求），建议日常用 `--incremental`，或按交易所分批执行以控制失败影响面。
 6. 估值字段（PE/PB 等）允许 NULL，表示亏损或无数据，不应强制转换为 0。
+7. `output/` 与 `data/` 已被 `.gitignore` 排除；`templates/` 与 `config.ini` 则是入库的运行必需文件，删除后网页生成会失败。
 
 ## 许可证
 
-MIT License
+MIT License —— 声明于本文档，**仓库内暂未附 LICENSE 文件**；正式对外分发前需补齐。
