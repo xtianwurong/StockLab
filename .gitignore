@@ -1,0 +1,18 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---- 虚拟环境（本地运行时，不入库）----
+venv/
+.venv/
+
+# ---- macOS ----
+.DS_Store
+
+# ---- 生成产物（运行时生成，不入库）----
+output/
+
+# ---- AI 工具元数据（本地记忆，不入库）----
+.workbuddy/

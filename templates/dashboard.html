@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockLab - A 股核心板块 ETF 与主板走势对比</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0b1120;
+      --bg-card: #151f32;
+      --bg-hover: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --accent-blue: #38bdf8;
+      --accent-red: #f43f5e;
+      --accent-green: #10b981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, Arial, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      padding: 14px 18px;
+      line-height: 1.4;
+      overflow-x: hidden;
+    }
+    .top-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 10px 16px;
+      margin-bottom: 12px;
+    }
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .title-group h1 {
+      font-size: 18px;
+      font-weight: 700;
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .gen-badge {
+      font-size: 11px;
+      color: var(--text-muted);
+      background: #0f172a;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border-color);
+    }
+    .controls-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+    }
+    .btn-group {
+      display: inline-flex;
+      align-items: center;
+      background: #0f172a;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 2px;
+    }
+    .btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn:hover { color: var(--text-main); background: var(--bg-hover); }
+    .btn.active {
+      background: var(--accent-blue);
+      color: #0f172a;
+      font-weight: 600;
+    }
+
+    /* 单一主图表容器 */
+    .chart-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 12px 14px 6px 14px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    #chartContainer {
+      width: 100%;
+      height: calc(100vh - 96px);
+      min-height: 580px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="top-bar">
+    <div class="title-group">
+      <h1>A 股核心板块 ETF 与主板走势全景</h1>
+      <span class="gen-badge" id="genTime">更新中...</span>
+    </div>
+
+    <div class="controls-group">
+      <!-- 时间跨度按钮组 -->
+      <div class="btn-group">
+        <button class="btn active" onclick="setTimeSpan(120, this)">10年全景</button>
+        <button class="btn" onclick="setTimeSpan(60, this)">近5年</button>
+        <button class="btn" onclick="setTimeSpan(36, this)">近3年</button>
+        <button class="btn" onclick="setTimeSpan(12, this)">近1年</button>
+      </div>
+
+      <!-- 呈现模式按钮组 -->
+      <div class="btn-group">
+        <button class="btn active" onclick="setMode('rebased', this)">基期=100</button>
+        <button class="btn" onclick="setMode('return', this)">累计收益率%</button>
+        <button class="btn" onclick="setMode('raw', this)">原始点位</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 页面唯一主体：走势对比图表 -->
+  <div class="chart-box">
+    <div id="chartContainer"></div>
+  </div>
+
+  <script>
+    // 注入的数据载荷
+    const RAW_PAYLOAD = __DATA_PAYLOAD__;
+
+    document.getElementById('genTime').innerText = '数据对齐时间: ' + RAW_PAYLOAD.generated_time;
+
+    // 备用调色板（确保任何标的在未配颜色时均有高对比度独立颜色）
+    const FALLBACK_PALETTE = [
+      '#795548', '#8c564b', '#a65628', '#b8860b', '#708090',
+      '#20b2aa', '#e41a1c', '#00bfff', '#4169e1', '#ff1493',
+      '#00ced1', '#2ca02c', '#17becf', '#ff7f00', '#636363',
+      '#4682b4', '#984ea3', '#377eb8', '#d2691e', '#8fbc8f'
+    ];
+
+    let chartInstance = null;
+    let currentSpan = 120;
+    let currentMode = 'rebased';
+
+    function initChart() {
+      const chartDom = document.getElementById('chartContainer');
+      chartInstance = echarts.init(chartDom, 'dark', { backgroundColor: 'transparent' });
+      window.addEventListener('resize', () => chartInstance.resize());
+      renderView();
+    }
+
+    function setTimeSpan(months, btn) {
+      currentSpan = months;
+      btn.parentElement.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderView();
+    }
+
+    function setMode(mode, btn) {
+      currentMode = mode;
+      btn.parentElement.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderView();
+    }
+
+    function computeSliceData() {
+      const totalMonths = RAW_PAYLOAD.months.length;
+      const startIndex = Math.max(0, totalMonths - currentSpan);
+
+      const list = RAW_PAYLOAD.series.map(item => {
+        const rawSliced = item.prices.slice(startIndex);
+        let baseVal = null;
+        let firstValidIdx = -1;
+        for (let i = 0; i < rawSliced.length; i++) {
+          if (rawSliced[i] !== null && rawSliced[i] !== undefined) {
+            baseVal = rawSliced[i];
+            firstValidIdx = i;
+            break;
+          }
+        }
+
+        const returnList = rawSliced.map(p => {
+          if (p === null || p === undefined || baseVal === null) return null;
+          return parseFloat((((p - baseVal) / baseVal) * 100).toFixed(2));
+        });
+
+        const transformedData = rawSliced.map((p, idx) => {
+          if (p === null || p === undefined || baseVal === null) return null;
+          if (currentMode === 'raw') return p;
+          if (currentMode === 'return') return returnList[idx];
+          return parseFloat(((p / baseVal) * 100).toFixed(2));
+        });
+
+        const finalReturn = (baseVal !== null && rawSliced[rawSliced.length - 1] !== null)
+          ? ((rawSliced[rawSliced.length - 1] - baseVal) / baseVal) * 100
+          : -999;
+
+        return {
+          ...item,
+          data: transformedData,
+          returnList: returnList,
+          rawSliced: rawSliced,
+          baseVal: baseVal,
+          firstValidIdx: firstValidIdx,
+          finalReturn: finalReturn
+        };
+      });
+
+      // 提取主板大盘基准切片
+      const benchItem = list.find(s => s.is_benchmark);
+      const benchSliced = benchItem ? benchItem.rawSliced : [];
+
+      // 计算每个标的在各时间点相对于上证指数的超额涨跌幅（同步基期对齐）
+      list.forEach(item => {
+        if (item.is_benchmark) {
+          item.relativeReturns = item.rawSliced.map(() => 0.0);
+          return;
+        }
+
+        const firstIdx = item.firstValidIdx;
+        if (firstIdx === -1 || !benchSliced[firstIdx]) {
+          item.relativeReturns = item.rawSliced.map(() => null);
+          return;
+        }
+
+        const itemBase = item.rawSliced[firstIdx];
+        const benchBase = benchSliced[firstIdx];
+
+        item.relativeReturns = item.rawSliced.map((p, idx) => {
+          if (idx < firstIdx || p === null || p === undefined || !benchSliced[idx]) return null;
+          const itemRet = ((p - itemBase) / itemBase) * 100;
+          const benchRet = ((benchSliced[idx] - benchBase) / benchBase) * 100;
+          return parseFloat((itemRet - benchRet).toFixed(2));
+        });
+      });
+
+      return list;
+    }
+
+    function renderView() {
+      const totalMonths = RAW_PAYLOAD.months.length;
+      const startIndex = Math.max(0, totalMonths - currentSpan);
+      const slicedMonths = RAW_PAYLOAD.months.slice(startIndex);
+      const processed = computeSliceData();
+
+      const echartsSeries = [];
+      const sortedDrawList = [...processed].sort((a, b) => (a.is_benchmark ? 1 : 0) - (b.is_benchmark ? 1 : 0));
+
+      let colorIdx = 0;
+      sortedDrawList.forEach(item => {
+        const isBench = item.is_benchmark;
+        const validColor = isBench
+          ? '#ffffff'
+          : ((item.color && item.color.trim()) ? item.color.trim() : FALLBACK_PALETTE[colorIdx % FALLBACK_PALETTE.length]);
+        if (!isBench) colorIdx++;
+
+        echartsSeries.push({
+          name: item.name,
+          type: 'line',
+          data: item.data,
+          smooth: 0.15,
+          showSymbol: false,
+          z: isBench ? 10 : 3,
+          lineStyle: {
+            width: isBench ? 3.5 : 1.8,
+            color: validColor,
+            shadowColor: isBench ? 'rgba(255,255,255,0.45)' : 'transparent',
+            shadowBlur: isBench ? 8 : 0,
+          },
+          itemStyle: { color: validColor },
+          emphasis: {
+            disabled: false,
+            focus: 'none', // 确保鼠标移动到任何图表元素或折线上时，绝不淡化/隐藏其他折线！
+            lineStyle: {
+              width: isBench ? 4.5 : 2.8,
+              color: validColor
+            }
+          }
+        });
+      });
+
+      let yName = currentMode === 'return' ? '累计收益率 (%)' : (currentMode === 'raw' ? '价格/点位' : '基期归一化 (Base=100)');
+      let yFormatter = currentMode === 'return' ? '{value}%' : '{value}';
+
+      const option = {
+        animationDuration: 300,
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: 'rgba(21, 31, 50, 0.95)',
+          borderColor: '#475569',
+          borderWidth: 1,
+          textStyle: { color: '#f8fafc', fontSize: 12 },
+          axisPointer: {
+            type: 'cross',
+            label: { backgroundColor: '#475569' },
+            lineStyle: { color: 'rgba(148, 163, 184, 0.4)', type: 'dashed' }
+          },
+          formatter: function (params) {
+            if (!params || params.length === 0) return '';
+            const dataIdx = params[0].dataIndex;
+            const monthStr = params[0].axisValue;
+
+            // 提取当前月份的主板大盘基准参考值
+            const benchItem = processed.find(s => s.is_benchmark);
+            let benchSummary = '';
+            if (benchItem && benchItem.data[dataIdx] !== null && benchItem.data[dataIdx] !== undefined) {
+              const bVal = benchItem.data[dataIdx];
+              let bStr = '';
+              if (currentMode === 'return') {
+                bStr = (bVal >= 0 ? '+' : '') + bVal.toFixed(2) + '%';
+              } else if (currentMode === 'raw') {
+                bStr = bVal.toFixed(2) + ' 点';
+              } else {
+                bStr = bVal.toFixed(2);
+              }
+              benchSummary = `<span style="font-size:11px; color:#cbd5e1; font-weight:normal;">上证基准: <b style="color:#ffffff;">${bStr}</b></span>`;
+            }
+
+            let tip = `<div style="font-weight:700; margin-bottom:6px; border-bottom:1px solid #475569; padding-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
+              <span>📅 ${monthStr}</span>
+              ${benchSummary}
+            </div>`;
+
+            const sortedParams = [...params].sort((a, b) => (b.value ?? -9999) - (a.value ?? -9999));
+
+            sortedParams.forEach(p => {
+              if (p.value === null || p.value === undefined) return;
+              const isB = p.seriesName.includes('上证');
+              const matchedItem = processed.find(s => s.name === p.seriesName);
+              const relDiff = (matchedItem && matchedItem.relativeReturns) ? matchedItem.relativeReturns[dataIdx] : null;
+
+              let valStr = '';
+              if (currentMode === 'return') {
+                valStr = (p.value >= 0 ? '+' : '') + p.value + '%';
+              } else if (currentMode === 'raw') {
+                valStr = isB ? p.value.toFixed(2) + ' 点' : p.value.toFixed(3) + ' 元';
+              } else {
+                valStr = p.value;
+              }
+
+              let relBadge = '';
+              if (isB) {
+                relBadge = `<span style="font-size:11px; color:#94a3b8; padding:1px 6px; border-radius:3px; background:rgba(148,163,184,0.15); margin-left:8px;">基准线</span>`;
+              } else if (relDiff !== null && relDiff !== undefined) {
+                const isUp = relDiff >= 0;
+                const sign = isUp ? '+' : '';
+                const color = isUp ? '#f43f5e' : '#10b981';
+                const bg = isUp ? 'rgba(244,63,94,0.14)' : 'rgba(16,185,129,0.14)';
+                const border = isUp ? 'rgba(244,63,94,0.28)' : 'rgba(16,185,129,0.28)';
+                relBadge = `<span style="font-size:11px; color:${color}; background:${bg}; border:1px solid ${border}; padding:1px 6px; border-radius:3px; font-weight:600; margin-left:8px;">相对上证 ${sign}${relDiff.toFixed(2)}%</span>`;
+              }
+
+              tip += `<div style="display:flex; justify-content:space-between; align-items:center; gap:16px; margin:2.5px 0;">
+                <span style="display:inline-flex; align-items:center; gap:4px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  ${p.marker} <b>${isB ? '★ ' : ''}${p.seriesName}</b>
+                </span>
+                <span style="font-family:monospace; display:inline-flex; align-items:center; justify-content:flex-end;">
+                  <span style="font-weight:600;">${valStr}</span>
+                  ${relBadge}
+                </span>
+              </div>`;
+            });
+
+            return tip;
+          }
+        },
+        legend: {
+          type: 'scroll',
+          top: 0,
+          textStyle: { color: '#cbd5e1', fontSize: 12 },
+          icon: 'rect',
+          itemWidth: 14,
+          itemHeight: 7,
+          selectedMode: true,
+          legendHoverLink: false // 禁用鼠标悬停图例时对折线的高亮联动，防止干扰正常走势曲线显示
+        },
+        grid: { left: '3%', right: '3%', bottom: '10%', top: '7%', containLabel: true },
+        xAxis: {
+          type: 'category',
+          data: slicedMonths,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: '#475569' } },
+          axisLabel: { color: '#94a3b8', fontSize: 11 }
+        },
+        yAxis: {
+          type: 'value',
+          name: yName,
+          nameTextStyle: { color: '#94a3b8', fontSize: 12 },
+          splitLine: { lineStyle: { color: 'rgba(51, 65, 85, 0.4)', type: 'dashed' } },
+          axisLabel: { color: '#94a3b8', formatter: yFormatter }
+        },
+        dataZoom: [
+          {
+            type: 'slider',
+            show: true,
+            bottom: 4,
+            height: 22,
+            borderColor: 'transparent',
+            backgroundColor: '#151f32',
+            fillerColor: 'rgba(56, 189, 248, 0.25)',
+            textStyle: { color: '#94a3b8' },
+            handleStyle: { color: '#38bdf8' }
+          },
+          { type: 'inside' }
+        ],
+        series: echartsSeries
+      };
+
+      chartInstance.setOption(option, true);
+    }
+
+    window.onload = initChart;
+  </script>
+</body>
+</html>
