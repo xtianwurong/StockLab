@@ -3,7 +3,7 @@
 A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线走势分析工具。
 抓取各赛道纯正行业 ETF 与上证指数的前复权月线数据，清洗对齐后渲染为**自包含的交互式 HTML 网页**（ECharts 图表，单文件、可离线打开、可直接分享）。
 
-**数据全部来自公开接口，不依赖任何本地数据文件。**
+**数据全部来自公开接口。** 板块走势网页直接实时抓取，不落地任何中间文件；同时项目内置一套**本地 DuckDB 数据仓库**（可选路径），用于沉淀全市场 A 股的日 K 与估值数据，详见「数据库设计（DuckDB）」章节。
 
 ---
 
@@ -31,6 +31,7 @@ StockLab/
 │   ├── generate_sector_trend.py # 命令行入口：生成板块走势网页
 │   └── sync_market_data.py     # 数据同步入口：全市场数据同步到本地 DuckDB
 ├── config.ini                  # 配置：月数、输出路径、基准与板块清单
+├── requirements.txt            # 运行依赖（版本用 == 锁定）
 ├── AGENT.md                    # 本文档（项目永久上下文与设计契约）
 ├── templates/
 │   └── dashboard.html          # 网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
@@ -51,9 +52,9 @@ StockLab/
 │   │   │   ├── duckdb.py       #     DuckDB 连接管理
 │   │   │   └── schema.py       #     Schema 定义与初始化
 │   │   └── repository/         #   数据访问层
-│   │       ├── security.py     #     securities 表读写
-│   │       ├── daily_price.py  #     daily_prices 表读写
-│   │       └── daily_valuation.py #  daily_valuations 表读写
+│   │       ├── security.py        #     securities 表读写
+│   │       ├── daily_price.py     #     daily_prices 表读写
+│   │       └── daily_valuation.py #     daily_valuations 表读写
 │   └── visualizer/             # 可视化 / Web 呈现层
 │       ├── page_generator.py   #   模板填充 → HTML
 │       └── sector_trend.py     #   SectorTrendVisualizer 端到端编排
@@ -63,35 +64,39 @@ StockLab/
 ## 分层与依赖方向
 
 ```
-入口脚本 (scripts/)
+入口脚本 (scripts/)            ← 取数与落库的唯一编排方
         │
-        ▼
-stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
-                              │
-                              ▼
-                    stocklab.persistence  ──►  stocklab.common
-                              │
-                              ├── storage/    (DuckDB 连接管理 + Schema)
-                              └── repository/ (SQL 读写封装)
+        ├──►  stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
+        │                                  （只对外取数）
+        │
+        └──►  stocklab.persistence  ──►  stocklab.persistence.storage
+                                       （只对本地落库；零内部依赖）
 ```
+
+| 包 | 实际 import 清单 | 说明 |
+|----|------------------|------|
+| `stocklab.common` | `configparser` / `math` / `os` / `re` | 通用工具，不依赖任何 StockLab 模块 |
+| `stocklab.datasource` | `common` + `akshare` / `baostock` / `pandas` / `requests` | 只出不进 |
+| `stocklab.persistence` | `logging` / `os` / `pandas` / `duckdb` | 只进不出，**不依赖 `common`**（配置解析在持久化层无意义） |
+| `stocklab.visualizer` | `common` + `datasource` | 只做渲染 |
 
 - `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换）。
 - `stocklab/datasource`：**只负责对外取数**，不感知本地存储。
   - `tencent_client.py`：腾讯直连行情网关，统一接入股票/ETF/指数。
   - `stock_data.py`：单股多源数据服务（三级容错策略 + 估值对齐）。
   - `market_provider.py`：全市场批量数据获取。
-- `stocklab/persistence`：**只负责本地落库**，不依赖任何外部数据源（AkShare / BaoStock / 腾讯）。
+- `stocklab/persistence`：**只负责本地落库**，既不依赖 `common`，也不依赖任何外部数据源（AkShare / BaoStock / 腾讯）。
   - `storage/`：DuckDB 连接管理与 Schema 定义。
   - `repository/`：SQL 读写封装，仅依赖 pandas 与本层 `storage/`。
 - `stocklab/visualizer`：把数据渲染成网页。
-- **分层命名契约**：`datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是入口脚本，层与层之间不得互相 import。
+- **分层命名契约**：`datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是入口脚本，**两层之间不得互相 import**。
 - 顶层入口脚本只做「参数解析 + 调用库」，不含业务逻辑；自检脚本放在 tests/ 下。
 
 ## 数据源架构
 
 **腾讯直连市场数据客户端（`stocklab/datasource/tencent_client.py` - `TencentMarketClient`）**：
 - 抹平资产类型差异，完全统一支持 A 股个股、行业/宽基 ETF 以及大盘指数。
-- 提供 `fetch_kline` (全要素 OHLCV)、`fetch_monthly_close` (月末收盘序列)、`fetch_multi_monthly_close` (多标的并发抓取) 与 `fetch_name` (名称查询)。
+- 提供 `fetch_kline` (全要素 OHLCV)、`fetch_monthly_close` (月末收盘序列)、`fetch_multi_monthly_close` (多标的并发抓取)、`fetch_name` (名称查询) 与 `fetch_quote_fields` (盘口原始字段列表，`~` 分隔，供上层解析)。
 
 **单股深度数据与估值（`stocklab/datasource/stock_data.py` - `MarketDataService`）** 三级容错，价格与 PE 各自独立降级：
 
@@ -238,6 +243,9 @@ stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
 # 自定义月数与输出路径
 ./venv/bin/python scripts/generate_sector_trend.py --months 60 --output output/trend_5y.html
 
+# 指定其他配置文件
+./venv/bin/python scripts/generate_sector_trend.py --config config.ini
+
 # 全链路自检（可选股票代码，默认 000001.SZ）
 ./venv/bin/python tests/test_data_interfaces.py 000001.SZ
 
@@ -262,8 +270,11 @@ stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -i https://pypi.tuna.tsinghua.edu.cn/simple akshare baostock pandas requests duckdb
+pip install -r requirements.txt
 ```
+
+> 国内网络可用清华源加速：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt`
+> `requirements.txt` 用 `==` 锁定版本（Python 3.14.4 / venv 环境实测对齐）。
 
 | 库 | 用途 |
 |----|------|
@@ -273,7 +284,7 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple akshare baostock pandas 
 | requests | 腾讯直连 HTTP（实时行情、公司名称、板块 K 线） |
 | duckdb | 本地分析型数据仓库（全市场 A 股数据持久化） |
 
-> numpy / matplotlib 为传递或历史依赖，当前代码不直接 import。
+> numpy / matplotlib 为传递或历史依赖，当前代码不直接 import（已实测确认全库无 `import numpy` / `import matplotlib`）。
 
 ## 配置说明（config.ini）
 
