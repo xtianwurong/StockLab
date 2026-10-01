@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 股票数据提供模块 (Data Provider)
+StockLab - 股票行情与估值抓取模块 (stocklab.datasource.stock_fetcher)
 ==============================================================================
 
 【模块职责】
@@ -54,6 +54,7 @@ import pandas as pd
 import requests
 
 from stocklab.common.type_utils import safe_float, safe_int
+from stocklab.datasource.tencent_client import TencentMarketClient
 
 # 初始化模块级私有 Logger
 _logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ _logger = logging.getLogger(__name__)
 # 最小对外暴露清单 (__all__)
 # ============================================================================
 # Python 约定：只有列入 __all__ 的符号才被视作公共 API。
-# 当外部使用 `from stocklab.data.provider import *` 时，仅有以下 6 个符号会被导入，
+# 当外部使用 `from stocklab.datasource.stock_fetcher import *` 时，仅有以下 6 个符号会被导入，
 # 模块内以 '_' 开头的内部类与函数均被有效隐藏，保持接口的简洁与稳定性。
 __all__ = [
     "TRADE_DATE_COLUMN",
@@ -686,9 +687,8 @@ class _TencentDataSource(_StockDataSource):
 
     SOURCE_NAME = "tencent(腾讯财经)"
 
-    _QUOTE_ENDPOINT = "http://qt.gtimg.cn/q"
-    _KLINE_ENDPOINT = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-    _HTTP_TIMEOUT_SECONDS = 6
+    def __init__(self, client=None):
+        self._client = client if client is not None else TencentMarketClient()
 
     def fetch_monthly_close_prices(
         self, stock_code, adjust_type, retry_count=1, retry_interval_seconds=0
@@ -699,8 +699,17 @@ class _TencentDataSource(_StockDataSource):
         Returns:
             pd.DataFrame: 标准格式月线数据；失败返回空表
         """
-        tencent_code = self._convert_to_tencent_code(stock_code)
-        rows = self._query_tencent_kline_rows(tencent_code)
+        bars = self._client.fetch_kline(
+            symbol=stock_code, period="day", adjust="qfq", count=800
+        )
+        if not bars:
+            return pd.DataFrame()
+
+        rows = []
+        for b in bars:
+            if b.get("date") and b.get("close") is not None:
+                rows.append([b["date"], b["close"]])
+
         if not rows:
             return pd.DataFrame()
 
@@ -709,32 +718,9 @@ class _TencentDataSource(_StockDataSource):
 
     def fetch_stock_name(self, stock_code):
         """
-        从腾讯财经快速查询股票公司中文简称
-
-        【调用说明】
-          腾讯直连行情 `qt.gtimg.cn/q={symbol}` 单次响应极快，无需登录握手，
-          解析返回的 `~` 分隔字段中的第 2 项即为简称。
-
-        Returns:
-            str: 中文公司简称；失败返回空字符串
+        从腾讯财经快速查询股票公司中文简称（委托底层通用客户端）
         """
-        tencent_code = self._convert_to_tencent_code(stock_code)
-        fields = self._query_tencent_quote(tencent_code)
-        if not fields or len(fields) < 3:
-            return ""
-
-        # fields[1] 为股票简称，fields[2] 为代码
-        name = fields[1].strip()
-        code_part = stock_code.split(".")[0]
-        if fields[2].strip() != code_part:
-            _logger.warning(
-                "%s 返回的代码与请求不匹配: %s vs %s",
-                self.SOURCE_NAME,
-                fields[2],
-                code_part,
-            )
-            return ""
-        return name
+        return self._client.fetch_name(stock_code)
 
     def fetch_realtime_quote(self, stock_code):
         """
@@ -754,9 +740,19 @@ class _TencentDataSource(_StockDataSource):
         Returns:
             StockRealtimeQuote | None: 填充后的实时行情对象；失败返回 None
         """
-        tencent_code = self._convert_to_tencent_code(stock_code)
-        fields = self._query_tencent_quote(tencent_code)
+        fields = self._client.fetch_quote_fields(stock_code)
         if not fields or len(fields) < 45:
+            return None
+
+        # fields[1] 为股票简称，fields[2] 为代码
+        code_part = stock_code.split(".")[0]
+        if len(fields) > 2 and fields[2].strip() and fields[2].strip() != code_part:
+            _logger.warning(
+                "%s 返回的代码与请求不匹配: %s vs %s",
+                self.SOURCE_NAME,
+                fields[2],
+                code_part,
+            )
             return None
 
         quote = StockRealtimeQuote(stock_code)
@@ -808,74 +804,6 @@ class _TencentDataSource(_StockDataSource):
             quote.quote_time = raw_time
 
         return quote
-
-    def _convert_to_tencent_code(self, stock_code):
-        """
-        股票代码 -> 腾讯格式：
-        "000001.SZ" -> "sz000001"
-        "600519.SH" -> "sh600519"
-        "920002.BJ" -> "bj920002"
-        """
-        raw = stock_code.strip()
-        lower = raw.lower()
-        if "." in raw:
-            parts = raw.split(".")
-            num = parts[0]
-            mkt = parts[1].lower()
-            return mkt + num
-        if lower.startswith(("sh", "sz", "bj")):
-            return lower
-        # 根据数字前缀智能推断市场
-        if raw.startswith(("6", "5", "90")):
-            return "sh" + raw
-        if raw.startswith(("4", "8", "92")):
-            return "bj" + raw
-        return "sz" + raw
-
-    def _query_tencent_quote(self, tencent_symbol):
-        """发起腾讯实时行情 HTTP 请求，返回分割后的字段列表"""
-        url = f"{self._QUOTE_ENDPOINT}={tencent_symbol}"
-        headers = {
-            "Referer": "http://finance.qq.com",
-            "User-Agent": "Mozilla/5.0",
-        }
-        try:
-            response = requests.get(url, headers=headers, timeout=self._HTTP_TIMEOUT_SECONDS)
-            response.encoding = "gbk"
-            content = response.text.strip()
-            data_start = content.find('"')
-            data_end = content.rfind('"')
-            if data_start == -1 or data_end <= data_start:
-                return []
-            data_str = content[data_start + 1 : data_end]
-            return data_str.split("~")
-        except Exception as error:
-            _logger.warning("%s 查询实时行情失败: %s", self.SOURCE_NAME, error)
-            return []
-
-    def _query_tencent_kline_rows(self, tencent_symbol, num_bars=800):
-        """从腾讯 K 线接口抓取前复权日线行情"""
-        url = self._KLINE_ENDPOINT
-        params = {"param": f"{tencent_symbol},day,,,{num_bars},qfq"}
-        headers = {"User-Agent": "Mozilla/5.0"}
-        try:
-            response = requests.get(
-                url, params=params, headers=headers, timeout=self._HTTP_TIMEOUT_SECONDS
-            )
-            payload = response.json()
-            data = payload.get("data", {}).get(tencent_symbol, {})
-            # qfqday 为前复权日线数组
-            rows = data.get("qfqday") or data.get("day") or []
-            result = []
-            for row in rows:
-                if len(row) >= 3:
-                    date_str = str(row[0])
-                    close_price = row[2]
-                    result.append([date_str, close_price])
-            return result
-        except Exception as error:
-            _logger.warning("%s 查询历史 K 线失败: %s", self.SOURCE_NAME, error)
-            return []
 
 
 # ============================================================================

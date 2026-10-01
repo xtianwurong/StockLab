@@ -5,15 +5,13 @@ StockLab - 数据接口测试 (tests/test_data_interfaces.py)
 ==============================================================================
 
 【功能用途】
-  本脚本用于验证 StockLab 核心功能链路（直接验证分层包 stocklab 及各模块功能）：
+  本脚本用于验证 StockLab 核心功能链路：
     0. 验证基础类型转换模块 (stocklab.common.type_utils)
-    1. 验证腾讯实时行情接口 (fetch_realtime_quote)：
-       - 验证最新现价、昨收、今开、涨跌额、涨跌幅、成交量/额、换手率、动态 PE/PB、市值等。
-    2. 验证多级公司简称查询 (fetch_stock_name)：
-       - 优先走腾讯轻量直连，体验毫秒级响应。
-    3. 验证月线历史行情与主备通道容错 (fetch_monthly_close_prices / fetch_monthly_price_and_pe)：
-       - AkShare -> BaoStock -> 腾讯 三级降级。
-    4. 验证核心板块纯正行业 ETF 与 A 股主板 10 年月线交互式网页生成 (SectorTrendVisualizer)。
+    1. 验证通用行情客户端 (MarketDataClient)：统一验证股票、ETF 与指数的名称、OHLCV K线与月线批量抓取
+    2. 验证腾讯实时行情快照接口 (fetch_realtime_quote)
+    3. 验证多级公司简称查询 (fetch_stock_name)
+    4. 验证月线历史行情与主备通道容错 (fetch_monthly_close_prices / fetch_monthly_price_and_pe)
+    5. 验证核心板块与主板月线走势交互式 HTML 网页生成 (SectorTrendVisualizer)
 
 【运行方式】
   python3 tests/test_data_interfaces.py [股票代码]
@@ -34,6 +32,7 @@ from stocklab import (
     SectorTrendVisualizer,
     StockDataFetchParams,
     StockDataFetcher,
+    TencentMarketClient,
     safe_float,
     safe_int,
 )
@@ -54,10 +53,48 @@ def run_type_utils_test():
     print("  -> safe_float 与 safe_int 边界测试用例全部通过！")
 
 
+def run_generic_market_client_test():
+    """测试腾讯直连市场行情客户端 (TencentMarketClient) 对股票/ETF/指数的统一接入能力"""
+    print("\n" + "=" * 65)
+    print("【阶段一：测试 TencentMarketClient 接口（股票/ETF/指数不区分）】")
+    print("=" * 65)
+
+    client = TencentMarketClient()
+
+    test_targets = ["sh000001", "sh512480", "sh600519", "000001.SZ"]
+
+    # 1. 通用名称测试
+    print("1. 统一名称查询测试:")
+    for sym in test_targets:
+        name = client.fetch_name(sym)
+        assert len(name) > 0, f"未能获取 {sym} 名称"
+        print(f"   * {sym:<10} -> {name}")
+
+    # 2. 批量并发月线获取测试
+    print("\n2. 统一批量并发月线收盘价获取:")
+    batch_data = client.fetch_multi_monthly_close(test_targets, num_months=3)
+    for sym in test_targets:
+        assert sym in batch_data, f"缺失标的 {sym} 的数据"
+        series = batch_data[sym]
+        assert len(series) > 0, f"标的 {sym} 数据为空"
+        last_m, last_p = list(series.items())[-1]
+        print(f"   * {sym:<10} 获取到 {len(series)} 个月 | 最新收盘: {last_m} = {last_p} 元/点")
+
+    # 3. 全要素 OHLCV K线测试
+    print("\n3. 统一全要素 OHLCV 历史 K 线测试 (贵州茅台):")
+    bars = client.fetch_kline("sh600519", period="month", count=2)
+    assert len(bars) > 0, "未能获取茅台 K 线"
+    for b in bars:
+        assert "open" in b and "close" in b and "volume" in b
+        print(f"   * 日期: {b['date']} | 开: {b['open']} | 收: {b['close']} | 量: {b['volume']}")
+
+    print("  -> TencentMarketClient 通用跨资产接入测试全部通过！")
+
+
 def run_realtime_quote_test(fetcher: StockDataFetcher, stock_code: str):
     """测试腾讯实时行情快照接口"""
     print("\n" + "=" * 65)
-    print(f"【阶段一：测试腾讯实时行情快照】目标股票：{stock_code}")
+    print(f"【阶段二：测试腾讯实时行情快照】目标股票：{stock_code}")
     print("=" * 65)
 
     quote = fetcher.fetch_realtime_quote(stock_code)
@@ -86,7 +123,7 @@ def run_realtime_quote_test(fetcher: StockDataFetcher, stock_code: str):
 def run_historical_data_test(fetcher: StockDataFetcher, stock_code: str):
     """测试历史月线价格与 PE-TTM 对齐获取"""
     print("\n" + "=" * 65)
-    print(f"【阶段二：测试月线历史与估值对齐】目标股票：{stock_code}")
+    print(f"【阶段三：测试月线历史与估值对齐】目标股票：{stock_code}")
     print("=" * 65)
 
     params = StockDataFetchParams(stock_code)
@@ -127,7 +164,7 @@ def run_historical_data_test(fetcher: StockDataFetcher, stock_code: str):
 def run_sector_web_generation_test():
     """测试板块纯正 ETF 与主板 10 年走势交互式网页生成"""
     print("\n" + "=" * 65)
-    print("【阶段三：测试核心板块与主板月线走势交互式 HTML 网页生成】")
+    print("【阶段四：测试核心板块与主板月线走势交互式 HTML 网页生成】")
     print("=" * 65)
 
     test_html = "test_sector_trend.html"
@@ -154,15 +191,18 @@ def main():
     # 0. 验证 type_utils 基础转换
     run_type_utils_test()
 
+    # 1. 验证通用行情客户端 (股票/ETF/指数不区分)
+    run_generic_market_client_test()
+
     fetcher = StockDataFetcher()
 
-    # 1. 验证腾讯实时行情快照
+    # 2. 验证腾讯实时行情快照
     run_realtime_quote_test(fetcher, stock_code)
 
-    # 2. 验证历史月线与时序对齐
+    # 3. 验证历史月线与时序对齐
     run_historical_data_test(fetcher, stock_code)
 
-    # 3. 验证板块 ETF 与主板网页图表生成
+    # 4. 验证板块 ETF 与主板网页图表生成
     run_sector_web_generation_test()
 
     print("\n>>> 全部验证执行完毕 <<<")

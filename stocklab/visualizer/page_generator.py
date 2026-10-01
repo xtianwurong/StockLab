@@ -12,12 +12,16 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List
 
 _logger = logging.getLogger("StockLab.Visualizer.PageGenerator")
 
+__all__ = [
+    "SectorWebPageGenerator",
+    "find_template_path",
+]
 
-def find_template_path(template_name: str = "dashboard.html") -> str:
+
+def find_template_path(template_name="dashboard.html"):
     """
     智能查找模板路径：
     1. 用户指定的绝对路径或直接相对路径
@@ -52,12 +56,10 @@ class SectorWebPageGenerator:
     负责组装数据并通过 dashboard.html 模板渲染生成纯图表交互式 HTML 页面
     """
 
-    def __init__(self, template_name: str = "dashboard.html"):
+    def __init__(self, template_name="dashboard.html"):
         self.template_path = find_template_path(template_name)
 
-    def generate_html(
-        self, sectors: List[Any], raw_data: Dict[str, Dict[str, float]], output_path: str = "output/sector_etf_trend.html"
-    ) -> str:
+    def generate_html(self, sectors, raw_data, output_path="output/sector_etf_trend.html"):
         """
         根据抓取的原始月线字典，提取全集并集月份、对齐缺失数据、填充模板并保存 HTML 文件
         """

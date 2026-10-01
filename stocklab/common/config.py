@@ -14,7 +14,12 @@ StockLab - 统一配置管理模块 (stocklab.common.config)
 import configparser
 import os
 from types import SimpleNamespace
-from typing import List, Tuple
+
+__all__ = [
+    "DEFAULT_FALLBACK_PALETTE",
+    "find_config_path",
+    "load_ini_config",
+]
 
 # 预设高对比度调色板（保障任何行业标的在未配颜色时均有鲜明色彩）
 DEFAULT_FALLBACK_PALETTE = [
@@ -25,7 +30,7 @@ DEFAULT_FALLBACK_PALETTE = [
 ]
 
 
-def find_config_path(config_path: str = "config.ini") -> str:
+def find_config_path(config_path="config.ini"):
     """
     自适应查找 config.ini 路径：优先当前工作目录，其次项目根目录
     """
@@ -41,7 +46,7 @@ def find_config_path(config_path: str = "config.ini") -> str:
     return os.path.abspath(config_path)
 
 
-def load_ini_config(config_path: str = "config.ini") -> Tuple[List[SimpleNamespace], int, str, int]:
+def load_ini_config(config_path="config.ini"):
     """
     从 config.ini 中加载运行参数、大盘基准与各行业 ETF 监控清单
 
