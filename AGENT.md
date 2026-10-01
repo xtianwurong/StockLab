@@ -51,6 +51,9 @@ StockLab/
 │   │       ├── security.py             #       reference.securities 读写
 │   │       ├── daily_price.py          #       market.daily_prices 读写
 │   │       └── daily_valuation.py      #       market.daily_valuations 读写
+│   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
+│   │   ├── __init__.py                 #     导出 MarketDataFacade
+│   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
 │   └── visualizer/                     #   可视化 / Web 呈现层
 │       ├── __init__.py                 #     导出编排类与网页生成类
 │       ├── sector_trend.py             #     SectorTrendVisualizer 端到端编排
@@ -77,15 +80,19 @@ StockLab/
         ├──►  stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
         │                                  （只对外取数）
         │
+        ├──►  stocklab.facade  ──┬──►  stocklab.datasource
+        │        （统一取数入口）  └──►  stocklab.persistence
+        │
         └──►  stocklab.persistence  ──►  stocklab.persistence.storage
                                        （只对本地落库；零内部依赖）
 ```
 
 | 包 | 依赖的 StockLab 包 | 第三方库 | 标准库 |
 |----|------------------|---------|--------|
-| `stocklab.common` | 无 | 无 | `configparser` `math` `os` `types` |
+| `stocklab.common` | 无 | 无 | `configparser` `logging` `math` `os` `types` |
 | `stocklab.datasource` | `common`（层内互引 `datasource`） | `akshare` `baostock` `pandas` `requests` | `concurrent.futures` `contextlib` `datetime` `io` `logging` `time` |
 | `stocklab.persistence` | 无（仅层内 `persistence.storage`） | `duckdb` `pandas` | `logging` `os` |
+| `stocklab.facade` | `common` `datasource` `persistence` | `pandas` | `logging` |
 | `stocklab.visualizer` | `common` `datasource`（层内互引 `visualizer`） | 无 | `datetime` `json` `logging` `os` |
 
 > `stocklab.persistence` **不依赖 `common`**：持久化层无配置语义，解析 `config.ini` 对它没有意义。
@@ -98,8 +105,11 @@ StockLab/
 - `stocklab/persistence`：**只负责本地落库**，既不依赖 `common`，也不依赖任何外部数据源（AkShare / BaoStock / 腾讯）。
   - `storage/`：DuckDB 连接管理与 Schema 定义。
   - `repository/`：SQL 读写封装，仅依赖 pandas 与本层 `storage/`。
+- `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/visualizer`：把数据渲染成网页。
-- **分层命名契约**：`datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是入口脚本，**两层之间不得互相 import**。
+- **分层命名契约**：
+  - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
+  - `facade` 可依赖两者，但 **`datasource` 与 `persistence` 绝不可反向 import `facade`**，否则形成循环依赖。
 - 顶层入口脚本只做「参数解析 + 调用库」，不含业务逻辑；自检脚本放在 tests/ 下。
 
 ## 数据源架构
@@ -122,6 +132,38 @@ StockLab/
 - 负责全市场 A 股数据的批量获取，与单股数据服务明确边界。
 - 提供 `fetch_securities` (股票基础信息)、`fetch_daily_prices` (日 K 行情)、`fetch_realtime_valuations` (最新估值快照)。
 
+**统一数据取数门面（`stocklab/facade/market_data.py` - `MarketDataFacade`）**：
+
+- 设计模式 **Facade（外观模式，GoF 结构型模式）**：为「本地 DuckDB 库 + 远端公开接口」这一子系统提供统一简化接口，对上层隐藏来源选择、命中判定与回退策略。
+- > 「外观」指**对外的门面 / 入口**，与界面美观无关。
+- **命名模式、不命名策略**：优先级不写进类名（若策略演变为「按新鲜度路由」或「加缓存中间层」，那是重构而非改名）。
+- **cache-aside 回写**：远端取到的数据自动写回本地库，使后续查询命中本地。
+
+| 优先级（`config.ini` `[data_source] priority`） | 行为 | 适用场景 |
+|---|---|---|
+| `local_first` | 先查本地库 → 未命中回退远端 → 远端结果回写本地 | 历史分析、批量回补，可容忍新鲜度差异 |
+| `remote_first` | 先取远端 → 失败（返回空表）回退本地库 | 实时行情、最新估值快照，对新鲜度敏感 |
+
+```python
+from stocklab.facade import MarketDataFacade
+
+with MarketDataFacade() as facade:          # 优先级取自 config.ini
+    print(facade.priority)                  # 'local_first' 或 'remote_first'
+    df = facade.fetch_daily_prices("600519.SH", "2025-01-01", "2026-09-30")
+```
+
+| 方法 | 说明 |
+|------|------|
+| `fetch_securities()` | 全市场证券基础信息；本地非空即命中，否则远端取并回写 |
+| `fetch_daily_prices(ts_code, start_date, end_date)` | 单只日 K（不复权）；日期入参用 `YYYY-MM-DD`，转调远端时自动压缩为 `YYYYMMDD` |
+| `fetch_valuations(trade_date=None)` | 全市场估值；`trade_date` 为空时取本地最新交易日，否则回退远端实时快照 |
+| `priority` | 只读属性，返回当前生效的优先级 |
+| `close()` / `with` | 释放本地数据库连接（支持上下文管理） |
+
+> **优先级取值来源与容错**：显式构造参数 > `config.ini [data_source] priority` > 默认 `local_first`；配置文件缺失、段落缺失或取值非法时**记 warning 并回退默认值**，不会静默采用错误策略。合法取值由 `stocklab.common.config.DATA_SOURCE_PRIORITIES` 单点定义。
+
+> ⚠️ **当前覆盖缺口（务必知悉）**：本地库仅覆盖 A 股个股（`reference.securities` 为 A 股全量），且 `market.daily_prices` 存的是**不复权日 K**。因此行业 ETF 与指数标的本地无记录、需要**前复权月线**的分析场景**必然回退远端**——对本项目主要消费方（板块走势图）命中率接近 0。补齐覆盖与口径前，回退分支是唯一被实际走到的路径。
+
 **本地数据仓库（`stocklab/persistence/`）**：
 - DuckDB 嵌入式分析数据库，存储全市场 A 股数据。
 - 数据域分离：reference (证券身份)、market (行情估值)、sys (同步状态)。
@@ -129,7 +171,7 @@ StockLab/
 - 核心表：`reference.securities`、`market.daily_prices`、`market.daily_valuations`、`sys.sync_tasks`。
 - 对外统一出口：`from stocklab.persistence import Database, initialize_database, SecurityRepository, DailyPriceRepository, DailyValuationRepository`。
 
-> **已知演进债（阶段二）**：当前存在两条并行数据通路——`visualizer` 直连腾讯抓实时数据出图，`persistence` 只被写入、尚无读取方。阶段一为「不破坏现有功能」而刻意保持现状；后续应让板块走势支持从本地仓库出图，使建库的分析价值兑现。
+> **已知演进债（阶段二）**：`visualizer` 目前仍直连 `TencentMarketClient` 出图，尚未改走 `MarketDataFacade`，因此「两条并行数据通路」尚未合流。`MarketDataFacade` 已是合流的落点：待本地库补齐 ETF / 指数覆盖与前复权口径后，把 `sector_trend.py` 的取数改为经由 facade 即可收口。
 
 **统一数据契约**：所有单股数据源标准化为三列常量 —— `TRADE_DATE_COLUMN` / `CLOSE_PRICE_COLUMN` / `PE_TTM_COLUMN`。
 
@@ -309,6 +351,7 @@ pip install -r requirements.txt
 ## 配置说明（config.ini）
 
 - `[settings]`：`default_months`（默认月数）、`output_html`（输出路径）、`http_timeout`
+- `[data_source]`：`priority` —— 取数优先级，`local_first`（默认）/ `remote_first`；非法值回退 `local_first`
 - `[benchmark]`：主板基准（默认上证指数，白色粗线）
 - `[sectors]`：板块清单，每行格式 `标识 = 代码, 简称, 赛道, 颜色, 跟踪指数, 管理人, 纯度说明`
   - 在行首加 `#` 或 `;` 即可临时停用某个板块

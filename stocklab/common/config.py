@@ -9,17 +9,30 @@ StockLab - 统一配置管理模块 (stocklab.common.config)
     1. 运行配置 (settings): 历史月数、输出文件名、网络超时等
     2. 主板基准配置 (benchmark): 代码、简称、基准属性、呈现样式
     3. 核心板块 ETF 监控列表 (sectors): 纯正行业代表 ETF 标的池
+    4. 取数优先级配置 (data_source): 本地库与远端接口的先后策略
 """
 
 import configparser
+import logging
 import os
 from types import SimpleNamespace
 
 __all__ = [
+    "DATA_SOURCE_PRIORITIES",
+    "DEFAULT_DATA_SOURCE_PRIORITY",
     "DEFAULT_FALLBACK_PALETTE",
     "find_config_path",
     "load_ini_config",
+    "load_data_source_priority",
 ]
+
+_logger = logging.getLogger(__name__)
+
+# 取数优先级合法取值（Facade 层据此校验，避免拼写错误导致策略静默失效）
+DATA_SOURCE_PRIORITIES = ("local_first", "remote_first")
+
+# 配置缺失或非法时的兜底策略：本地优先，保证行为可预期
+DEFAULT_DATA_SOURCE_PRIORITY = "local_first"
 
 # 预设高对比度调色板（保障任何行业标的在未配颜色时均有鲜明色彩）
 DEFAULT_FALLBACK_PALETTE = [
@@ -122,3 +135,50 @@ def load_ini_config(config_path="config.ini"):
                 sectors.append(item)
 
     return sectors, default_months, default_output, http_timeout
+
+
+def load_data_source_priority(config_path="config.ini"):
+    """
+    读取取数优先级策略 (config.ini 的 [data_source] 段)
+
+    【为什么单独成函数】
+       load_ini_config 的返回值签名已被 generate_sector_trend.py 等调用方按 4 元组解包，
+       不可改动；本函数独立读取，避免破坏既有接口。
+
+    Args:
+        config_path (str, optional): 配置文件路径，默认 "config.ini"
+
+    Returns:
+        str: "local_first"（本地库优先，缺失回退远端）
+             或 "remote_first"（远端优先，失败回退本地）
+             配置文件缺失、段落缺失或取值非法时返回 DEFAULT_DATA_SOURCE_PRIORITY
+    """
+    full_path = find_config_path(config_path)
+    if not os.path.exists(full_path):
+        _logger.debug("配置文件不存在，取数优先级使用默认值: %s", DEFAULT_DATA_SOURCE_PRIORITY)
+        return DEFAULT_DATA_SOURCE_PRIORITY
+
+    config = configparser.ConfigParser(
+        interpolation=None,
+        comment_prefixes=("#", ";"),
+        inline_comment_prefixes=(";",)
+    )
+    try:
+        config.read(full_path, encoding="utf-8")
+        if "data_source" not in config:
+            return DEFAULT_DATA_SOURCE_PRIORITY
+        value = config["data_source"].get("priority", DEFAULT_DATA_SOURCE_PRIORITY).strip()
+    except Exception as error:
+        _logger.warning("解析 [data_source] 失败，使用默认优先级 %s: %s", DEFAULT_DATA_SOURCE_PRIORITY, error)
+        return DEFAULT_DATA_SOURCE_PRIORITY
+
+    if value not in DATA_SOURCE_PRIORITIES:
+        _logger.warning(
+            "取数优先级取值非法 [%s]，合法值为 %s，改用默认 %s",
+            value,
+            "/".join(DATA_SOURCE_PRIORITIES),
+            DEFAULT_DATA_SOURCE_PRIORITY,
+        )
+        return DEFAULT_DATA_SOURCE_PRIORITY
+
+    return value
