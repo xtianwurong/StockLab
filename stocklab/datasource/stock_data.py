@@ -53,7 +53,7 @@ import baostock as bs
 import pandas as pd
 import requests
 
-from stocklab.common.type_utils import safe_float, safe_int
+from stocklab.common.type_conversion import safe_float, safe_int
 from stocklab.datasource.tencent_client import TencentMarketClient
 
 # 初始化模块级私有 Logger
@@ -93,7 +93,7 @@ PE_TTM_COLUMN = "pe_ttm"
 
 
 # ============================================================================
-# 通用数据类型安全转换辅助函数（下沉至 type_utils.py，在此保留别名兼容内部调用）
+# 通用数据类型安全转换辅助函数（下沉至 type_conversion.py，在此保留别名兼容内部调用）
 # ============================================================================
 _safe_float = safe_float
 _safe_int = safe_int

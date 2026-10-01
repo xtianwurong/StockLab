@@ -6,7 +6,7 @@ StockLab - 数据接口测试 (tests/test_data_interfaces.py)
 
 【功能用途】
   本脚本用于验证 StockLab 核心功能链路：
-    0. 验证基础类型转换模块 (stocklab.common.type_utils)
+    0. 验证基础类型转换模块 (stocklab.common.type_conversion)
     1. 验证通用行情客户端 (MarketDataClient)：统一验证股票、ETF 与指数的名称、OHLCV K线与月线批量抓取
     2. 验证腾讯实时行情快照接口 (fetch_realtime_quote)
     3. 验证多级公司简称查询 (fetch_stock_name)
@@ -38,8 +38,8 @@ from stocklab import (
 )
 
 
-def run_type_utils_test():
-    """测试 type_utils 类型安全转换基础工具"""
+def run_type_conversion_test():
+    """测试 type_conversion 类型安全转换基础工具"""
     print("\n" + "=" * 65)
     print("【阶段零：测试 stocklab.common 基础类型转换】")
     print("=" * 65)
@@ -188,8 +188,8 @@ def main():
 
     print(f">>> 开始执行 StockLab 全功能自动化验证 (股票代码: {stock_code}) <<<")
 
-    # 0. 验证 type_utils 基础转换
-    run_type_utils_test()
+    # 0. 验证 type_conversion 基础转换
+    run_type_conversion_test()
 
     # 1. 验证通用行情客户端 (股票/ETF/指数不区分)
     run_generic_market_client_test()

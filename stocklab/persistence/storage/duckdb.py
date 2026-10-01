@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - DuckDB 连接管理模块 (stocklab.datasource.storage.duckdb)
+StockLab - DuckDB 连接管理模块 (stocklab.persistence.storage.duckdb)
 ==============================================================================
 
 【模块职责】
@@ -19,7 +19,7 @@ import os
 
 import duckdb
 
-from stocklab.datasource.storage.schema import DEFAULT_DB_PATH, initialize_database
+from stocklab.persistence.storage.schema import DEFAULT_DB_PATH, initialize_database
 
 _logger = logging.getLogger(__name__)
 

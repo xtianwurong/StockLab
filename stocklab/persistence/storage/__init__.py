@@ -1,5 +1,8 @@
 """
-StockLab 数据存储层 (stocklab.datasource.storage)
+StockLab 数据存储层 (stocklab.persistence.storage)
+
+【模块职责】
+   本地 DuckDB 的连接管理与 Schema 定义，不含任何业务数据映射逻辑。
 """
 
 from .duckdb import Database

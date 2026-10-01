@@ -41,12 +41,13 @@ StockLab/
 ├── stocklab/                   # 核心库包
 │   ├── common/                 # 通用基础层
 │   │   ├── config.py           #   config.ini 解析
-│   │   └── type_utils.py       #   safe_float / safe_int 类型安全转换
-│   ├── datasource/             # 数据源接入层
+│   │   └── type_conversion.py  #   safe_float / safe_int 类型安全转换
+│   ├── datasource/             # 数据源接入层（只负责「从外部取数」）
 │   │   ├── tencent_client.py   #   【腾讯直连行情网关】TencentMarketClient（统一接入股票/ETF/指数）
 │   │   ├── stock_data.py       #   【个股多源数据服务】MarketDataService（三级容错策略 + 估值对齐）
-│   │   ├── market_provider.py  #   【全市场数据 Provider】MarketDataProvider（全市场批量数据获取）
-│   │   ├── storage/            #   数据存储层
+│   │   └── market_provider.py  #   【全市场数据 Provider】MarketDataProvider（全市场批量数据获取）
+│   ├── persistence/            # 本地数据持久化层（只负责「往本地存数」）
+│   │   ├── storage/            #   数据存储基础设施
 │   │   │   ├── duckdb.py       #     DuckDB 连接管理
 │   │   │   └── schema.py       #     Schema 定义与初始化
 │   │   └── repository/         #   数据访问层
@@ -67,18 +68,23 @@ StockLab/
         ▼
 stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
                               │
+                              ▼
+                    stocklab.persistence  ──►  stocklab.common
+                              │
                               ├── storage/    (DuckDB 连接管理 + Schema)
                               └── repository/ (SQL 读写封装)
 ```
 
 - `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换）。
-- `stocklab/datasource`：对外数据获取与数据持久化。
+- `stocklab/datasource`：**只负责对外取数**，不感知本地存储。
   - `tencent_client.py`：腾讯直连行情网关，统一接入股票/ETF/指数。
   - `stock_data.py`：单股多源数据服务（三级容错策略 + 估值对齐）。
   - `market_provider.py`：全市场批量数据获取。
+- `stocklab/persistence`：**只负责本地落库**，不依赖任何外部数据源（AkShare / BaoStock / 腾讯）。
   - `storage/`：DuckDB 连接管理与 Schema 定义。
-  - `repository/`：SQL 读写封装，不依赖外部数据源。
+  - `repository/`：SQL 读写封装，仅依赖 pandas 与本层 `storage/`。
 - `stocklab/visualizer`：把数据渲染成网页。
+- **分层命名契约**：`datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是入口脚本，层与层之间不得互相 import。
 - 顶层入口脚本只做「参数解析 + 调用库」，不含业务逻辑；自检脚本放在 tests/ 下。
 
 ## 数据源架构
@@ -101,19 +107,22 @@ stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
 - 负责全市场 A 股数据的批量获取，与单股数据服务明确边界。
 - 提供 `fetch_securities` (股票基础信息)、`fetch_daily_prices` (日 K 行情)、`fetch_realtime_valuations` (最新估值快照)。
 
-**本地数据仓库（`stocklab/datasource/storage/` + `stocklab/datasource/repository/`）**：
+**本地数据仓库（`stocklab/persistence/`）**：
 - DuckDB 嵌入式分析数据库，存储全市场 A 股数据。
 - 数据域分离：reference (证券身份)、market (行情估值)、sys (同步状态)。
 - Repository 模式封装 SQL 读写，不依赖外部数据源。
 - 核心表：`reference.securities`、`market.daily_prices`、`market.daily_valuations`、`sys.sync_tasks`。
+- 对外统一出口：`from stocklab.persistence import Database, initialize_database, SecurityRepository, DailyPriceRepository, DailyValuationRepository`。
+
+> **已知演进债（阶段二）**：当前存在两条并行数据通路——`visualizer` 直连腾讯抓实时数据出图，`persistence` 只被写入、尚无读取方。阶段一为「不破坏现有功能」而刻意保持现状；后续应让板块走势支持从本地仓库出图，使建库的分析价值兑现。
 
 **统一数据契约**：所有单股数据源标准化为三列常量 —— `TRADE_DATE_COLUMN` / `CLOSE_PRICE_COLUMN` / `PE_TTM_COLUMN`。
 
 ## 数据库设计（DuckDB）
 
 **存储位置**：`data/stocklab.duckdb`（单文件嵌入式数据库，运行时自动创建，已被 `.gitignore` 排除）。
-**DDL 唯一来源**：`stocklab/datasource/storage/schema.py`（全部 `CREATE ... IF NOT EXISTS`，重复初始化幂等安全）。
-**连接管理**：`stocklab/datasource/storage/duckdb.py` —— `Database` 类（支持 `with` 上下文管理）；数据库文件不存在时自动重新初始化 Schema。
+**DDL 唯一来源**：`stocklab/persistence/storage/schema.py`（全部 `CREATE ... IF NOT EXISTS`，重复初始化幂等安全）。
+**连接管理**：`stocklab/persistence/storage/duckdb.py` —— `Database` 类（支持 `with` 上下文管理）；数据库文件不存在时自动重新初始化 Schema。
 
 ### 数据域（Schema）
 
@@ -204,7 +213,7 @@ stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
 - **批量 UPSERT**：先将 pandas DataFrame 注册为临时表，再 `INSERT INTO ... SELECT * FROM 临时表 ON CONFLICT (...) DO UPDATE SET ...`，单语句原子提交，**绝不逐行插入**。
 - **幂等性**：同一批数据重复写入行数不变；中断后重跑不会产生重复记录。
 - **主键冲突键**：`securities` 冲突于 `ts_code`；`daily_prices` / `daily_valuations` 冲突于 `(ts_code, trade_date)`。
-- **依赖方向**：Repository 只依赖 `storage/` 与 pandas，**不 import 任何数据源**（AkShare / BaoStock / 腾讯），保证数据访问层可独立测试与移植。
+- **依赖方向**：Repository 只依赖 `persistence.storage` 与 pandas，**不 import 任何数据源**（AkShare / BaoStock / 腾讯），保证数据访问层可独立测试与移植。
 
 ### Repository 公共接口
 

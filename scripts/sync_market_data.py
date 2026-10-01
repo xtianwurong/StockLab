@@ -34,11 +34,13 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stocklab.datasource.market_provider import MarketDataProvider
-from stocklab.datasource.repository.daily_price import DailyPriceRepository
-from stocklab.datasource.repository.daily_valuation import DailyValuationRepository
-from stocklab.datasource.repository.security import SecurityRepository
-from stocklab.datasource.storage.duckdb import Database
-from stocklab.datasource.storage.schema import initialize_database
+from stocklab.persistence import (
+    DailyPriceRepository,
+    DailyValuationRepository,
+    Database,
+    SecurityRepository,
+    initialize_database,
+)
 
 _logger = logging.getLogger("StockLab.Sync")
 

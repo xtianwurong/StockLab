@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 证券基础信息 Repository (stocklab.datasource.repository.security)
+StockLab - 证券基础信息 Repository (stocklab.persistence.repository.security)
 ==============================================================================
 
 【模块职责】
@@ -18,7 +18,7 @@ import logging
 
 import pandas as pd
 
-from stocklab.datasource.storage.duckdb import Database
+from stocklab.persistence.storage.duckdb import Database
 
 _logger = logging.getLogger(__name__)
 

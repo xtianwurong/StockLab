@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - DuckDB 数据库 Schema 定义 (stocklab.datasource.storage.schema)
+StockLab - DuckDB 数据库 Schema 定义 (stocklab.persistence.storage.schema)
 ==============================================================================
 
 【模块职责】
