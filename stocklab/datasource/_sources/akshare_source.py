@@ -16,7 +16,7 @@ import akshare as ak
 import pandas as pd
 
 from stocklab.datasource._sources.base import StockDataSource
-from stocklab.datasource.contract import (
+from stocklab.datasource.data_contract import (
     PE_TTM_COLUMN,
     TRADE_DATE_COLUMN,
 )

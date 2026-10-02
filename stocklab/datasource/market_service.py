@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 入库取数模块 (stocklab.datasource.market_batch)
+StockLab - 入库取数模块 (stocklab.datasource.market_service)
 ==============================================================================
 
 【模块职责】
@@ -37,11 +37,11 @@ import pandas as pd
 _logger = logging.getLogger(__name__)
 
 __all__ = [
-    "MarketBatchProvider",
+    "MarketService",
 ]
 
 
-class MarketBatchProvider:
+class MarketService:
     """
     入库取数类：外部数据源 → 与库表同名同序的 DataFrame
 
@@ -51,14 +51,11 @@ class MarketBatchProvider:
                          fetch_company_profile（公司概况补列）
       3. 行业横截面：    fetch_industry_valuation（某时点全部行业估值）
       4. 单指数成分：    fetch_index_membership（某指数全部成分）
-
-    【命名备注】类名中的 "MarketBatch" 为历史遗留（初版仅全市场批量两个方法），
-      现实际语义是「表同构入库取数」，如需更名建议 TableFetcher，由调用方统一决策。
     """
 
     def __init__(self, retry_count=2, retry_interval_seconds=2, interval_seconds=0.2):
         """
-        初始化全市场批量 Provider
+        初始化入库取数服务
 
         Args:
             retry_count (int, optional): 失败重试次数

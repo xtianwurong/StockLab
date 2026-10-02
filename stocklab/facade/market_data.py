@@ -36,7 +36,7 @@ from stocklab.common.config import (
     DEFAULT_DATA_SOURCE_PRIORITY,
     load_data_source_priority,
 )
-from stocklab.datasource.market_batch import MarketBatchProvider
+from stocklab.datasource.market_service import MarketService
 from stocklab.datasource.tencent_client import TencentMarketClient
 from stocklab.persistence import (
     DailyPriceRepository,
@@ -84,7 +84,7 @@ class MarketDataFacade:
         self._db_path = initialize_database(db_path)
         self._database = Database(self._db_path)
 
-        self._provider = MarketBatchProvider()
+        self._market_service = MarketService()
         self._tencent_client = TencentMarketClient()
         self._security_repo = SecurityRepository(self._database)
         self._price_repo = DailyPriceRepository(self._database)
@@ -144,11 +144,11 @@ class MarketDataFacade:
                 _logger.debug("证券基础信息命中本地库: %d 条", len(local_data))
                 return local_data
             _logger.info("本地库无证券基础信息，回退远端接口")
-            remote_data = self._provider.fetch_securities()
+            remote_data = self._market_service.fetch_securities()
             self._write_back(self._security_repo, remote_data, "securities")
             return remote_data
 
-        remote_data = self._provider.fetch_securities()
+        remote_data = self._market_service.fetch_securities()
         if not remote_data.empty:
             self._write_back(self._security_repo, remote_data, "securities")
             return remote_data
@@ -175,13 +175,13 @@ class MarketDataFacade:
                 )
                 return local_data
             _logger.info("本地库无 %s 的日 K，回退远端接口", ts_code)
-            remote_data = self._provider.fetch_daily_prices(
+            remote_data = self._market_service.fetch_daily_prices(
                 ts_code, self._compact_date(start_date), self._compact_date(end_date)
             )
             self._write_back(self._price_repo, remote_data, "daily_prices")
             return remote_data
 
-        remote_data = self._provider.fetch_daily_prices(
+        remote_data = self._market_service.fetch_daily_prices(
             ts_code, self._compact_date(start_date), self._compact_date(end_date)
         )
         if not remote_data.empty:
@@ -207,11 +207,11 @@ class MarketDataFacade:
                 _logger.debug("估值命中本地库: %d 条", len(local_data))
                 return local_data
             _logger.info("本地库无估值数据，回退远端接口")
-            remote_data = self._provider.fetch_realtime_valuations()
+            remote_data = self._market_service.fetch_realtime_valuations()
             self._write_back(self._valuation_repo, remote_data, "daily_valuations")
             return remote_data
 
-        remote_data = self._provider.fetch_realtime_valuations()
+        remote_data = self._market_service.fetch_realtime_valuations()
         if not remote_data.empty:
             self._write_back(self._valuation_repo, remote_data, "daily_valuations")
             return remote_data
@@ -248,7 +248,7 @@ class MarketDataFacade:
             return local_data
 
         _logger.info("本地库无 %s 的历史估值，取远端接口", ts_code)
-        remote_data = self._provider.fetch_valuation_history(ts_code, period)
+        remote_data = self._market_service.fetch_valuation_history(ts_code, period)
         self._write_back(self._history_repo, remote_data, "valuation_history")
         return remote_data
 

@@ -15,7 +15,7 @@ import pandas as pd
 
 from stocklab.common.type_conversion import safe_float, safe_int
 from stocklab.datasource._sources.base import StockDataSource
-from stocklab.datasource.contract import (
+from stocklab.datasource.data_contract import (
     CLOSE_PRICE_COLUMN,
     TRADE_DATE_COLUMN,
     StockRealtimeQuote,

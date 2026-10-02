@@ -276,9 +276,9 @@
         <code>quote_service.py</code> 内部组合复用 <code>TencentMarketClient</code> 作为其腾讯直连与基础行情的底层驱动，实现职责分层并消除跨模块重复代码。
       </div>
 
-      <h3>1.3 全市场批量服务 MarketBatchProvider</h3>
-      <p><code>stocklab/datasource/market_batch.py</code> — <code>MarketBatchProvider</code></p>
-      <p>负责全市场 A 股数据的批量获取，与单股数据服务明确边界：</p>
+      <h3>1.3 入库取数服务 MarketService</h3>
+      <p><code>stocklab/datasource/market_service.py</code> — <code>MarketService</code></p>
+      <p>负责从外部数据源取数并输出与本地库表<strong>同名同序</strong>的 DataFrame（供 UPSERT 按位置写入），与单股行情服务 <code>StockQuoteService</code> 明确边界——本模块面向<strong>入库同步</strong>，直连各数据源接口（自带重试与限流），不做三通道降级：</p>
       <ul>
         <li><code>fetch_securities</code> — 股票基础信息</li>
         <li><code>fetch_daily_prices</code> — 日 K 行情</li>

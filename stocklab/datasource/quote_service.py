@@ -5,7 +5,7 @@ StockLab - 单股行情服务 (stocklab.datasource.quote_service)
 ==============================================================================
 
 【模块职责】
-  本模块是单股维度的行情服务门面（对应 MarketBatchProvider 的全市场批量维度），
+  本模块是单股维度的行情服务门面（对应 MarketService 的入库取数维度），
   负责 A 股单只股票行情的统一获取与数据清洗，完全独立于绘图逻辑：
     1. 统一数据契约：对外输出严格标准化格式的 pandas.DataFrame 与实时行情数据对象，
        屏蔽各数据源底层的通信协议与字段差异。
@@ -15,8 +15,8 @@ StockLab - 单股行情服务 (stocklab.datasource.quote_service)
     4. 独立复用性：不依赖 matplotlib，可作为独立的行情抓取库被外部其它分析脚本直接 import。
 
 【模块结构（本文件为单股维度的对外服务门面）】
-  - contract.py            : 统一数据契约（列名常量 + StockRealtimeQuote），此处 re-export
-  - _sources/base.py       : 数据源抽象基类 StockDataSource（类似 C++ 抽象类）
+  - data_contract.py        : 统一数据契约（列名常量 + StockRealtimeQuote），此处 re-export
+  - _sources/base.py        : 数据源抽象基类 StockDataSource（类似 C++ 抽象类）
   - _sources/akshare_source.py  : 东方财富主通道实现（基于 akshare）
   - _sources/baostock_source.py : 证券宝备用通道实现（基于 baostock，含 Socket 会话生命周期管理）
   - _sources/tencent_source.py  : 腾讯财经直连通道实现（基于 qt.gtimg.cn，极速实时行情与备用日 K）
@@ -31,7 +31,7 @@ StockLab - 单股行情服务 (stocklab.datasource.quote_service)
   - 标准库：logging（分级日志）
   - 第三方库：
       * pandas (>=2.0)     : 数据表格清洗、类型转换、时序重采样
-  - 包内：stocklab.datasource.contract、stocklab.datasource._sources
+  - 包内：stocklab.datasource.data_contract、stocklab.datasource._sources
 ==============================================================================
 """
 
@@ -44,7 +44,7 @@ from stocklab.datasource._sources import (
     BaoStockDataSource,
     TencentDataSource,
 )
-from stocklab.datasource.contract import (
+from stocklab.datasource.data_contract import (
     CLOSE_PRICE_COLUMN,
     PE_TTM_COLUMN,
     TRADE_DATE_COLUMN,

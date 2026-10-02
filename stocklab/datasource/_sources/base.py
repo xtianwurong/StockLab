@@ -6,13 +6,13 @@ StockLab - 数据源抽象基类 (stocklab.datasource._sources.base)
 
 【模块职责】
   定义所有数据源子类必须遵守的接口契约（类似 C++ 抽象基类 / 纯虚接口）。
-  只依赖 pandas 与统一数据契约（contract），不依赖任何具体数据源 SDK。
+  只依赖 pandas 与统一数据契约（data_contract），不依赖任何具体数据源 SDK。
 ==============================================================================
 """
 
 import pandas as pd
 
-from stocklab.datasource.contract import (
+from stocklab.datasource.data_contract import (
     CLOSE_PRICE_COLUMN,
     TRADE_DATE_COLUMN,
 )

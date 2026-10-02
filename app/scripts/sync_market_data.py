@@ -46,7 +46,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from stocklab.common.http_client import install_browser_user_agent
-from stocklab.datasource.market_batch import MarketBatchProvider
+from stocklab.datasource.market_service import MarketService
 from stocklab.persistence import (
     DailyPriceRepository,
     DailyValuationRepository,
@@ -161,10 +161,10 @@ def sync_securities(database):
     _logger.info("阶段一：同步股票基础信息")
     _logger.info("=" * 60)
 
-    provider = MarketBatchProvider()
+    market_service = MarketService()
     repository = SecurityRepository(database)
 
-    df = provider.fetch_securities()
+    df = market_service.fetch_securities()
     if df.empty:
         _logger.error("获取股票基础信息失败，跳过")
         return False
@@ -222,7 +222,7 @@ def sync_daily_prices(database, start_date, end_date):
     _logger.info("阶段二：同步日 K 行情 (%s ~ %s)", start_date, end_date)
     _logger.info("=" * 60)
 
-    provider = MarketBatchProvider()
+    market_service = MarketService()
     repository = DailyPriceRepository(database)
 
     # 获取全部证券代码
@@ -237,7 +237,7 @@ def sync_daily_prices(database, start_date, end_date):
 
     for _, row in securities.iterrows():
         ts_code = row["ts_code"]
-        df = provider.fetch_daily_prices(ts_code, start_date, end_date)
+        df = market_service.fetch_daily_prices(ts_code, start_date, end_date)
         if df.empty:
             failed_count += 1
             continue
@@ -285,10 +285,10 @@ def sync_industry_valuation(database, stat_date, classification="国证行业分
     _logger.info("阶段六：同步行业估值（%s @ %s）", classification, stat_date)
     _logger.info("=" * 60)
 
-    provider = MarketBatchProvider()
+    market_service = MarketService()
     repository = IndustryValuationRepository(database)
 
-    df = provider.fetch_industry_valuation(stat_date, classification)
+    df = market_service.fetch_industry_valuation(stat_date, classification)
     if df.empty:
         _logger.warning("行业估值 [%s @ %s] 获取失败，跳过", classification, stat_date)
         return False
@@ -317,14 +317,14 @@ def sync_index_membership(database):
     _logger.info("阶段五：同步主流宽基指数成分")
     _logger.info("=" * 60)
 
-    provider = MarketBatchProvider()
+    market_service = MarketService()
     repository = IndexMembershipRepository(database)
 
     total_count = 0
     success_count = 0
 
     for index_code, index_name in _INDEX_CODES:
-        df = provider.fetch_index_membership(index_code)
+        df = market_service.fetch_index_membership(index_code)
         if df.empty:
             _logger.warning("指数 [%s] %s 成分获取失败，跳过", index_code, index_name)
             continue
@@ -389,7 +389,7 @@ def sync_valuation_history(database, period, ts_code_list=None, max_workers=8):
     def fetch_one(ts_code):
         """工作线程任务：只做取数，不触碰数据库"""
         try:
-            return ts_code, MarketBatchProvider().fetch_valuation_history(ts_code, period)
+            return ts_code, MarketService().fetch_valuation_history(ts_code, period)
         except Exception as error:
             _logger.debug("并发取数异常 [%s]: %s", ts_code, error)
             return ts_code, pd.DataFrame()
@@ -426,10 +426,10 @@ def sync_valuations(database):
     _logger.info("阶段三：同步最新全市场估值快照")
     _logger.info("=" * 60)
 
-    provider = MarketBatchProvider()
+    market_service = MarketService()
     repository = DailyValuationRepository(database)
 
-    df = provider.fetch_realtime_valuations()
+    df = market_service.fetch_realtime_valuations()
     if df.empty:
         _logger.error("获取估值快照失败，跳过")
         return False

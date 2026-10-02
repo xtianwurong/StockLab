@@ -1006,7 +1006,7 @@
       <div class="callout callout-warn">
         <strong>待补齐的四个字段：</strong>
         <code>industry</code> / <code>area</code> / <code>list_date</code> / <code>is_hs</code><br>
-        实现已就绪（<code>MarketBatchProvider.fetch_company_profile()</code>），待数据源开放后可直接灌入。<br>
+        实现已就绪（<code>MarketService.fetch_company_profile()</code>），待数据源开放后可直接灌入。<br>
         在此之前，<strong>用 <code>index_memberships</code> 的指数成分作为同业分组的替代维度</strong>。
       </div>
 
@@ -1259,7 +1259,7 @@
       </table>
 
       <div class="callout callout-error">
-        <strong>⚠️ 列序即契约：</strong>本表 16 列的顺序与 <code>MarketBatchProvider.fetch_realtime_valuations()</code> 的 DataFrame 输出<strong>严格同名同序</strong>。UPSERT 使用 <code>SELECT *</code> 按位置匹配，<strong>修改任一侧必须同步修改另一侧</strong>，否则会因列数不匹配导致整体写入失败。
+        <strong>⚠️ 列序即契约：</strong>本表 16 列的顺序与 <code>MarketService.fetch_realtime_valuations()</code> 的 DataFrame 输出<strong>严格同名同序</strong>。UPSERT 使用 <code>SELECT *</code> 按位置匹配，<strong>修改任一侧必须同步修改另一侧</strong>，否则会因列数不匹配导致整体写入失败。
       </div>
 
       <div class="callout">
