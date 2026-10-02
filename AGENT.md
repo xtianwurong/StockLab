@@ -54,13 +54,19 @@ StockLab/
 │   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
 │   │   ├── __init__.py                 #     导出 MarketDataFacade
 │   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
+│   ├── analytics/                      #   统计分析层（纯变换，不取数不落库）
+│   │   ├── __init__.py                 #     导出分析器 / 渲染器 / 口径常量
+│   │   ├── valuation_distribution.py   #     ValuationDistributionAnalyzer：全市场市盈率分布统计
+│   │   ├── profile_reporter.py         #     ValuationDistributionReporter：统计报告文本渲染（控制台）
+│   │   └── markdown_reporter.py        #     ValuationDistributionMarkdownReporter：统计报告 Markdown 渲染（归档）
 │   └── visualizer/                     #   可视化 / Web 呈现层
 │       ├── __init__.py                 #     导出编排类与网页生成类
 │       ├── sector_trend.py             #     SectorTrendVisualizer 端到端编排
 │       └── page_generator.py           #     SectorWebPageGenerator 模板填充 → HTML
 ├── scripts/                            # ── 入口脚本（只做参数解析 + 调用库）──
 │   ├── generate_sector_trend.py        #     命令行入口：生成板块走势网页
-│   └── sync_market_data.py             #     命令行入口：全市场数据同步到本地 DuckDB
+│   ├── sync_market_data.py             #     命令行入口：全市场数据同步到本地 DuckDB
+│   └── analyze_pe_distribution.py      #     命令行入口：全市场市盈率分布统计
 ├── tests/                              # ── 自检脚本 ──
 │   └── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
 ├── templates/                          # ── 静态资源 ──
@@ -83,9 +89,15 @@ StockLab/
         ├──►  stocklab.facade  ──┬──►  stocklab.datasource
         │        （统一取数入口）  └──►  stocklab.persistence
         │
+        ├──►  stocklab.analytics
+        │        （纯统计变换：只吃 DataFrame，不碰网络/数据库，零层内依赖）
+        │
         └──►  stocklab.persistence  ──►  stocklab.persistence.storage
                                        （只对本地落库；零内部依赖）
 ```
+
+> `stocklab.analytics` **不 import `facade` / `datasource` / `persistence`**：它只接收调用方传入的
+> DataFrame 做统计聚合，因此可脱离网络与数据库独立单测。取数仍由入口脚本经 facade 完成。
 
 | 包 | 依赖的 StockLab 包 | 第三方库 | 标准库 |
 |----|------------------|---------|--------|
@@ -93,6 +105,7 @@ StockLab/
 | `stocklab.datasource` | `common`（层内互引 `datasource`） | `akshare` `baostock` `pandas` `requests` | `concurrent.futures` `contextlib` `datetime` `io` `logging` `time` |
 | `stocklab.persistence` | 无（仅层内 `persistence.storage`） | `duckdb` `pandas` | `logging` `os` |
 | `stocklab.facade` | `common` `datasource` `persistence` | `pandas` | `logging` |
+| `stocklab.analytics` | 无（层内互引 `analytics`） | `pandas` | `logging` `os` `unicodedata` |
 | `stocklab.visualizer` | `common` `datasource`（层内互引 `visualizer`） | 无 | `datetime` `json` `logging` `os` |
 
 > `stocklab.persistence` **不依赖 `common`**：持久化层无配置语义，解析 `config.ini` 对它没有意义。
@@ -106,6 +119,7 @@ StockLab/
   - `storage/`：DuckDB 连接管理与 Schema 定义。
   - `repository/`：SQL 读写封装，仅依赖 pandas 与本层 `storage/`。
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
+- `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
 - `stocklab/visualizer`：把数据渲染成网页。
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
@@ -184,6 +198,76 @@ with MarketDataFacade() as facade:          # 优先级取自 config.ini
 | `SectorWebPageGenerator` | `visualizer/page_generator.py` | 模板视图生成器 | 提取全标的月份并集 → 对齐缺失数据 → 填充 `dashboard.html` 的 `__DATA_PAYLOAD__` → 落盘单文件 HTML |
 
 `MarketDataService` 另有一个状态字段 `used_source_name`，记录本次价格查询实际命中的数据源标识（如 `akshare` / `baostock` / `tencent`），供上层日志展示。
+
+## 市盈率分布统计（analytics）
+
+**定位**：`stocklab/analytics` 是纯统计变换层 —— 只接收 DataFrame 做聚合，不发网络请求、不连数据库、不 import `facade`/`datasource`/`persistence`，因此可完全脱离 IO 独立单测。
+
+```python
+from stocklab.analytics import ValuationDistributionAnalyzer, ValuationDistributionReporter
+
+analyzer = ValuationDistributionAnalyzer(pe_column="pe_ttm")
+profile = analyzer.analyze(valuation_df, securities_df)   # 两张表按 ts_code 关联
+print(ValuationDistributionReporter().format_text_report(profile))
+```
+
+| 模块 | 职责 |
+|------|------|
+| `valuation_distribution.py` | `ValuationDistributionAnalyzer` 分析器 + 4 个结果实体；纯计算 |
+| `profile_reporter.py` | `ValuationDistributionReporter` 纯文本渲染；控制台阅读 |
+| `markdown_reporter.py` | `ValuationDistributionMarkdownReporter` Markdown 渲染；长期归档 |
+
+**结果实体**（均为简单实体 / POD，仅承载数据与最简派生计算，渲染一律交给 Reporter）：
+`ValuationDistributionProfile`（整体结果）、`DistributionBucket`（区间桶）、
+`PeRankEntry`（极值标的）、`MarketValuationDistribution`（分交易所摘要）。
+
+> **渲染层扩展规则**：两种输出形态结构差异很大（纯文本靠视觉宽度对齐，Markdown 靠表格语法），
+> **新增输出形态应另写渲染器**，不要给既有渲染器加格式开关——否则会出现大量互相干扰的分支。
+> 渲染器只读统计实体，不得做任何统计运算。
+
+### Markdown 归档报告
+
+`scripts/analyze_pe_distribution.py --markdown <路径>` 生成，面向长期留存：
+- 顶部自动生成一句话中文结论，读第一行即可掌握全貌；
+- 样本代表性不足时在引用块里加 ⚠️ 警示；
+- 表格化统计，便于 grep「多少只 PE 在 20-30 区间」；
+- 尾部固定「口径说明」，避免报告脱离上下文被误引用；
+- 证券简称中的竖线必须转义（`某某|转债` → `某某\|转债`），否则破坏表格列结构。
+
+### 职责边界：库层只描述事实，不描述补救
+
+样本代表性判定（`PE_MIN_REASONABLE_SAMPLE_COUNT` + `Profile.is_representative()`）**下沉在库层**，
+报告表头也会自动标注「分布结论不成立」。这样任何消费方都无法绕过该校验。
+但「怎么补救」（先跑 `sync_market_data.py valuations` 或改用 `--priority remote_first`）
+属于**入口脚本的编排知识**，留在 `scripts/` 里 —— 库层不应知道具体脚本的存在。
+
+### 统计口径的三个业务约束（改动前必读）
+
+1. **PE 分布严重右偏，均值不可作为分布中心的代表**。少数高成长股 PE 可达数千倍，
+   算术均值被极端值严重拉偏。因此输出以**中位数 + 分位数**为主，均值单独标注「仅供参考」，
+   并额外给出**截尾均值**（剔除 PE > 1000 倍后的均值）作为第三个参照。
+2. **亏损股没有有意义的 PE**。数据源以 `-` / NaN 表示，统计时归入「无有效 PE」；
+   `PE <= 0` 的负值单独计数。两者**一律不参与分位数统计**，也不进入分桶。
+3. **两个口径不可混用**：`pe`（市盈率-动态，东财快照口径）与 `pe_ttm`（跨期可比）
+   含义不同，由 `pe_column` 显式指定，绝不做隐式推断。
+
+### 固定业务语义分桶（非等宽）
+
+分桶数 = 边界数 + 1，边界 `PE_DISTRIBUTION_BUCKET_EDGES` 共 8 个，
+对应 9 档标签 `PE_DISTRIBUTION_BUCKET_LABELS`，**最后一档 `1000+` 右端开放**。
+区间语义为**左开右闭**（`20-30` 表示 `(20, 30]`）。
+> 循环基准必须用**标签数**而非边界数，否则末尾的开放区间会被漏掉。
+
+> **为何不用等宽分桶**：PE 的业务关注区间高度非线性（0~50 密集、50 以上迅速稀疏），
+> 固定边界让每档都有明确的投资含义；等宽分桶会把 0~30 全挤进同一根柱子。
+
+### 报告排版约束
+
+- **分位数不配条形**：右偏极端时最大值可达数千倍，若以最大值为满格线性映射，
+  P5~P95 的条形会全部塌缩成空条反而误导读者。分布形态由区间直方图承担。
+- **区间直方图**才配条形，且按各档自身占比线性映射。
+- 中英文混排需按**视觉宽度**对齐（用 `unicodedata.east_asian_width` 计算，全角算 2 列），
+  直接用 `%` 对齐会错位。
 
 ## 数据库设计（DuckDB）
 
@@ -325,6 +409,20 @@ with MarketDataFacade() as facade:          # 优先级取自 config.ini
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
 ./venv/bin/python scripts/sync_market_data.py --securities-only
+
+# 统计 A 股全市场市盈率分布（PE-TTM 口径，默认仅打印到控制台）
+./venv/bin/python scripts/analyze_pe_distribution.py
+
+# 换口径 / 换取数通路
+./venv/bin/python scripts/analyze_pe_distribution.py --pe-column dynamic
+./venv/bin/python scripts/analyze_pe_distribution.py --priority remote_first
+
+# 归档 Markdown 报告（长期留存、可被 grep 与其他文档引用）
+./venv/bin/python scripts/analyze_pe_distribution.py --markdown output/pe_distribution.md
+
+# 指定统计交易日并同时输出两种形态
+./venv/bin/python scripts/analyze_pe_distribution.py \
+    --trade-date 2026-09-30 --output output/pe_distribution.txt --markdown output/pe_distribution.md
 ```
 
 ## 环境与依赖
@@ -360,6 +458,7 @@ pip install -r requirements.txt
 
 - `output/sector_etf_trend.html` —— 单文件自包含网页，含多标的月线走势对比图，可直接双击打开或分享。
 - `data/stocklab.duckdb` —— 本地 DuckDB 数据库，含全市场 A 股日 K 行情与估值数据。
+- 市盈率分布统计报告 —— 默认仅打印到控制台；`--output` 落盘纯文本，`--markdown` 落盘 Markdown 归档。
 
 ## 注意事项
 
@@ -370,6 +469,16 @@ pip install -r requirements.txt
 5. 全市场数据同步耗时较长（全历史回补约 5400 次请求），建议日常用 `--incremental`，或按交易所分批执行以控制失败影响面。
 6. 估值字段（PE/PB 等）允许 NULL，表示亏损或无数据，不应强制转换为 0。
 7. `output/` 与 `data/` 已被 `.gitignore` 排除；`templates/` 与 `config.ini` 则是入库的运行必需文件，删除后网页生成会失败。
+8. **市盈率分布统计依赖 `market.daily_valuations` 有数据**。`local_first` 下只要本地快照非空即判定命中，
+   即使只有个位数条数。代表性判定在库层（`is_representative()`，阈值 1000 只），
+   报告表头会自动标注「分布结论不成立」，入口脚本再补充补救提示。
+   首次使用先跑 `sync_market_data.py valuations`，或加 `--priority remote_first` 直接取远端快照。
+9. 估值快照的 `trade_date` 是**写入快照的日期**，不一定是真实交易日；报告展示的日期取自实际样本的最大值。
+10. **两个估值数据源的「亏损」表达方式不同，但分析口径等价**：
+    - 东财（`stock_zh_a_spot_em`）对亏损股返回 `-`，`to_numeric(errors="coerce")` 后为 **NaN** → 计入「无有效 PE」；
+    - 腾讯（`qt.gtimg.cn` 字段 39）对亏损股返回**负值**（如 ST嘉应 -703）→ 计入「PE ≤ 0」。
+    两者都会被排除出分位数与分桶，但分别落在不同分类里，对比不同数据源的报告时需注意。
+    > 实测回测：同一批 5572 只证券，负值形态与 NaN 形态下有效样本数与中位数完全一致。
 
 ## 许可证
 
