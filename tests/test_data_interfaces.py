@@ -29,13 +29,13 @@ from stocklab import (
     CLOSE_PRICE_COLUMN,
     PE_TTM_COLUMN,
     TRADE_DATE_COLUMN,
-    SectorTrendVisualizer,
     StockDataFetchParams,
     MarketDataService,
     TencentMarketClient,
     safe_float,
     safe_int,
 )
+from app.dashboard import SectorTrendVisualizer
 
 
 def run_type_conversion_test():

@@ -101,9 +101,9 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 ### 分层与依赖方向
 
 ```
-入口脚本 (scripts/)            ← 取数与落库的唯一编排方
+入口脚本 (app/scripts/)         ← 取数与落库的唯一编排方
          │
-         ├──►  stocklab.dashboard  ──►  stocklab.facade  ──►  stocklab.datasource
+         ├──►  app.dashboard  ──►  stocklab.facade  ──►  stocklab.datasource
          │                                  （只对外取数）
          │
          ├──►  stocklab.facade  ──┬──►  stocklab.datasource
@@ -126,7 +126,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 | `stocklab.persistence` | 无（仅层内 `persistence.storage`） | `duckdb` `pandas` | `logging` `os` |
 | `stocklab.facade` | `common` `datasource` `persistence` | `pandas` | `logging` |
 | `stocklab.analytics` | 无（层内互引 `analytics`） | `pandas` | `logging` `os` `unicodedata` |
-| `stocklab.dashboard` | `common` `facade`（层内互引 `dashboard`） | 无 | `datetime` `json` `logging` `os` |
+| `app.dashboard` | `common` `facade`（层内互引 `dashboard`） | 无 | `datetime` `json` `logging` `os` |
 
 > `stocklab.persistence` **不依赖 `common`**：持久化层无配置语义，解析 `config.ini` 对它没有意义。
 
@@ -140,7 +140,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   - `repository/`：SQL 读写封装，仅依赖 pandas 与本层 `storage/`。
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
-- `stocklab/dashboard`：把数据渲染成网页。
+- `app/dashboard`：把数据渲染成网页。
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
   - `facade` 可依赖两者，但 **`datasource` 与 `persistence` 绝不可反向 import `facade`**，否则形成循环依赖。
@@ -194,19 +194,20 @@ StockLab/
 │   │   ├── profile_reporter.py         #     ValuationDistributionReporter：统计报告文本渲染（控制台）
 │   │   ├── markdown_reporter.py        #     ValuationDistributionMarkdownReporter：统计报告 Markdown 渲染（归档）
 │   │   └── percentile_reporter.py      #     ValuationPercentileReporter：分位报告渲染（文本 + Markdown）
-│   └── dashboard/                      #   仪表板 / Web 呈现层
-│       ├── __init__.py                 #     导出编排类与网页生成类
-│       ├── sector_trend.py             #     SectorTrendVisualizer 端到端编排
-│       └── page_generator.py           #     SectorWebPageGenerator 模板填充 → HTML
-├── scripts/                            # ── 入口脚本（只做参数解析 + 调用库）──
-│   ├── generate_sector_trend.py        #     命令行入口：生成板块走势网页
-│   ├── sync_market_data.py             #     命令行入口：全市场数据同步到本地 DuckDB（五个阶段）
-│   ├── analyze_pe_distribution.py      #     命令行入口：全市场市盈率分布统计
-│   └── analyze_valuation_percentile.py #     命令行入口：个股历史估值分位计算
+├── app/                               # ── 应用层（业务特定）──
+│   ├── dashboard/                      #   仪表板模块
+│   │   ├── __init__.py
+│   │   ├── sector_trend.py            #     SectorTrendVisualizer 端到端编排
+│   │   ├── page_generator.py          #     SectorWebPageGenerator 模板填充 → HTML
+│   │   └── templates/
+│   │       └── dashboard.html         #    网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
+│   └── scripts/                       #   CLI 入口
+│       ├── generate_sector_trend.py   #     命令行入口：生成板块走势网页
+│       ├── sync_market_data.py        #     命令行入口：全市场数据同步到本地 DuckDB（五个阶段）
+│       ├── analyze_pe_distribution.py #     命令行入口：全市场市盈率分布统计
+│       └── analyze_valuation_percentile.py # 命令行入口：个股历史估值分位计算
 ├── tests/                              # ── 自检脚本 ──
 │   └── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
-├── templates/                          # ── 静态资源 ──
-│   └── dashboard.html                  #     网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
 ├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
 │   └── stocklab.duckdb                 #     本地 DuckDB 单文件数据库
 ├── output/                             # ── 同上 ──
@@ -234,10 +235,10 @@ StockLab/
 | **渲染** | `stocklab.analytics.percentile_reporter` | 单股分位：控制台表格 + Markdown |
 | | `stocklab.analytics.profile_reporter` | 全市场分布：纯文本报告（ASCII 条形图） |
 | | `stocklab.analytics.markdown_reporter` | 全市场分布：归档级 Markdown（表格 + 自动结论） |
-| **仪表板** | `stocklab.dashboard.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
-| | `stocklab.dashboard.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
-| **脚本** | `scripts/sync_market_data.py` | 5 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分 |
-| | `scripts/generate_sector_trend.py` | 可视化生成 CLI：月数/输出路径/配置文件可配 |
+| **仪表板** | `app.dashboard.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
+| | `app.dashboard.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
+| **脚本** | `app/scripts/sync_market_data.py` | 5 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分 |
+| | `app/scripts/generate_sector_trend.py` | 可视化生成 CLI：月数/输出路径/配置文件可配 |
 
 ---
 
@@ -245,57 +246,57 @@ StockLab/
 
 ```bash
 # 生成板块走势网页（默认读取 config.ini）
-./venv/bin/python scripts/generate_sector_trend.py
+./venv/bin/python app/scripts/generate_sector_trend.py
 
 # 自定义月数与输出路径
-./venv/bin/python scripts/generate_sector_trend.py --months 60 --output output/trend_5y.html
+./venv/bin/python app/scripts/generate_sector_trend.py --months 60 --output output/trend_5y.html
 
 # 指定其他配置文件
-./venv/bin/python scripts/generate_sector_trend.py --config config.ini
+./venv/bin/python app/scripts/generate_sector_trend.py --config config.ini
 
 # 全链路自检（可选股票代码，默认 000001.SZ）
 ./venv/bin/python tests/test_data_interfaces.py 000001.SZ
 
 # 同步全市场数据到本地 DuckDB（不带子命令 = 一键全跑前三个阶段）
-./venv/bin/python scripts/sync_market_data.py --start-date 2025-01-01 --end-date 2026-09-30
+./venv/bin/python app/scripts/sync_market_data.py --start-date 2025-01-01 --end-date 2026-09-30
 
 # 增量同步（自动从最新交易日期同步到当前）
-./venv/bin/python scripts/sync_market_data.py --incremental
+./venv/bin/python app/scripts/sync_market_data.py --incremental
 
 # 五个阶段分开执行（子命令，公共参数可在子命令前后任意位置）
-./venv/bin/python scripts/sync_market_data.py securities                 # 阶段一：股票基础信息
-./venv/bin/python scripts/sync_market_data.py prices --incremental       # 阶段二：日 K 行情
-./venv/bin/python scripts/sync_market_data.py prices --start-date 1990-12-19   # 阶段二：全历史回补
-./venv/bin/python scripts/sync_market_data.py valuations                 # 阶段三：估值快照
-./venv/bin/python scripts/sync_market_data.py valuation-history --period 近五年  # 阶段四：历史估值序列
-./venv/bin/python scripts/sync_market_data.py indexes                     # 阶段五：主流宽基指数成分
+./venv/bin/python app/scripts/sync_market_data.py securities                 # 阶段一：股票基础信息
+./venv/bin/python app/scripts/sync_market_data.py prices --incremental       # 阶段二：日 K 行情
+./venv/bin/python app/scripts/sync_market_data.py prices --start-date 1990-12-19   # 阶段二：全历史回补
+./venv/bin/python app/scripts/sync_market_data.py valuations                 # 阶段三：估值快照
+./venv/bin/python app/scripts/sync_market_data.py valuation-history --period 近五年  # 阶段四：历史估值序列
+./venv/bin/python app/scripts/sync_market_data.py indexes                     # 阶段五：主流宽基指数成分
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
-./venv/bin/python scripts/sync_market_data.py --securities-only
+./venv/bin/python app/scripts/sync_market_data.py --securities-only
 
 # 个股历史估值分位（替代「处于低位/高位」这类无法复核的定性描述）
-./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH
+./venv/bin/python app/scripts/analyze_valuation_percentile.py 600519.SH
 
 # 指定计算区间与当前值（当前值缺省取历史序列最新一日）
-./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH \
+./venv/bin/python app/scripts/analyze_valuation_percentile.py 600519.SH \
     --start-date 2021-01-01 --pe-ttm 19.32
 
 # 导出 Markdown
-./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH \
+./venv/bin/python app/scripts/analyze_valuation_percentile.py 600519.SH \
     --markdown output/600519_percentile.md
 
 # 统计 A 股全市场市盈率分布（PE-TTM 口径，默认仅打印到控制台）
-./venv/bin/python scripts/analyze_pe_distribution.py
+./venv/bin/python app/scripts/analyze_pe_distribution.py
 
 # 换口径 / 换取数通路
-./venv/bin/python scripts/analyze_pe_distribution.py --pe-column dynamic
-./venv/bin/python scripts/analyze_pe_distribution.py --priority remote_first
+./venv/bin/python app/scripts/analyze_pe_distribution.py --pe-column dynamic
+./venv/bin/python app/scripts/analyze_pe_distribution.py --priority remote_first
 
 # 归档 Markdown 报告（长期留存、可被 grep 与其他文档引用）
-./venv/bin/python scripts/analyze_pe_distribution.py --markdown output/pe_distribution.md
+./venv/bin/python app/scripts/analyze_pe_distribution.py --markdown output/pe_distribution.md
 
 # 指定统计交易日并同时输出两种形态
-./venv/bin/python scripts/analyze_pe_distribution.py \
+./venv/bin/python app/scripts/analyze_pe_distribution.py \
     --trade-date 2026-09-30 --output output/pe_distribution.txt --markdown output/pe_distribution.md
 ```
 
@@ -305,11 +306,11 @@ StockLab/
 
 | 场景 | 入口 | 核心路径 |
 |------|------|----------|
-| **全量建库** | `python scripts/sync_market_data.py` | Provider → Repository → DuckDB |
-| **增量同步日K** | `python scripts/sync_market_data.py prices --incremental` | Facade(local_first) → 本地库最大日期 → 补齐 |
+| **全量建库** | `python app/scripts/sync_market_data.py` | Provider → Repository → DuckDB |
+| **增量同步日K** | `python app/scripts/sync_market_data.py prices --incremental` | Facade(local_first) → 本地库最大日期 → 补齐 |
 | **历史估值分位(单股)** | Facade → ValuationHistoryRepo → Analyzer → Reporter | 本地序列 → CDF分位 → 控制台/MD |
 | **全市场PE分布快照** | Facade → DailyValuationRepo → DistributionAnalyzer → MarkdownReporter | 单日横截面 → 中位数/分桶/极值 → 归档MD |
-| **板块10年走势网页** | `python scripts/generate_sector_trend.py` | TencentClient(并发月线) → PageGenerator → dashboard.html |
+| **板块10年走势网页** | `python app/scripts/generate_sector_trend.py` | Facade → TencentClient(并发月线) → PageGenerator → dashboard.html |
 
 ---
 

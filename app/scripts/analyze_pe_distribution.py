@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - A 股全市场市盈率分布统计 CLI (scripts/analyze_pe_distribution.py)
+StockLab - A 股全市场市盈率分布统计 CLI (app/scripts/analyze_pe_distribution.py)
 ==============================================================================
 
 【功能用途】

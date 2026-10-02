@@ -434,7 +434,7 @@ print(ValuationDistributionReporter().format_text_report(profile))</code></pre>
       </div>
 
       <h4>Markdown 归档报告特性</h4>
-      <p><code>scripts/analyze_pe_distribution.py --markdown &lt;路径&gt;</code> 生成，面向长期留存：</p>
+      <p><code>app/scripts/analyze_pe_distribution.py --markdown &lt;路径&gt;</code> 生成，面向长期留存：</p>
       <ul>
         <li>顶部自动生成一句话中文结论，读第一行即可掌握全貌</li>
         <li>样本代表性不足时在引用块里加 ⚠️ 警示</li>
@@ -444,7 +444,7 @@ print(ValuationDistributionReporter().format_text_report(profile))</code></pre>
       </ul>
 
       <h4>职责边界：库层只描述事实，不描述补救</h4>
-      <p>样本代表性判定（<code>PE_MIN_REASONABLE_SAMPLE_COUNT</code> + <code>Profile.is_representative()</code>）<strong>下沉在库层</strong>，报告表头也会自动标注「分布结论不成立」。这样任何消费方都无法绕过该校验。但「怎么补救」属于<strong>入口脚本的编排知识</strong>，留在 <code>scripts/</code> 里。</p>
+      <p>样本代表性判定（<code>PE_MIN_REASONABLE_SAMPLE_COUNT</code> + <code>Profile.is_representative()</code>）<strong>下沉在库层</strong>，报告表头也会自动标注「分布结论不成立」。这样任何消费方都无法绕过该校验。但「怎么补救」属于<strong>入口脚本的编排知识</strong>，留在 <code>app/scripts/</code> 里。</p>
 
       <h4>统计口径的三个业务约束</h4>
       <ol>

@@ -1,5 +1,5 @@
 """
-StockLab 仪表板与 Web 呈现层 (stocklab.dashboard)
+StockLab 仪表板与 Web 呈现层 (app.dashboard)
 """
 
 from .page_generator import SectorWebPageGenerator

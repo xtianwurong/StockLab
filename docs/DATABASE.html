@@ -1471,11 +1471,11 @@
       <h2>六、同步与访问路径</h2>
 
       <h3>6.1 同步命令</h3>
-      <pre><code>./venv/bin/python scripts/sync_market_data.py securities          # 阶段一：证券档案
-./venv/bin/python scripts/sync_market_data.py prices --incremental # 阶段二：日 K
-./venv/bin/python scripts/sync_market_data.py valuations          # 阶段三：估值快照
-./venv/bin/python scripts/sync_market_data.py indexes             # 阶段五：指数成分
-./venv/bin/python scripts/sync_market_data.py valuation-history \
+      <pre><code>./venv/bin/python app/scripts/sync_market_data.py securities          # 阶段一：证券档案
+./venv/bin/python app/scripts/sync_market_data.py prices --incremental # 阶段二：日 K
+./venv/bin/python app/scripts/sync_market_data.py valuations          # 阶段三：估值快照
+./venv/bin/python app/scripts/sync_market_data.py indexes             # 阶段五：指数成分
+./venv/bin/python app/scripts/sync_market_data.py valuation-history \
     --period 全部 --workers 8                                     # 阶段四：历史估值（耗时最长）</code></pre>
 
       <div class="callout">

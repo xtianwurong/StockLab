@@ -310,7 +310,7 @@ print(ValuationDistributionReporter().format_text_report(profile))</code></pre>
       </div>
 
       <h3>2.5 Markdown 归档报告特性</h3>
-      <p><code>scripts/analyze_pe_distribution.py --markdown &lt;路径&gt;</code> 生成，面向长期留存：</p>
+      <p><code>app/scripts/analyze_pe_distribution.py --markdown &lt;路径&gt;</code> 生成，面向长期留存：</p>
       <ul>
         <li>顶部自动生成一句话中文结论，读第一行即可掌握全貌</li>
         <li>样本代表性不足时在引用块里加 ⚠️ 警示</li>
@@ -399,13 +399,13 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 
       <h3>4.3 输出示例</h3>
       <pre><code># 控制台输出
-./venv/bin/python scripts/analyze_pe_distribution.py
+./venv/bin/python app/scripts/analyze_pe_distribution.py
 
 # Markdown 归档
-./venv/bin/python scripts/analyze_pe_distribution.py --markdown output/pe_distribution.md
+./venv/bin/python app/scripts/analyze_pe_distribution.py --markdown output/pe_distribution.md
 
 # 同时输出两种形态
-./venv/bin/python scripts/analyze_pe_distribution.py \
+./venv/bin/python app/scripts/analyze_pe_distribution.py \
     --trade-date 2026-09-30 --output output/pe_distribution.txt --markdown output/pe_distribution.md</code></pre>
     </div>
 

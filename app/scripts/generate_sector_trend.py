@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - A 股核心板块纯正 ETF 与主板 10 年月线走势网页生成器 (scripts/generate_sector_trend.py)
+StockLab - A 股核心板块纯正 ETF 与主板 10 年月线走势网页生成器 (app/scripts/generate_sector_trend.py)
 ==============================================================================
 
 【说明】
-  本脚本为命令行顶层快捷入口，底层核心逻辑已分层封装在 stocklab.dashboard 模块中。
+  本脚本为命令行顶层快捷入口，底层核心逻辑已分层封装在 app.dashboard 模块中。
 """
 
 import argparse
@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stocklab.common.config import load_ini_config
-from stocklab.dashboard import SectorTrendVisualizer
+from app.dashboard import SectorTrendVisualizer
 
 
 def main():

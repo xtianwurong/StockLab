@@ -14,7 +14,6 @@ from stocklab.datasource import (
     StockRealtimeQuote,
     TencentMarketClient,
 )
-from stocklab.dashboard import SectorTrendVisualizer, SectorWebPageGenerator
 
 __all__ = [
     "safe_float",
@@ -27,6 +26,4 @@ __all__ = [
     "MarketDataService",
     "StockRealtimeQuote",
     "TencentMarketClient",
-    "SectorTrendVisualizer",
-    "SectorWebPageGenerator",
 ]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 板块走势对比与 Web 仪表板编排主类 (stocklab.dashboard.sector_trend)
+StockLab - 板块走势对比与 Web 仪表板编排主类 (app.dashboard.sector_trend)
 ==============================================================================
 
 【模块职责】
@@ -12,9 +12,9 @@ import logging
 
 from stocklab.common.config import load_ini_config
 from stocklab.facade.market_data import MarketDataFacade
-from stocklab.dashboard.page_generator import SectorWebPageGenerator
+from app.dashboard.page_generator import SectorWebPageGenerator
 
-_logger = logging.getLogger("StockLab.Visualizer.SectorTrend")
+_logger = logging.getLogger("StockLab.Dashboard.SectorTrend")
 
 __all__ = [
     "SectorTrendVisualizer",

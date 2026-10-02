@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
  ==============================================================================
-StockLab - A 股市场数据同步 CLI (scripts/sync_market_data.py)
+StockLab - A 股市场数据同步 CLI (app/scripts/sync_market_data.py)
  ==============================================================================
 
 【功能用途】
@@ -10,27 +10,27 @@ StockLab - A 股市场数据同步 CLI (scripts/sync_market_data.py)
 
 【运行方式】
    # 一键全跑（阶段一 -> 阶段二 -> 阶段三）
-   python scripts/sync_market_data.py --start-date 2025-01-01 --end-date 2026-09-30
-   python scripts/sync_market_data.py --incremental
+   python app/scripts/sync_market_data.py --start-date 2025-01-01 --end-date 2026-09-30
+   python app/scripts/sync_market_data.py --incremental
 
    # 阶段一：仅同步股票基础信息
-   python scripts/sync_market_data.py securities
+   python app/scripts/sync_market_data.py securities
 
    # 阶段二：仅同步日 K 行情（指定日期范围 / 增量）
-   python scripts/sync_market_data.py prices --start-date 2025-01-01 --end-date 2026-09-30
-   python scripts/sync_market_data.py prices --incremental
+   python app/scripts/sync_market_data.py prices --start-date 2025-01-01 --end-date 2026-09-30
+   python app/scripts/sync_market_data.py prices --incremental
 
    # 阶段三：仅同步估值快照
-   python scripts/sync_market_data.py valuations
+   python app/scripts/sync_market_data.py valuations
 
    # 阶段四：仅同步历史估值序列（逐只抓取，耗时最长；不参与一键全跑）
-   python scripts/sync_market_data.py valuation-history --period 近五年
+   python app/scripts/sync_market_data.py valuation-history --period 近五年
 
    # 阶段五：仅同步主流宽基指数成分（同业分组维度，数秒完成）
-   python scripts/sync_market_data.py indexes
+   python app/scripts/sync_market_data.py indexes
 
    # 阶段六：仅同步行业估值横截面（板块洼地判断依据）
-   python scripts/sync_market_data.py industries --stat-date 2026-09-30
+   python app/scripts/sync_market_data.py industries --stat-date 2026-09-30
 """
 
 import argparse

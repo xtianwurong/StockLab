@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 交互式网页生成器模块 (stocklab.dashboard.page_generator)
+StockLab - 交互式网页生成器模块 (app.dashboard.page_generator)
 ==============================================================================
 
 【模块职责】
@@ -13,7 +13,7 @@ import logging
 import os
 from datetime import datetime
 
-_logger = logging.getLogger("StockLab.Visualizer.PageGenerator")
+_logger = logging.getLogger("StockLab.Dashboard.PageGenerator")
 
 __all__ = [
     "SectorWebPageGenerator",
@@ -25,7 +25,7 @@ def find_template_path(template_name="dashboard.html"):
     """
     智能查找模板路径：
     1. 用户指定的绝对路径或直接相对路径
-    2. 项目 templates/ 目录
+    2. 模块 templates/ 目录
     3. 项目根目录
     """
     if os.path.exists(template_name):
@@ -33,8 +33,8 @@ def find_template_path(template_name="dashboard.html"):
 
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-    # 候选 1: templates/ 目录下
-    c1 = os.path.join(base_dir, "templates", template_name)
+    # 候选 1: 模块 templates/ 目录下
+    c1 = os.path.join(base_dir, "app", "dashboard", "templates", template_name)
     if os.path.exists(c1):
         return c1
 
@@ -43,8 +43,8 @@ def find_template_path(template_name="dashboard.html"):
     if os.path.exists(c2):
         return c2
 
-    # 候选 3: templates/dashboard.html 兜底
-    c3 = os.path.join(base_dir, "templates", "dashboard.html")
+    # 候选 3: 模块 templates/dashboard.html 兜底
+    c3 = os.path.join(base_dir, "app", "dashboard", "templates", "dashboard.html")
     if os.path.exists(c3):
         return c3
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 个股历史估值分位 CLI (scripts/analyze_valuation_percentile.py)
+StockLab - 个股历史估值分位 CLI (app/scripts/analyze_valuation_percentile.py)
 ==============================================================================
 
 【功能用途】
