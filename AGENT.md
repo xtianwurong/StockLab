@@ -133,8 +133,10 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换、HTTP 全局配置）。
   - `http_client.py`：浏览器 UA 补丁，**由入口脚本显式调用**，导入本包不产生任何全局副作用。
 - `stocklab/datasource`：**只负责对外取数**，不感知本地存储。
+  - `contract.py`：统一数据契约（列名常量、实时行情模型），门面与通道的共用符号单点定义。
+  - `stock_data.py`：对外门面，`MarketDataService` 三级降级调度（价格/估值/简称/实时行情）。
+  - `_sources/`：三个异构通道的私有实现（抽象基类 + AkShare + BaoStock + 腾讯），外部勿直接依赖。
   - `tencent_client.py`：腾讯直连行情网关，统一接入股票/ETF/指数。
-  - `stock_data.py`：单股多源数据服务（三级容错策略 + 估值对齐）。
   - `market_provider.py`：全市场批量数据获取。
 - `stocklab/persistence`：**只负责本地落库**，既不依赖 `common`，也不依赖任何外部数据源（AkShare / BaoStock / 腾讯）。
   - `storage/`：DuckDB 连接管理与 Schema 定义。
@@ -170,9 +172,16 @@ StockLab/
 │   │   └── type_conversion.py          #     safe_float / safe_int 类型安全转换
 │   ├── datasource/                     #   数据源接入层（只负责「从外部取数」）
 │   │   ├── __init__.py                 #     导出个股服务与腾讯网关的公共 API
+│   │   ├── contract.py                 #     统一数据契约：列名常量 + StockRealtimeQuote（无依赖，供门面与通道共用）
 │   │   ├── tencent_client.py           #     【腾讯直连行情网关】TencentMarketClient（股票/ETF/指数统一接入）
-│   │   ├── stock_data.py               #     【个股多源数据服务】MarketDataService（三级容错 + 估值独立降级）
-│   │   └── market_provider.py          #     【全市场数据 Provider】MarketDataProvider（全市场批量取数）
+│   │   ├── stock_data.py               #     【对外门面】MarketDataService 三级降级编排 + 数据契约 re-export
+│   │   ├── market_provider.py          #     【全市场数据 Provider】MarketDataProvider（全市场批量取数）
+│   │   └── _sources/                   #     内部通道实现包（下划线前缀 = 私有，外部勿依赖）
+│   │       ├── __init__.py             #       导出抽象基类与三个通道实现
+│   │       ├── base.py                 #       StockDataSource 抽象基类（纯虚接口 + 标准化/降采样工具）
+│   │       ├── akshare_source.py       #       东方财富主通道（akshare，含重试与列名防御）
+│   │       ├── baostock_source.py      #       证券宝备用通道（专有 Socket + login/logout 会话管理）
+│   │       └── tencent_source.py       #       腾讯直连通道（实时行情/简称/备用日线降采样）
 │   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
 │   │   ├── __init__.py                 #     本层统一出口（Database + 五个 Repository）
 │   │   ├── storage/                    #     数据存储基础设施
