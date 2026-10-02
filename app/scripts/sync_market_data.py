@@ -46,7 +46,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from stocklab.common.http_client import install_browser_user_agent
-from stocklab.datasource.market_provider import MarketDataProvider
+from stocklab.datasource.market_batch import MarketBatchProvider
 from stocklab.persistence import (
     DailyPriceRepository,
     DailyValuationRepository,
@@ -161,7 +161,7 @@ def sync_securities(database):
     _logger.info("阶段一：同步股票基础信息")
     _logger.info("=" * 60)
 
-    provider = MarketDataProvider()
+    provider = MarketBatchProvider()
     repository = SecurityRepository(database)
 
     df = provider.fetch_securities()
@@ -222,7 +222,7 @@ def sync_daily_prices(database, start_date, end_date):
     _logger.info("阶段二：同步日 K 行情 (%s ~ %s)", start_date, end_date)
     _logger.info("=" * 60)
 
-    provider = MarketDataProvider()
+    provider = MarketBatchProvider()
     repository = DailyPriceRepository(database)
 
     # 获取全部证券代码
@@ -285,7 +285,7 @@ def sync_industry_valuation(database, stat_date, classification="国证行业分
     _logger.info("阶段六：同步行业估值（%s @ %s）", classification, stat_date)
     _logger.info("=" * 60)
 
-    provider = MarketDataProvider()
+    provider = MarketBatchProvider()
     repository = IndustryValuationRepository(database)
 
     df = provider.fetch_industry_valuation(stat_date, classification)
@@ -317,7 +317,7 @@ def sync_index_membership(database):
     _logger.info("阶段五：同步主流宽基指数成分")
     _logger.info("=" * 60)
 
-    provider = MarketDataProvider()
+    provider = MarketBatchProvider()
     repository = IndexMembershipRepository(database)
 
     total_count = 0
@@ -389,7 +389,7 @@ def sync_valuation_history(database, period, ts_code_list=None, max_workers=8):
     def fetch_one(ts_code):
         """工作线程任务：只做取数，不触碰数据库"""
         try:
-            return ts_code, MarketDataProvider().fetch_valuation_history(ts_code, period)
+            return ts_code, MarketBatchProvider().fetch_valuation_history(ts_code, period)
         except Exception as error:
             _logger.debug("并发取数异常 [%s]: %s", ts_code, error)
             return ts_code, pd.DataFrame()
@@ -426,7 +426,7 @@ def sync_valuations(database):
     _logger.info("阶段三：同步最新全市场估值快照")
     _logger.info("=" * 60)
 
-    provider = MarketDataProvider()
+    provider = MarketBatchProvider()
     repository = DailyValuationRepository(database)
 
     df = provider.fetch_realtime_valuations()

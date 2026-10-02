@@ -6,8 +6,8 @@ StockLab - 数据源统一数据契约 (stocklab.datasource.contract)
 
 【模块职责】
   定义所有数据源必须遵守的统一数据契约：列名常量与共享数据模型。
-  独立成模块的原因：数据源实现（_sources/）与对外服务（stock_data.py）
-  都依赖这些符号，若放在 stock_data.py 内会造成循环导入。
+  独立成模块的原因：数据源实现（_sources/）与对外服务（quote_service.py）
+  都依赖这些符号，若放在 quote_service.py 内会造成循环导入。
 
 【数据契约】
   所有数据源在完成抓取后，必须通过标准化转换输出只包含以下列名的 DataFrame：

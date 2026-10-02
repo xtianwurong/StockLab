@@ -30,7 +30,7 @@ from stocklab import (
     PE_TTM_COLUMN,
     TRADE_DATE_COLUMN,
     StockDataFetchParams,
-    MarketDataService,
+    StockQuoteService,
     TencentMarketClient,
     safe_float,
     safe_int,
@@ -194,7 +194,7 @@ def main():
     # 1. 验证通用行情客户端 (股票/ETF/指数不区分)
     run_generic_market_client_test()
 
-    service = MarketDataService()
+    service = StockQuoteService()
 
     # 2. 验证腾讯实时行情快照
     run_realtime_quote_test(service, stock_code)

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 股票市场数据服务模块 (stocklab.datasource.stock_data)
+StockLab - 单股行情服务 (stocklab.datasource.quote_service)
 ==============================================================================
 
 【模块职责】
-  本模块专职负责 A 股股票行情的统一获取与数据清洗，完全独立于绘图逻辑：
+  本模块是单股维度的行情服务门面（对应 MarketBatchProvider 的全市场批量维度），
+  负责 A 股单只股票行情的统一获取与数据清洗，完全独立于绘图逻辑：
     1. 统一数据契约：对外输出严格标准化格式的 pandas.DataFrame 与实时行情数据对象，
        屏蔽各数据源底层的通信协议与字段差异。
     2. 多数据源三通道容错：集成 AkShare（东方财富）、BaoStock（证券宝）以及 腾讯财经（直连 HTTP）
@@ -13,13 +14,13 @@ StockLab - 股票市场数据服务模块 (stocklab.datasource.stock_data)
     3. 异构数据对齐：针对估值指标（PE-TTM）接口只有日频的特性，提供统一的月末降采样与年月对齐算法。
     4. 独立复用性：不依赖 matplotlib，可作为独立的行情抓取库被外部其它分析脚本直接 import。
 
-【模块结构（本文件仅为对外门面）】
+【模块结构（本文件为单股维度的对外服务门面）】
   - contract.py            : 统一数据契约（列名常量 + StockRealtimeQuote），此处 re-export
   - _sources/base.py       : 数据源抽象基类 StockDataSource（类似 C++ 抽象类）
   - _sources/akshare_source.py  : 东方财富主通道实现（基于 akshare）
   - _sources/baostock_source.py : 证券宝备用通道实现（基于 baostock，含 Socket 会话生命周期管理）
   - _sources/tencent_source.py  : 腾讯财经直连通道实现（基于 qt.gtimg.cn，极速实时行情与备用日 K）
-  本文件保留取数参数类与三级降级调度编排（MarketDataService），并 re-export 数据契约符号，
+  本文件保留取数参数类与三级降级调度编排（StockQuoteService），并 re-export 数据契约符号，
   保证对外公共接口与拆分前完全一致。
 
   注：浏览器 UA 运行时补丁（规避东财 WAF 反爬阻断）位于
@@ -57,7 +58,7 @@ _logger = logging.getLogger(__name__)
 # 最小对外暴露清单 (__all__)
 # ============================================================================
 # Python 约定：只有列入 __all__ 的符号才被视作公共 API。
-# 当外部使用 `from stocklab.datasource.stock_data import *` 时，仅有以下 6 个符号会被导入，
+# 当外部使用 `from stocklab.datasource.quote_service import *` 时，仅有以下 6 个符号会被导入，
 # 模块内的导入符号均保持接口的简洁与稳定性。
 __all__ = [
     "TRADE_DATE_COLUMN",
@@ -65,7 +66,7 @@ __all__ = [
     "PE_TTM_COLUMN",
     "StockRealtimeQuote",
     "StockDataFetchParams",
-    "MarketDataService",
+    "StockQuoteService",
 ]
 
 
@@ -113,7 +114,7 @@ class StockDataFetchParams:
 # ============================================================================
 # 取数编排调度器 (Fetch Orchestrator & Strategy Manager)
 # ============================================================================
-class MarketDataService:
+class StockQuoteService:
     """
     股票市场数据服务类 (Market Data Service)
 

@@ -9,7 +9,7 @@ from stocklab.datasource import (
     CLOSE_PRICE_COLUMN,
     PE_TTM_COLUMN,
     TRADE_DATE_COLUMN,
-    MarketDataService,
+    StockQuoteService,
     StockDataFetchParams,
     StockRealtimeQuote,
     TencentMarketClient,
@@ -23,7 +23,7 @@ __all__ = [
     "PE_TTM_COLUMN",
     "TRADE_DATE_COLUMN",
     "StockDataFetchParams",
-    "MarketDataService",
+    "StockQuoteService",
     "StockRealtimeQuote",
     "TencentMarketClient",
 ]

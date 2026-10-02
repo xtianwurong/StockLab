@@ -242,7 +242,7 @@
       </ul>
 
       <h3>1.2 单股深度数据与估值（三级容错）</h3>
-      <p><code>stocklab/datasource/stock_data.py</code> — <code>MarketDataService</code></p>
+      <p><code>stocklab/datasource/quote_service.py</code> — <code>StockQuoteService</code></p>
       <p>价格与 PE 各自独立降级：</p>
 
       <table>
@@ -273,11 +273,11 @@
       </table>
 
       <div class="callout">
-        <code>stock_data.py</code> 内部组合复用 <code>TencentMarketClient</code> 作为其腾讯直连与基础行情的底层驱动，实现职责分层并消除跨模块重复代码。
+        <code>quote_service.py</code> 内部组合复用 <code>TencentMarketClient</code> 作为其腾讯直连与基础行情的底层驱动，实现职责分层并消除跨模块重复代码。
       </div>
 
-      <h3>1.3 全市场数据 Provider</h3>
-      <p><code>stocklab/datasource/market_provider.py</code> — <code>MarketDataProvider</code></p>
+      <h3>1.3 全市场批量服务 MarketBatchProvider</h3>
+      <p><code>stocklab/datasource/market_batch.py</code> — <code>MarketBatchProvider</code></p>
       <p>负责全市场 A 股数据的批量获取，与单股数据服务明确边界：</p>
       <ul>
         <li><code>fetch_securities</code> — 股票基础信息</li>
@@ -574,13 +574,13 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
         <tbody>
           <tr>
             <td><code>StockDataFetchParams</code></td>
-            <td><code>datasource/stock_data.py</code></td>
+            <td><code>datasource/quote_service.py</code></td>
             <td>参数对象 (Parameter Object)</td>
             <td>收拢 <code>stock_code</code> / <code>adjust_type</code>（<code>qfq</code>/<code>hfq</code>/不复权）/ <code>retry_count</code> / <code>retry_interval_seconds</code>，后续新增控制项不改方法签名</td>
           </tr>
           <tr>
             <td><code>StockRealtimeQuote</code></td>
-            <td><code>datasource/stock_data.py</code></td>
+            <td><code>datasource/quote_service.py</code></td>
             <td>简单实体类 (POD)</td>
             <td>18 个带默认初值的字段：现价、昨收、今开、最高、最低、涨跌额/幅、成交量/额、换手率、PE-TTM、PB、总/流通市值、行情时间；提供 <code>to_dict()</code></td>
           </tr>
@@ -594,7 +594,7 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
       </table>
 
       <div class="callout">
-        <code>MarketDataService</code> 另有一个状态字段 <code>used_source_name</code>，记录本次价格查询实际命中的数据源标识（如 <code>akshare</code> / <code>baostock</code> / <code>tencent</code>），供上层日志展示。
+        <code>StockQuoteService</code> 另有一个状态字段 <code>used_source_name</code>，记录本次价格查询实际命中的数据源标识（如 <code>akshare</code> / <code>baostock</code> / <code>tencent</code>），供上层日志展示。
       </div>
     </div>
 

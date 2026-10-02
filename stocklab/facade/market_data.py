@@ -36,7 +36,7 @@ from stocklab.common.config import (
     DEFAULT_DATA_SOURCE_PRIORITY,
     load_data_source_priority,
 )
-from stocklab.datasource.market_provider import MarketDataProvider
+from stocklab.datasource.market_batch import MarketBatchProvider
 from stocklab.datasource.tencent_client import TencentMarketClient
 from stocklab.persistence import (
     DailyPriceRepository,
@@ -84,7 +84,7 @@ class MarketDataFacade:
         self._db_path = initialize_database(db_path)
         self._database = Database(self._db_path)
 
-        self._provider = MarketDataProvider()
+        self._provider = MarketBatchProvider()
         self._tencent_client = TencentMarketClient()
         self._security_repo = SecurityRepository(self._database)
         self._price_repo = DailyPriceRepository(self._database)

@@ -132,12 +132,12 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 
 - `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换、HTTP 全局配置）。
   - `http_client.py`：浏览器 UA 补丁，**由入口脚本显式调用**，导入本包不产生任何全局副作用。
-- `stocklab/datasource`：**只负责对外取数**，不感知本地存储。
-  - `contract.py`：统一数据契约（列名常量、实时行情模型），门面与通道的共用符号单点定义。
-  - `stock_data.py`：对外门面，`MarketDataService` 三级降级调度（价格/估值/简称/实时行情）。
-  - `_sources/`：三个异构通道的私有实现（抽象基类 + AkShare + BaoStock + 腾讯），外部勿直接依赖。
-  - `tencent_client.py`：腾讯直连行情网关，统一接入股票/ETF/指数。
-  - `market_provider.py`：全市场批量数据获取。
+- `stocklab/datasource`：**只负责对外取数**，不感知本地存储。内部按用途分三块：
+  - **分析/行情取数**（单股维度、三级降级）：`quote_service.py`（`StockQuoteService`：月线价格 / PE-TTM / 简称 / 实时行情；价格通道 AkShare → BaoStock → 腾讯，估值通道 AkShare → BaoStock）→ `_sources/`（三个通道的私有实现，外部勿依赖）。
+  - **入库取数**（多粒度、单源直连）：`market_batch.py`（`MarketBatchProvider`：7 个 `fetch_*` 方法与 7 张库表一一对应，输出与表**严格同名同序**供 UPSERT 按位置写入；粒度含全市场快照 / 单股序列 / 行业横截面 / 指数成分四种，直连各 akshare 接口（自带重试与限流），**不做通道降级**。调用方仅两个：`app/scripts/sync_market_data.py` 与 facade 远端分支（Cache-Aside 回写本地库）。**命名备注**：`market_batch` / `MarketBatchProvider` 是历史遗留名（初版仅「全市场批量」两个方法，后长成 7 方法入库取数），`market`（全市场）现仅覆盖 2/7、`batch`（批量）仅覆盖 4/7；真实共性是「输出=库表同构」，如需更名候选 `table_fetcher.py` / `TableFetcher`，待决策，当前保持现名不变）。
+  - **公共基础**：
+    - `contract.py`：行情数据契约（3 个列名常量 + `StockRealtimeQuote`），`quote_service` 与 `_sources` 共用；单独成文件是为避免「通道 import 服务、服务又 import 通道」的循环导入（类比 C++ 只含 struct + constexpr 的公共头文件）。
+    - `tencent_client.py`：腾讯 HTTP 传输网关（`TencentMarketClient` + `normalize_symbol`），抹平股票/ETF/指数代码差异，提供 K 线 / 简称 / 盘口原始字段与多标的**并发**抓取。独立于 `_sources` 之外的原因：能力超出单股 `StockDataSource` 契约（ETF/指数 + 并发），且被两个上层独立复用——`_sources/tencent_source`（单股降级第三级）与 `facade.fetch_multi_monthly_close`（dashboard 板块走势 10 标的并发月线），故置于通道之下单独一层。
 - `stocklab/persistence`：**只负责本地落库**，既不依赖 `common`，也不依赖任何外部数据源（AkShare / BaoStock / 腾讯）。
   - `storage/`：DuckDB 连接管理与 Schema 定义。
   - `repository/`：SQL 读写封装，仅依赖 pandas 与本层 `storage/`。
@@ -172,11 +172,11 @@ StockLab/
 │   │   └── type_conversion.py          #     safe_float / safe_int 类型安全转换
 │   ├── datasource/                     #   数据源接入层（只负责「从外部取数」）
 │   │   ├── __init__.py                 #     导出个股服务与腾讯网关的公共 API
-│   │   ├── contract.py                 #     统一数据契约：列名常量 + StockRealtimeQuote（无依赖，供门面与通道共用）
-│   │   ├── tencent_client.py           #     【腾讯直连行情网关】TencentMarketClient（股票/ETF/指数统一接入）
-│   │   ├── stock_data.py               #     【对外门面】MarketDataService 三级降级编排 + 数据契约 re-export
-│   │   ├── market_provider.py          #     【全市场数据 Provider】MarketDataProvider（全市场批量取数）
-│   │   └── _sources/                   #     内部通道实现包（下划线前缀 = 私有，外部勿依赖）
+│   │   ├── contract.py                 #     统一数据契约：列名常量 + StockRealtimeQuote（无依赖，单股/全市场共用）
+│   │   ├── tencent_client.py           #     【腾讯传输网关】TencentMarketClient（股票/ETF/指数统一接入）
+│   │   ├── quote_service.py            #     【单股行情服务】StockQuoteService：三级降级编排 + 数据契约 re-export
+│   │   ├── market_batch.py             #     【入库取数】MarketBatchProvider：7 个 fetch_* 与 7 张库表同名同序（粒度混合，非仅全市场）
+│   │   └── _sources/                   #     单股通道实现包（下划线前缀 = 私有，外部勿依赖）
 │   │       ├── __init__.py             #       导出抽象基类与三个通道实现
 │   │       ├── base.py                 #       StockDataSource 抽象基类（纯虚接口 + 标准化/降采样工具）
 │   │       ├── akshare_source.py       #       东方财富主通道（akshare，含重试与列名防御）
@@ -236,9 +236,10 @@ StockLab/
 |------|------|----------|
 | **配置** | `stocklab.common.config` | 解析 `config.ini`，输出强类型配置对象（基准、板块、优先级） |
 | **基础工具** | `stocklab.common.type_conversion` | `safe_float` / `safe_int` —— 统一处理 `None/空串/占位符/-` |
-| **数据源** | `stocklab.datasource.stock_data` | **单股核心服务**：三通道降级、月线价格+PE对齐、实时行情 |
-| | `stocklab.datasource.tencent_client` | **通用行情客户端**：股票/ETF/指数不区分、并发批量、OHLCV全要素 |
-| | `stocklab.datasource.market_provider` | **全市场批量 Provider**：基础信息/日K/估值快照/历史估值/行业估值/指数成分/公司概况 |
+| **数据源** | `stocklab.datasource.quote_service` | **单股行情服务 `StockQuoteService`**：三通道降级、月线价格+PE对齐、实时行情 |
+| | `stocklab.datasource.contract` | **数据契约**：列名常量 + `StockRealtimeQuote`，单股/全市场两服务共用 |
+| | `stocklab.datasource.tencent_client` | **腾讯传输网关 `TencentMarketClient`**：股票/ETF/指数不区分、并发批量、OHLCV全要素 |
+| | `stocklab.datasource.market_batch` | **入库取数 `MarketBatchProvider`**：基础信息/日K/估值快照/历史估值/行业估值/指数成分/公司概况 —— 输出与库表同名同序 |
 | **外观** | `stocklab.facade.market_data` | **统一取数门面**：本地优先/远端优先策略、Cache-Aside 回写 |
 | **持久化** | `stocklab.persistence.storage.schema` | DuckDB DDL 定义：7 张表、3 个 Schema、复合主键 |
 | | `stocklab.persistence.storage.duckdb` | 连接管理：延迟初始化、上下文管理器 |
@@ -400,7 +401,7 @@ pip install -r requirements.txt
     这是刻意为之——亏损期不具备估值比较意义，计入分母会扭曲结论。
 13. **巨潮 `stock_profile_cninfo` 已需授权**：实测返回
     `{"resultcode": 451, "resultmsg": "ApiFilter 未经授权的访问,code:003 token null"}`，
-    HTTP 200 但数据为空。`MarketDataProvider.fetch_company_profile()` 已实现，
+    HTTP 200 但数据为空。`MarketBatchProvider.fetch_company_profile()` 已实现，
     在接口开放的环境可直接用于补齐 `securities.industry` / `list_date`；
     接口不可用时以 `reference.index_memberships` 的指数成分作为同业分组的替代维度。
 

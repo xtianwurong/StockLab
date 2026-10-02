@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 全市场数据 Provider (stocklab.datasource.market_provider)
+StockLab - 入库取数模块 (stocklab.datasource.market_batch)
 ==============================================================================
 
 【模块职责】
-   负责从外部数据源批量获取全市场 A 股数据，输出标准化 pandas DataFrame。
-   与单股数据服务 (stock_data.py) 明确边界：本模块专注于全市场批量获取。
+   从外部数据源取数，输出与本地 DuckDB 表**严格同名同序**的 pandas DataFrame，
+   供 Repository 的 UPSERT 按位置匹配写入（列序即契约，改任一侧必须同步改另一侧）。
+   7 个公开 fetch_* 方法与 7 张库表一一对应，调用方仅两个：
+     - app/scripts/sync_market_data.py（入库同步编排）
+     - stocklab.facade.MarketDataFacade（远端分支，Cache-Aside 回写本地库）
 
-【数据源策略】
-   - 股票基础信息：AkShare (stock_info_a_code_name)
-   - 日 K 行情：AkShare (stock_zh_a_hist) 按日期逐只抓取
-   - 估值数据：AkShare (stock_zh_a_spot_em) 实时快照
+【粒度说明（注意：并非全为「全市场批量」）】
+   - 全市场一次返回：fetch_securities / fetch_realtime_valuations
+   - 单股逐只：      fetch_daily_prices / fetch_valuation_history / fetch_company_profile
+   - 行业横截面：    fetch_industry_valuation
+   - 单指数成分：    fetch_index_membership
+
+【数据源策略】（直连 akshare 各接口，自带重试与限流，不做 _sources 三通道降级）
+   - 东方财富：证券名录、日 K、全市场估值快照
+   - 百度股市通：单股历史估值序列
+   - 巨潮资讯：行业估值横截面、公司概况
+   - 中证官网：指数成分
 
 【设计原则】
-   - 不破坏现有 Provider 接口
-   - 批量获取优先，避免逐股票低效调用
-   - 失败降级：AkShare 失败时记录日志并返回空 DataFrame
+   - 列序即契约：输出列与库表严格同名同序，UPSERT SELECT * 按位置匹配
+   - 失败降级：取数失败记录日志并返回空 DataFrame，由调用方决定是否中止
 """
 
 import logging
@@ -28,23 +37,28 @@ import pandas as pd
 _logger = logging.getLogger(__name__)
 
 __all__ = [
-    "MarketDataProvider",
+    "MarketBatchProvider",
 ]
 
 
-class MarketDataProvider:
+class MarketBatchProvider:
     """
-    全市场数据提供类
+    入库取数类：外部数据源 → 与库表同名同序的 DataFrame
 
-    【职责】
-      1. 获取全市场股票基础信息
-      2. 获取指定日期范围的日 K 行情
-      3. 获取最新全市场估值快照
+    【职责】按粒度分四组，共 7 个方法：
+      1. 全市场一次返回：fetch_securities（证券名录）、fetch_realtime_valuations（估值快照）
+      2. 单股逐只：      fetch_daily_prices（日K）、fetch_valuation_history（历史估值）、
+                         fetch_company_profile（公司概况补列）
+      3. 行业横截面：    fetch_industry_valuation（某时点全部行业估值）
+      4. 单指数成分：    fetch_index_membership（某指数全部成分）
+
+    【命名备注】类名中的 "MarketBatch" 为历史遗留（初版仅全市场批量两个方法），
+      现实际语义是「表同构入库取数」，如需更名建议 TableFetcher，由调用方统一决策。
     """
 
     def __init__(self, retry_count=2, retry_interval_seconds=2, interval_seconds=0.2):
         """
-        初始化全市场数据 Provider
+        初始化全市场批量 Provider
 
         Args:
             retry_count (int, optional): 失败重试次数
