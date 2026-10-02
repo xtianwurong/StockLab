@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockLab 分析计算层设计</title>
+  <style>
+    :root {
+      --bg-primary: #0b1120;
+      --bg-card: #151f32;
+      --bg-hover: #1e293b;
+      --bg-code: #0f172a;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --border-color: #334155;
+      --accent-blue: #38bdf8;
+      --accent-red: #f43f5e;
+      --accent-green: #10b981;
+      --accent-yellow: #f59e0b;
+      --accent-purple: #a78bfa;
+      --accent-cyan: #06b6d4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, Arial, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    .header {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    .header .subtitle { color: var(--text-muted); font-size: 14px; }
+    .header .meta { color: var(--text-dim); font-size: 12px; margin-top: 12px; }
+
+    .nav {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .nav a {
+      color: var(--text-muted);
+      text-decoration: none;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .nav a:hover { color: var(--text-main); background: var(--bg-hover); }
+
+    .section {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+    }
+    .section h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--accent-blue);
+    }
+    .section h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-top: 20px;
+      margin-bottom: 12px;
+      color: var(--accent-purple);
+    }
+    .section h4 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 16px;
+      margin-bottom: 8px;
+      color: var(--accent-cyan);
+    }
+    .section p { margin-bottom: 12px; }
+    .section ul, .section ol { margin-left: 20px; margin-bottom: 12px; }
+    .section li { margin-bottom: 6px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 13px;
+    }
+    th {
+      background: var(--bg-hover);
+      font-weight: 600;
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 2px solid var(--border-color);
+    }
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-color);
+      vertical-align: top;
+    }
+    tr:hover td { background: var(--bg-hover); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-ok { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+    .badge-warn { background: rgba(245, 158, 11, 0.15); color: var(--accent-yellow); }
+    .badge-error { background: rgba(244, 63, 94, 0.15); color: var(--accent-red); }
+    .badge-info { background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); }
+
+    code {
+      background: var(--bg-code);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 12px;
+      color: var(--accent-cyan);
+    }
+    pre {
+      background: var(--bg-code);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      color: var(--text-main);
+      line-height: 1.5;
+    }
+
+    .callout {
+      border-left: 3px solid var(--accent-blue);
+      background: rgba(56, 189, 248, 0.05);
+      padding: 12px 16px;
+      margin: 12px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .callout-warn { border-left-color: var(--accent-yellow); background: rgba(245, 158, 11, 0.05); }
+    .callout-error { border-left-color: var(--accent-red); background: rgba(244, 63, 94, 0.05); }
+    .callout-success { border-left-color: var(--accent-green); background: rgba(16, 185, 129, 0.05); }
+
+    .formula-box {
+      background: var(--bg-code);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      margin: 12px 0;
+      text-align: center;
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 14px;
+      color: var(--accent-cyan);
+    }
+
+    .footer {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+      padding: 20px 0;
+      border-top: 1px solid var(--border-color);
+      margin-top: 20px;
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 12px; }
+      .section { padding: 16px; }
+      .header { padding: 16px; }
+      table { font-size: 12px; }
+      th, td { padding: 6px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="header">
+      <h1>StockLab 分析计算层设计</h1>
+      <div class="subtitle">市盈率分布统计、历史估值分位、报告渲染器的技术规格</div>
+      <div class="meta">
+        返回 <a href="../AGENT.md" style="color: var(--accent-blue);">AGENT.md</a> ｜
+        返回 <a href="ARCHITECTURE.html" style="color: var(--accent-blue);">ARCHITECTURE.html</a> ｜
+        返回 <a href="DATABASE.html" style="color: var(--accent-blue);">DATABASE.html</a>
+      </div>
+    </div>
+
+    <div class="nav">
+      <a href="#overview">定位与边界</a>
+      <a href="#distribution">市盈率分布统计</a>
+      <a href="#percentile">历史估值分位</a>
+      <a href="#reporter">报告渲染器</a>
+    </div>
+
+    <!-- 定位与边界 -->
+    <div class="section" id="overview">
+      <h2>一、定位与边界</h2>
+      <p><code>stocklab/analytics</code> 是纯统计变换层 —— 只接收 DataFrame 做聚合，不发网络请求、不连数据库、不 import <code>facade</code>/<code>datasource</code>/<code>persistence</code>，因此可完全脱离 IO 独立单测。</p>
+
+      <h3>模块组成</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>职责</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>valuation_distribution.py</code></td>
+            <td><code>ValuationDistributionAnalyzer</code> 分析器 + 4 个结果实体；纯计算</td>
+          </tr>
+          <tr>
+            <td><code>valuation_percentile.py</code></td>
+            <td><code>ValuationPercentileAnalyzer</code> 分析器 + <code>ValuationPercentileResult</code> 实体；纯计算</td>
+          </tr>
+          <tr>
+            <td><code>profile_reporter.py</code></td>
+            <td><code>ValuationDistributionReporter</code> 纯文本渲染；控制台阅读</td>
+          </tr>
+          <tr>
+            <td><code>markdown_reporter.py</code></td>
+            <td><code>ValuationDistributionMarkdownReporter</code> Markdown 渲染；长期归档</td>
+          </tr>
+          <tr>
+            <td><code>percentile_reporter.py</code></td>
+            <td><code>ValuationPercentileReporter</code> 渲染；控制台文本 + Markdown 双形态</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>设计原则</h3>
+      <ul>
+        <li><strong>计算与呈现分离</strong>：Analyzer 只产出实体，Reporter 只负责渲染，可扩展 HTML/JSON/DB 等多形态</li>
+        <li><strong>渲染层扩展规则</strong>：两种输出形态结构差异很大（纯文本靠视觉宽度对齐，Markdown 靠表格语法），<strong>新增输出形态应另写渲染器</strong>，不要给既有渲染器加格式开关</li>
+        <li><strong>职责边界</strong>：库层只描述事实，不描述补救。样本代表性判定下沉在库层，但「怎么补救」属于入口脚本的编排知识</li>
+      </ul>
+    </div>
+
+    <!-- 市盈率分布统计 -->
+    <div class="section" id="distribution">
+      <h2>二、市盈率分布统计</h2>
+
+      <h3>2.1 使用示例</h3>
+      <pre><code>from stocklab.analytics import ValuationDistributionAnalyzer, ValuationDistributionReporter
+
+analyzer = ValuationDistributionAnalyzer(pe_column="pe_ttm")
+profile = analyzer.analyze(valuation_df, securities_df)   # 两张表按 ts_code 关联
+print(ValuationDistributionReporter().format_text_report(profile))</code></pre>
+
+      <h3>2.2 结果实体</h3>
+      <p>均为简单实体 / POD，仅承载数据与最简派生计算，渲染一律交给 Reporter：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>实体</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ValuationDistributionProfile</code></td><td>整体结果</td></tr>
+          <tr><td><code>DistributionBucket</code></td><td>区间桶</td></tr>
+          <tr><td><code>PeRankEntry</code></td><td>极值标的</td></tr>
+          <tr><td><code>MarketValuationDistribution</code></td><td>分交易所摘要</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2.3 统计口径的三个业务约束</h3>
+
+      <h4>约束一：PE 分布严重右偏</h4>
+      <p>少数高成长股 PE 可达数千倍，算术均值被极端值严重拉偏。因此输出以<strong>中位数 + 分位数</strong>为主，均值单独标注「仅供参考」，并额外给出<strong>截尾均值</strong>（剔除 PE > 1000 倍后的均值）作为第三个参照。</p>
+
+      <h4>约束二：亏损股没有有意义的 PE</h4>
+      <p>数据源以 <code>-</code> / NaN 表示，统计时归入「无有效 PE」；<code>PE <= 0</code> 的负值单独计数。两者<strong>一律不参与分位数统计</strong>，也不进入分桶。</p>
+
+      <h4>约束三：两个口径不可混用</h4>
+      <p><code>pe</code>（市盈率-动态，东财快照口径）与 <code>pe_ttm</code>（跨期可比）含义不同，由 <code>pe_column</code> 显式指定，绝不做隐式推断。</p>
+
+      <h3>2.4 固定业务语义分桶（非等宽）</h3>
+      <p>分桶数 = 边界数 + 1，边界 <code>PE_DISTRIBUTION_BUCKET_EDGES</code> 共 8 个，对应 9 档标签 <code>PE_DISTRIBUTION_BUCKET_LABELS</code>，<strong>最后一档 <code>1000+</code> 右端开放</strong>。区间语义为<strong>左开右闭</strong>（<code>20-30</code> 表示 <code>(20, 30]</code>）。</p>
+
+      <div class="callout callout-warn">
+        <strong>为何不用等宽分桶：</strong>PE 的业务关注区间高度非线性（0~50 密集、50 以上迅速稀疏），固定边界让每档都有明确的投资含义；等宽分桶会把 0~30 全挤进同一根柱子。
+      </div>
+
+      <h3>2.5 Markdown 归档报告特性</h3>
+      <p><code>scripts/analyze_pe_distribution.py --markdown &lt;路径&gt;</code> 生成，面向长期留存：</p>
+      <ul>
+        <li>顶部自动生成一句话中文结论，读第一行即可掌握全貌</li>
+        <li>样本代表性不足时在引用块里加 ⚠️ 警示</li>
+        <li>表格化统计，便于 grep「多少只 PE 在 20-30 区间」</li>
+        <li>尾部固定「口径说明」，避免报告脱离上下文被误引用</li>
+        <li>证券简称中的竖线必须转义（<code>某某|转债</code> → <code>某某\|转债</code>），否则破坏表格列结构</li>
+      </ul>
+    </div>
+
+    <!-- 历史估值分位 -->
+    <div class="section" id="percentile">
+      <h2>三、历史估值分位</h2>
+
+      <h3>3.1 使用示例</h3>
+      <pre><code>from stocklab.analytics import ValuationPercentileAnalyzer, ValuationPercentileReporter
+
+results = ValuationPercentileAnalyzer().analyze(
+    history_df, current_values={"pe_ttm": 19.32}, start_date="2021-01-01"
+)
+print(ValuationPercentileReporter().format_console_report("600519.SH", results))</code></pre>
+
+      <h3>3.2 分位口径（唯一实现，不可与其他工具混用）</h3>
+      <div class="formula-box">
+        分位 = (区间内低于当前值的样本数 / 有效样本总数) × 100%
+      </div>
+
+      <div class="callout callout-error">
+        这是<strong>经验分布函数 CDF</strong> 口径，与 <code>pandas.Series.quantile()</code>（线性插值分位点）<strong>不是同一件事</strong>：<code>quantile(0.25)</code> 返回「第 25 百分位的数值」，本模块返回「第 25 百分位的时间占比」。两者用途不同，<strong>绝不可互相替代或混报</strong>。
+      </div>
+
+      <h3>3.3 关键规则</h3>
+      <ul>
+        <li><strong>亏损期必须排除</strong>：<code>PE <= 0</code> 的样本不参与分母计算，否则亏损股的分位被严重扭曲。负值保留在原始序列中（不篡改数据），仅在统计口径上排除。</li>
+        <li><strong>当前值优先级</strong>：显式传入 > 区间内最新交易日值。</li>
+        <li><strong>档位划分</strong>：分位 ≤ 30% 相对低位，30%~70% 中性，≥ 70% 相对高位。</li>
+        <li><strong>不可用的指标要显式标记</strong>：表内存在但无有效样本的指标返回 <code>is_available() == False</code>，调用方据此区分「算不出来」与「不存在」。</li>
+        <li>单指标分位<strong>不等于</strong>「低估值」结论：仍需与行业、同业横向比较后才能定性。</li>
+      </ul>
+
+      <h3>3.4 排版约定</h3>
+      <ul>
+        <li><strong>分位数不配条形</strong>：右偏极端时最大值可达数千倍，若以最大值为满格线性映射，P5~P95 的条形会全部塌缩成空条反而误导读者。分布形态由区间直方图承担。</li>
+        <li><strong>区间直方图</strong>才配条形，且按各档自身占比线性映射。</li>
+        <li>中英文混排需按<strong>视觉宽度</strong>对齐（用 <code>unicodedata.east_asian_width</code> 计算，全角算 2 列），直接用 <code>%</code> 对齐会错位。</li>
+      </ul>
+    </div>
+
+    <!-- 报告渲染器 -->
+    <div class="section" id="reporter">
+      <h2>四、报告渲染器</h2>
+
+      <h3>4.1 渲染器清单</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>渲染器</th>
+            <th>输出形态</th>
+            <th>适用场景</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ValuationDistributionReporter</code></td>
+            <td>纯文本</td>
+            <td>控制台阅读</td>
+          </tr>
+          <tr>
+            <td><code>ValuationDistributionMarkdownReporter</code></td>
+            <td>Markdown</td>
+            <td>长期归档</td>
+          </tr>
+          <tr>
+            <td><code>ValuationPercentileReporter</code></td>
+            <td>控制台文本 + Markdown</td>
+            <td>双形态输出</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>4.2 渲染器设计原则</h3>
+      <ul>
+        <li>渲染器只读统计实体，不得做任何统计运算</li>
+        <li>两种输出形态结构差异很大（纯文本靠视觉宽度对齐，Markdown 靠表格语法），<strong>新增输出形态应另写渲染器</strong>，不要给既有渲染器加格式开关</li>
+        <li>中英文混排需按<strong>视觉宽度</strong>对齐（用 <code>unicodedata.east_asian_width</code> 计算，全角算 2 列）</li>
+      </ul>
+
+      <h3>4.3 输出示例</h3>
+      <pre><code># 控制台输出
+./venv/bin/python scripts/analyze_pe_distribution.py
+
+# Markdown 归档
+./venv/bin/python scripts/analyze_pe_distribution.py --markdown output/pe_distribution.md
+
+# 同时输出两种形态
+./venv/bin/python scripts/analyze_pe_distribution.py \
+    --trade-date 2026-09-30 --output output/pe_distribution.txt --markdown output/pe_distribution.md</code></pre>
+    </div>
+
+    <div class="footer">
+      <p><a href="../AGENT.md" style="color: var(--accent-blue);">← 返回 AGENT.md</a> ｜ <a href="ARCHITECTURE.html" style="color: var(--accent-blue);">查看 ARCHITECTURE.html →</a></p>
+    </div>
+
+  </div>
+</body>
+</html>

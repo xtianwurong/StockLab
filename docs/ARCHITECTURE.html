@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockLab 数据源与架构设计</title>
+  <style>
+    :root {
+      --bg-primary: #0b1120;
+      --bg-card: #151f32;
+      --bg-hover: #1e293b;
+      --bg-code: #0f172a;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --border-color: #334155;
+      --accent-blue: #38bdf8;
+      --accent-red: #f43f5e;
+      --accent-green: #10b981;
+      --accent-yellow: #f59e0b;
+      --accent-purple: #a78bfa;
+      --accent-cyan: #06b6d4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, Arial, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    .header {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    .header .subtitle { color: var(--text-muted); font-size: 14px; }
+    .header .meta { color: var(--text-dim); font-size: 12px; margin-top: 12px; }
+
+    .nav {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .nav a {
+      color: var(--text-muted);
+      text-decoration: none;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .nav a:hover { color: var(--text-main); background: var(--bg-hover); }
+
+    .section {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+    }
+    .section h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--accent-blue);
+    }
+    .section h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-top: 20px;
+      margin-bottom: 12px;
+      color: var(--accent-purple);
+    }
+    .section h4 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 16px;
+      margin-bottom: 8px;
+      color: var(--accent-cyan);
+    }
+    .section p { margin-bottom: 12px; }
+    .section ul, .section ol { margin-left: 20px; margin-bottom: 12px; }
+    .section li { margin-bottom: 6px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 13px;
+    }
+    th {
+      background: var(--bg-hover);
+      font-weight: 600;
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 2px solid var(--border-color);
+    }
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-color);
+      vertical-align: top;
+    }
+    tr:hover td { background: var(--bg-hover); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-ok { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+    .badge-warn { background: rgba(245, 158, 11, 0.15); color: var(--accent-yellow); }
+    .badge-error { background: rgba(244, 63, 94, 0.15); color: var(--accent-red); }
+    .badge-info { background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); }
+    .badge-purple { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+
+    code {
+      background: var(--bg-code);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 12px;
+      color: var(--accent-cyan);
+    }
+    pre {
+      background: var(--bg-code);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      color: var(--text-main);
+      line-height: 1.5;
+    }
+
+    .callout {
+      border-left: 3px solid var(--accent-blue);
+      background: rgba(56, 189, 248, 0.05);
+      padding: 12px 16px;
+      margin: 12px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .callout-warn { border-left-color: var(--accent-yellow); background: rgba(245, 158, 11, 0.05); }
+    .callout-error { border-left-color: var(--accent-red); background: rgba(244, 63, 94, 0.05); }
+    .callout-success { border-left-color: var(--accent-green); background: rgba(16, 185, 129, 0.05); }
+
+    .design-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+    .design-card {
+      background: var(--bg-hover);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .design-card h5 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--accent-blue);
+    }
+    .design-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .footer {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+      padding: 20px 0;
+      border-top: 1px solid var(--border-color);
+      margin-top: 20px;
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 12px; }
+      .section { padding: 16px; }
+      .header { padding: 16px; }
+      table { font-size: 12px; }
+      th, td { padding: 6px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="header">
+      <h1>StockLab 数据源与架构设计</h1>
+      <div class="subtitle">数据源容错策略、Facade 路由机制、分析计算层设计</div>
+      <div class="meta">
+        返回 <a href="../AGENT.md" style="color: var(--accent-blue);">AGENT.md</a> ｜
+        返回 <a href="DATABASE.html" style="color: var(--accent-blue);">DATABASE.html</a>
+      </div>
+    </div>
+
+    <div class="nav">
+      <a href="#datasource">数据源架构</a>
+      <a href="#facade">Facade 门面</a>
+      <a href="#analytics">分析计算层</a>
+      <a href="#design">设计亮点</a>
+    </div>
+
+    <!-- 数据源架构 -->
+    <div class="section" id="datasource">
+      <h2>一、数据源架构</h2>
+
+      <h3>1.1 腾讯直连市场数据客户端</h3>
+      <p><code>stocklab/datasource/tencent_client.py</code> — <code>TencentMarketClient</code></p>
+      <ul>
+        <li>抹平资产类型差异，完全统一支持 A 股个股、行业/宽基 ETF 以及大盘指数</li>
+        <li>提供 <code>fetch_kline</code> (全要素 OHLCV)、<code>fetch_monthly_close</code> (月末收盘序列)、<code>fetch_multi_monthly_close</code> (多标的并发抓取)、<code>fetch_name</code> (名称查询) 与 <code>fetch_quote_fields</code> (盘口原始字段列表)</li>
+      </ul>
+
+      <h3>1.2 单股深度数据与估值（三级容错）</h3>
+      <p><code>stocklab/datasource/stock_data.py</code> — <code>MarketDataService</code></p>
+      <p>价格与 PE 各自独立降级：</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>数据</th>
+            <th>主通道</th>
+            <th>备用通道</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>月线收盘价</td>
+            <td>AkShare（东方财富）</td>
+            <td>BaoStock → 腾讯 (TencentMarketClient)</td>
+          </tr>
+          <tr>
+            <td>PE-TTM</td>
+            <td>AkShare（百度股市通）</td>
+            <td>BaoStock（日线降采样）</td>
+          </tr>
+          <tr>
+            <td>公司简称</td>
+            <td>腾讯直连 (TencentMarketClient)</td>
+            <td>AkShare → BaoStock</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <code>stock_data.py</code> 内部组合复用 <code>TencentMarketClient</code> 作为其腾讯直连与基础行情的底层驱动，实现职责分层并消除跨模块重复代码。
+      </div>
+
+      <h3>1.3 全市场数据 Provider</h3>
+      <p><code>stocklab/datasource/market_provider.py</code> — <code>MarketDataProvider</code></p>
+      <p>负责全市场 A 股数据的批量获取，与单股数据服务明确边界：</p>
+      <ul>
+        <li><code>fetch_securities</code> — 股票基础信息</li>
+        <li><code>fetch_daily_prices</code> — 日 K 行情</li>
+        <li><code>fetch_realtime_valuations</code> — 最新估值快照</li>
+        <li><code>fetch_valuation_history</code> — 单只历史估值序列</li>
+        <li><code>fetch_industry_valuation</code> — 行业估值横截面</li>
+        <li><code>fetch_index_membership</code> — 指数成分</li>
+        <li><code>fetch_company_profile</code> — 公司概况</li>
+      </ul>
+    </div>
+
+    <!-- Facade 门面 -->
+    <div class="section" id="facade">
+      <h2>二、统一数据取数门面（Facade）</h2>
+
+      <p><code>stocklab/facade/market_data.py</code> — <code>MarketDataFacade</code></p>
+
+      <h3>2.1 设计模式</h3>
+      <p><strong>Facade（外观模式，GoF 结构型模式）</strong>：为「本地 DuckDB 库 + 远端公开接口」这一子系统提供统一简化接口，对上层隐藏来源选择、命中判定与回退策略。</p>
+      <ul>
+        <li><strong>命名模式、不命名策略</strong>：优先级不写进类名（若策略演变为「按新鲜度路由」或「加缓存中间层」，那是重构而非改名）</li>
+        <li><strong>cache-aside 回写</strong>：远端取到的数据自动写回本地库，使后续查询命中本地</li>
+      </ul>
+
+      <h3>2.2 取数优先级</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>优先级（<code>config.ini</code> <code>[data_source] priority</code>）</th>
+            <th>行为</th>
+            <th>适用场景</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>local_first</code></td>
+            <td>先查本地库 → 未命中回退远端 → 远端结果回写本地</td>
+            <td>历史分析、批量回补，可容忍新鲜度差异</td>
+          </tr>
+          <tr>
+            <td><code>remote_first</code></td>
+            <td>先取远端 → 失败（返回空表）回退本地库</td>
+            <td>实时行情、最新估值快照，对新鲜度敏感</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2.3 使用示例</h3>
+      <pre><code>from stocklab.facade import MarketDataFacade
+
+with MarketDataFacade() as facade:          # 优先级取自 config.ini
+    print(facade.priority)                  # 'local_first' 或 'remote_first'
+    df = facade.fetch_daily_prices("600519.SH", "2025-01-01", "2026-09-30")</code></pre>
+
+      <h3>2.4 公共接口</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>方法</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>fetch_securities()</code></td>
+            <td>全市场证券基础信息；本地非空即命中，否则远端取并回写</td>
+          </tr>
+          <tr>
+            <td><code>fetch_daily_prices(ts_code, start_date, end_date)</code></td>
+            <td>单只日 K（不复权）；日期入参用 <code>YYYY-MM-DD</code>，转调远端时自动压缩为 <code>YYYYMMDD</code></td>
+          </tr>
+          <tr>
+            <td><code>fetch_valuations(trade_date=None)</code></td>
+            <td>全市场估值快照；<code>trade_date</code> 为空时取本地最新交易日，否则回退远端实时快照</td>
+          </tr>
+          <tr>
+            <td><code>fetch_valuation_history(ts_code, period)</code></td>
+            <td>单只个股的逐日历史估值序列；<strong>无论优先级如何都遵循「先查本地 → 未命中取远端并回写」</strong>（本地是缓存而非唯一副本）</td>
+          </tr>
+          <tr>
+            <td><code>priority</code></td>
+            <td>只读属性，返回当前生效的优先级</td>
+          </tr>
+          <tr>
+            <td><code>close()</code> / <code>with</code></td>
+            <td>释放本地数据库连接（支持上下文管理）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-warn">
+        <strong>优先级取值来源与容错：</strong>显式构造参数 > <code>config.ini [data_source] priority</code> > 默认 <code>local_first</code>；配置文件缺失、段落缺失或取值非法时<strong>记 warning 并回退默认值</strong>，不会静默采用错误策略。合法取值由 <code>stocklab.common.config.DATA_SOURCE_PRIORITIES</code> 单点定义。
+      </div>
+
+      <div class="callout callout-error">
+        <strong>⚠️ 当前覆盖缺口（务必知悉）：</strong>本地库仅覆盖 A 股个股（<code>reference.securities</code> 为 A 股全量），且 <code>market.daily_prices</code> 存的是<strong>不复权日 K</strong>。因此行业 ETF 与指数标的本地无记录、需要<strong>前复权月线</strong>的分析场景<strong>必然回退远端</strong>——对本项目主要消费方（板块走势图）命中率接近 0。补齐覆盖与口径前，回退分支是唯一被实际走到的路径。
+      </div>
+
+      <h3>2.5 已知演进债</h3>
+      <div class="callout callout-warn">
+        <code>visualizer</code> 目前仍直连 <code>TencentMarketClient</code> 出图，尚未改走 <code>MarketDataFacade</code>，因此「两条并行数据通路」尚未合流。<code>MarketDataFacade</code> 已是合流的落点：待本地库补齐 ETF / 指数覆盖与前复权口径后，把 <code>sector_trend.py</code> 的取数改为经由 facade 即可收口。
+      </div>
+    </div>
+
+    <!-- 分析计算层 -->
+    <div class="section" id="analytics">
+      <h2>三、分析计算层（Analytics）</h2>
+
+      <h3>3.1 定位与边界</h3>
+      <p><code>stocklab/analytics</code> 是纯统计变换层 —— 只接收 DataFrame 做聚合，不发网络请求、不连数据库、不 import <code>facade</code>/<code>datasource</code>/<code>persistence</code>，因此可完全脱离 IO 独立单测。</p>
+
+      <h3>3.2 市盈率分布统计</h3>
+      <pre><code>from stocklab.analytics import ValuationDistributionAnalyzer, ValuationDistributionReporter
+
+analyzer = ValuationDistributionAnalyzer(pe_column="pe_ttm")
+profile = analyzer.analyze(valuation_df, securities_df)   # 两张表按 ts_code 关联
+print(ValuationDistributionReporter().format_text_report(profile))</code></pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>职责</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>valuation_distribution.py</code></td>
+            <td><code>ValuationDistributionAnalyzer</code> 分析器 + 4 个结果实体；纯计算</td>
+          </tr>
+          <tr>
+            <td><code>profile_reporter.py</code></td>
+            <td><code>ValuationDistributionReporter</code> 纯文本渲染；控制台阅读</td>
+          </tr>
+          <tr>
+            <td><code>markdown_reporter.py</code></td>
+            <td><code>ValuationDistributionMarkdownReporter</code> Markdown 渲染；长期归档</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>结果实体</h4>
+      <p>均为简单实体 / POD，仅承载数据与最简派生计算，渲染一律交给 Reporter：</p>
+      <ul>
+        <li><code>ValuationDistributionProfile</code> — 整体结果</li>
+        <li><code>DistributionBucket</code> — 区间桶</li>
+        <li><code>PeRankEntry</code> — 极值标的</li>
+        <li><code>MarketValuationDistribution</code> — 分交易所摘要</li>
+      </ul>
+
+      <div class="callout">
+        <strong>渲染层扩展规则：</strong>两种输出形态结构差异很大（纯文本靠视觉宽度对齐，Markdown 靠表格语法），<strong>新增输出形态应另写渲染器</strong>，不要给既有渲染器加格式开关——否则会出现大量互相干扰的分支。渲染器只读统计实体，不得做任何统计运算。
+      </div>
+
+      <h4>Markdown 归档报告特性</h4>
+      <p><code>scripts/analyze_pe_distribution.py --markdown &lt;路径&gt;</code> 生成，面向长期留存：</p>
+      <ul>
+        <li>顶部自动生成一句话中文结论，读第一行即可掌握全貌</li>
+        <li>样本代表性不足时在引用块里加 ⚠️ 警示</li>
+        <li>表格化统计，便于 grep「多少只 PE 在 20-30 区间」</li>
+        <li>尾部固定「口径说明」，避免报告脱离上下文被误引用</li>
+        <li>证券简称中的竖线必须转义（<code>某某|转债</code> → <code>某某\|转债</code>），否则破坏表格列结构</li>
+      </ul>
+
+      <h4>职责边界：库层只描述事实，不描述补救</h4>
+      <p>样本代表性判定（<code>PE_MIN_REASONABLE_SAMPLE_COUNT</code> + <code>Profile.is_representative()</code>）<strong>下沉在库层</strong>，报告表头也会自动标注「分布结论不成立」。这样任何消费方都无法绕过该校验。但「怎么补救」属于<strong>入口脚本的编排知识</strong>，留在 <code>scripts/</code> 里。</p>
+
+      <h4>统计口径的三个业务约束</h4>
+      <ol>
+        <li><strong>PE 分布严重右偏，均值不可作为分布中心的代表</strong>。少数高成长股 PE 可达数千倍，算术均值被极端值严重拉偏。因此输出以<strong>中位数 + 分位数</strong>为主，均值单独标注「仅供参考」，并额外给出<strong>截尾均值</strong>（剔除 PE > 1000 倍后的均值）作为第三个参照。</li>
+        <li><strong>亏损股没有有意义的 PE</strong>。数据源以 <code>-</code> / NaN 表示，统计时归入「无有效 PE」；<code>PE <= 0</code> 的负值单独计数。两者<strong>一律不参与分位数统计</strong>，也不进入分桶。</li>
+        <li><strong>两个口径不可混用</strong>：<code>pe</code>（市盈率-动态，东财快照口径）与 <code>pe_ttm</code>（跨期可比）含义不同，由 <code>pe_column</code> 显式指定，绝不做隐式推断。</li>
+      </ol>
+
+      <h4>固定业务语义分桶（非等宽）</h4>
+      <p>分桶数 = 边界数 + 1，边界 <code>PE_DISTRIBUTION_BUCKET_EDGES</code> 共 8 个，对应 9 档标签 <code>PE_DISTRIBUTION_BUCKET_LABELS</code>，<strong>最后一档 <code>1000+</code> 右端开放</strong>。区间语义为<strong>左开右闭</strong>（<code>20-30</code> 表示 <code>(20, 30]</code>）。</p>
+      <div class="callout callout-warn">
+        <strong>为何不用等宽分桶：</strong>PE 的业务关注区间高度非线性（0~50 密集、50 以上迅速稀疏），固定边界让每档都有明确的投资含义；等宽分桶会把 0~30 全挤进同一根柱子。
+      </div>
+
+      <h3>3.3 历史估值分位</h3>
+      <p>回答「当前估值在历史上贵不贵」，产出可量化、可复算的分位结论。</p>
+      <pre><code>from stocklab.analytics import ValuationPercentileAnalyzer, ValuationPercentileReporter
+
+results = ValuationPercentileAnalyzer().analyze(
+    history_df, current_values={"pe_ttm": 19.32}, start_date="2021-01-01"
+)
+print(ValuationPercentileReporter().format_console_report("600519.SH", results))</code></pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>职责</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>valuation_percentile.py</code></td>
+            <td><code>ValuationPercentileAnalyzer</code> 分析器 + <code>ValuationPercentileResult</code> 实体；纯计算</td>
+          </tr>
+          <tr>
+            <td><code>percentile_reporter.py</code></td>
+            <td><code>ValuationPercentileReporter</code> 渲染；控制台文本 + Markdown 双形态</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-error">
+        <strong>分位口径（唯一实现，不可与其他工具混用）：</strong><br>
+        <code>分位 = (区间内低于当前值的样本数 / 有效样本总数) × 100%</code><br><br>
+        这是<strong>经验分布函数 CDF</strong> 口径，与 <code>pandas.Series.quantile()</code>（线性插值分位点）<strong>不是同一件事</strong>：<code>quantile(0.25)</code> 返回「第 25 百分位的数值」，本模块返回「第 25 百分位的时间占比」。两者用途不同，<strong>绝不可互相替代或混报</strong>。
+      </div>
+
+      <h4>关键规则</h4>
+      <ul>
+        <li><strong>亏损期必须排除</strong>：<code>PE <= 0</code> 的样本不参与分母计算，否则亏损股的分位被严重扭曲。负值保留在原始序列中（不篡改数据），仅在统计口径上排除。</li>
+        <li><strong>当前值优先级</strong>：显式传入 > 区间内最新交易日值。</li>
+        <li><strong>档位划分</strong>：分位 ≤ 30% 相对低位，30%~70% 中性，≥ 70% 相对高位。</li>
+        <li><strong>不可用的指标要显式标记</strong>：表内存在但无有效样本的指标返回 <code>is_available() == False</code>，调用方据此区分「算不出来」与「不存在」。</li>
+        <li>单指标分位<strong>不等于</strong>「低估值」结论：仍需与行业、同业横向比较后才能定性。</li>
+      </ul>
+
+      <h4>排版约定</h4>
+      <ul>
+        <li><strong>分位数不配条形</strong>：右偏极端时最大值可达数千倍，若以最大值为满格线性映射，P5~P95 的条形会全部塌缩成空条反而误导读者。分布形态由区间直方图承担。</li>
+        <li><strong>区间直方图</strong>才配条形，且按各档自身占比线性映射。</li>
+        <li>中英文混排需按<strong>视觉宽度</strong>对齐（用 <code>unicodedata.east_asian_width</code> 计算，全角算 2 列），直接用 <code>%</code> 对齐会错位。</li>
+      </ul>
+    </div>
+
+    <!-- 设计亮点 -->
+    <div class="section" id="design">
+      <h2>四、设计亮点与架构决策</h2>
+
+      <div class="design-grid">
+        <div class="design-card">
+          <h5>三通道容错</h5>
+          <p>AkShare(主) → BaoStock(备) → 腾讯(近3年日线降采样) —— 价格通道三级降级</p>
+        </div>
+        <div class="design-card">
+          <h5>独立估值降级</h5>
+          <p>PE-TTM：AkShare(百度股市通) → BaoStock(日线降采样) —— 与价格通道解耦</p>
+        </div>
+        <div class="design-card">
+          <h5>年月对齐算法</h5>
+          <p>用 <code>pd.Period("M")</code> 作为 Join Key，规避月末交易日 ±1-2 天差异导致 PE 丢失</p>
+        </div>
+        <div class="design-card">
+          <h5>Cache-Aside</h5>
+          <p>Facade 层统一回写，后续查询命中本地库，降低外部依赖</p>
+        </div>
+        <div class="design-card">
+          <h5>Repository 模式</h5>
+          <p>表级封装，批量 UPSERT (<code>ON CONFLICT</code>)，NULL 语义保留</p>
+        </div>
+        <div class="design-card">
+          <h5>计算与呈现分离</h5>
+          <p>Analyzer 只产出实体，Reporter 只负责渲染，可扩展 HTML/JSON/DB 等多形态</p>
+        </div>
+        <div class="design-card">
+          <h5>统一代码规范</h5>
+          <p><code>normalize_symbol()</code> 统一 <code>sh600519</code> / <code>000001.SZ</code> / <code>sz000001</code> 等格式</p>
+        </div>
+        <div class="design-card">
+          <h5>并发取数 + 串行落库</h5>
+          <p><code>ThreadPoolExecutor</code> 并发抓取，主线程单连接串行 <code>upsert</code> —— 规避 DuckDB 非线程安全</p>
+        </div>
+        <div class="design-card">
+          <h5>样本代表性守护</h5>
+          <p><code>is_representative()</code> 在 Profile 实体层强制校验，防止残留数据产生误导性结论</p>
+        </div>
+      </div>
+
+      <h3>统一数据契约</h3>
+      <p>所有单股数据源标准化为三列常量：</p>
+      <ul>
+        <li><code>TRADE_DATE_COLUMN</code> = <code>"trade_date"</code></li>
+        <li><code>CLOSE_PRICE_COLUMN</code> = <code>"close_price"</code></li>
+        <li><code>PE_TTM_COLUMN</code> = <code>"pe_ttm"</code></li>
+      </ul>
+
+      <h3>数据载体类</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>类</th>
+            <th>所在文件</th>
+            <th>设计模式</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>StockDataFetchParams</code></td>
+            <td><code>datasource/stock_data.py</code></td>
+            <td>参数对象 (Parameter Object)</td>
+            <td>收拢 <code>stock_code</code> / <code>adjust_type</code>（<code>qfq</code>/<code>hfq</code>/不复权）/ <code>retry_count</code> / <code>retry_interval_seconds</code>，后续新增控制项不改方法签名</td>
+          </tr>
+          <tr>
+            <td><code>StockRealtimeQuote</code></td>
+            <td><code>datasource/stock_data.py</code></td>
+            <td>简单实体类 (POD)</td>
+            <td>18 个带默认初值的字段：现价、昨收、今开、最高、最低、涨跌额/幅、成交量/额、换手率、PE-TTM、PB、总/流通市值、行情时间；提供 <code>to_dict()</code></td>
+          </tr>
+          <tr>
+            <td><code>SectorWebPageGenerator</code></td>
+            <td><code>visualizer/page_generator.py</code></td>
+            <td>模板视图生成器</td>
+            <td>提取全标的月份并集 → 对齐缺失数据 → 填充 <code>dashboard.html</code> 的 <code>__DATA_PAYLOAD__</code> → 落盘单文件 HTML</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <code>MarketDataService</code> 另有一个状态字段 <code>used_source_name</code>，记录本次价格查询实际命中的数据源标识（如 <code>akshare</code> / <code>baostock</code> / <code>tencent</code>），供上层日志展示。
+      </div>
+    </div>
+
+    <div class="footer">
+      <p><a href="../AGENT.md" style="color: var(--accent-blue);">← 返回 AGENT.md</a> ｜ <a href="DATABASE.html" style="color: var(--accent-blue);">查看 DATABASE.html →</a></p>
+    </div>
+
+  </div>
+</body>
+</html>

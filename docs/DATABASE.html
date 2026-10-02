@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockLab 数据库设计与字段说明</title>
+  <style>
+    :root {
+      --bg-primary: #0b1120;
+      --bg-card: #151f32;
+      --bg-hover: #1e293b;
+      --bg-code: #0f172a;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --border-color: #334155;
+      --accent-blue: #38bdf8;
+      --accent-red: #f43f5e;
+      --accent-green: #10b981;
+      --accent-yellow: #f59e0b;
+      --accent-purple: #a78bfa;
+      --accent-cyan: #06b6d4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, Arial, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    /* Header */
+    .header {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    .header .subtitle { color: var(--text-muted); font-size: 14px; }
+    .header .meta { color: var(--text-dim); font-size: 12px; margin-top: 12px; }
+
+    /* Navigation */
+    .nav {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .nav a {
+      color: var(--text-muted);
+      text-decoration: none;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .nav a:hover { color: var(--text-main); background: var(--bg-hover); }
+
+    /* Section */
+    .section {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+    }
+    .section h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--accent-blue);
+    }
+    .section h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-top: 20px;
+      margin-bottom: 12px;
+      color: var(--accent-purple);
+    }
+    .section h4 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 16px;
+      margin-bottom: 8px;
+      color: var(--accent-cyan);
+    }
+    .section p { margin-bottom: 12px; color: var(--text-main); }
+    .section ul, .section ol { margin-left: 20px; margin-bottom: 12px; }
+    .section li { margin-bottom: 6px; }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 13px;
+    }
+    th {
+      background: var(--bg-hover);
+      color: var(--text-main);
+      font-weight: 600;
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 2px solid var(--border-color);
+    }
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-color);
+      vertical-align: top;
+    }
+    tr:hover td { background: var(--bg-hover); }
+
+    /* Status badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-ok { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+    .badge-warn { background: rgba(245, 158, 11, 0.15); color: var(--accent-yellow); }
+    .badge-error { background: rgba(244, 63, 94, 0.15); color: var(--accent-red); }
+    .badge-info { background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); }
+    .badge-purple { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+
+    /* Code */
+    code {
+      background: var(--bg-code);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 12px;
+      color: var(--accent-cyan);
+    }
+    pre {
+      background: var(--bg-code);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      color: var(--text-main);
+      line-height: 1.5;
+    }
+
+    /* Callout */
+    .callout {
+      border-left: 3px solid var(--accent-blue);
+      background: rgba(56, 189, 248, 0.05);
+      padding: 12px 16px;
+      margin: 12px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .callout-warn { border-left-color: var(--accent-yellow); background: rgba(245, 158, 11, 0.05); }
+    .callout-error { border-left-color: var(--accent-red); background: rgba(244, 63, 94, 0.05); }
+    .callout-success { border-left-color: var(--accent-green); background: rgba(16, 185, 129, 0.05); }
+
+    /* ER Diagram */
+    .er-diagram {
+      background: var(--bg-code);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 24px;
+      margin: 16px 0;
+      overflow-x: auto;
+    }
+
+    /* ER Diagram - CSS-based table cards */
+    .er-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      min-width: 800px;
+    }
+
+    .er-row {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      width: 100%;
+    }
+
+    .er-table-card {
+      background: var(--bg-hover);
+      border: 2px solid var(--border-color);
+      border-radius: 10px;
+      padding: 0;
+      min-width: 220px;
+      max-width: 280px;
+      flex: 1;
+      overflow: hidden;
+      transition: all 0.2s;
+    }
+    .er-table-card:hover {
+      border-color: var(--accent-blue);
+      box-shadow: 0 4px 20px rgba(56, 189, 248, 0.15);
+    }
+
+    .er-table-header {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(129, 140, 248, 0.15));
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .er-table-header .schema-name {
+      font-size: 10px;
+      color: var(--accent-cyan);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .er-table-header .table-name {
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .er-table-body {
+      padding: 8px 0;
+    }
+
+    .er-field {
+      display: flex;
+      align-items: center;
+      padding: 4px 14px;
+      font-size: 12px;
+      gap: 8px;
+    }
+    .er-field:hover {
+      background: rgba(56, 189, 248, 0.05);
+    }
+    .er-field .field-name {
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      color: var(--text-main);
+      flex: 1;
+    }
+    .er-field .field-type {
+      color: var(--text-dim);
+      font-size: 10px;
+    }
+    .er-field.pk .field-name {
+      color: var(--accent-yellow);
+    }
+    .er-field.pk .field-name::before {
+      content: "PK ";
+      font-size: 9px;
+      color: var(--accent-yellow);
+      font-weight: 700;
+    }
+    .er-field.fk .field-name {
+      color: var(--accent-green);
+    }
+    .er-field.fk .field-name::before {
+      content: "FK ";
+      font-size: 9px;
+      color: var(--accent-green);
+      font-weight: 700;
+    }
+
+    .er-table-footer {
+      padding: 6px 14px;
+      border-top: 1px solid var(--border-color);
+      background: rgba(0, 0, 0, 0.2);
+    }
+    .er-table-footer .row-count {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Connection lines */
+    .er-connector {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 40px;
+      position: relative;
+    }
+    .er-connector::before {
+      content: "";
+      width: 2px;
+      height: 100%;
+      background: var(--border-color);
+    }
+    .er-connector-label {
+      position: absolute;
+      background: var(--bg-code);
+      padding: 2px 10px;
+      font-size: 11px;
+      color: var(--accent-cyan);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    /* Branch connectors */
+    .er-branch {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      width: 100%;
+      position: relative;
+      padding-top: 20px;
+    }
+    .er-branch::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 60%;
+      height: 2px;
+      background: var(--border-color);
+    }
+    .er-branch::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 2px;
+      height: 20px;
+      background: var(--border-color);
+    }
+
+    .er-branch-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      flex: 1;
+      max-width: 280px;
+    }
+    .er-branch-item::before {
+      content: "";
+      position: absolute;
+      top: -20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 2px;
+      height: 20px;
+      background: var(--border-color);
+    }
+
+    /* Legend */
+    .er-legend {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
+      flex-wrap: wrap;
+    }
+    .er-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .er-legend-color {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+    }
+
+    /* Schema box */
+    .schema-box {
+      display: inline-block;
+      background: var(--bg-hover);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 8px;
+      min-width: 200px;
+    }
+    .schema-box h5 {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--accent-blue);
+    }
+    .schema-box .table-name {
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Stats grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .stat-card {
+      background: var(--bg-hover);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    .stat-card .number {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent-blue);
+    }
+    .stat-card .label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Progress bar */
+    .progress-bar {
+      height: 6px;
+      background: var(--bg-hover);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+    .progress-green { background: var(--accent-green); }
+    .progress-yellow { background: var(--accent-yellow); }
+    .progress-red { background: var(--accent-red); }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+      padding: 20px 0;
+      border-top: 1px solid var(--border-color);
+      margin-top: 20px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      body { padding: 12px; }
+      .section { padding: 16px; }
+      .header { padding: 16px; }
+      table { font-size: 12px; }
+      th, td { padding: 6px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>StockLab 数据库设计与字段说明</h1>
+      <div class="subtitle">本地 DuckDB 数据仓库的设计思想、整体框架、表间关联、字段含义与当前数据实况</div>
+      <div class="meta">
+        统计基准：2026-10-02 ｜ 数据库文件：<code>data/stocklab.duckdb</code>（约 144 MB）<br>
+        DDL 唯一来源：<code>stocklab/persistence/storage/schema.py</code>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav">
+      <a href="#design">设计思想</a>
+      <a href="#framework">整体框架</a>
+      <a href="#tables">逐表字段</a>
+      <a href="#integrity">完整性核验</a>
+      <a href="#sync">同步路径</a>
+      <a href="#misuse">常见误用</a>
+      <a href="#evolution">演进方向</a>
+    </div>
+
+    <!-- 一、设计思想 -->
+    <div class="section" id="design">
+      <h2>一、设计思想</h2>
+
+      <h3>1.1 定位：嵌入式分析型数据仓库</h3>
+      <p>选 DuckDB 而非 SQLite / PostgreSQL，核心原因是<strong>分析型负载</strong>：全市场 5572 只标的的估值序列共 442 万行，典型查询是「按标的取时间序列」「按日期做横截面聚合」，这类操作在列存 + 向量化执行的 DuckDB 上效率显著优于行存引擎。</p>
+      <p>同时它是<strong>单文件嵌入式</strong>——无需部署服务，<code>git</code> 可忽略，符合个人量化工具的运维现实。</p>
+
+      <h3>1.2 三条核心设计原则</h3>
+
+      <h4>原则一：数据域分离（Schema 划分）</h4>
+      <div class="er-diagram">
+        <div class="er-container">
+          <div class="er-row">
+            <div class="er-table-card">
+              <div class="er-table-header">
+                <div class="schema-name">Schema: reference</div>
+                <div class="table-name">证券身份与静态属性</div>
+              </div>
+              <div class="er-table-body">
+                <div class="er-field"><span class="field-name">securities</span><span class="field-type">5,572 行</span></div>
+                <div class="er-field"><span class="field-name">index_memberships</span><span class="field-type">4,350 行</span></div>
+              </div>
+              <div class="er-table-footer">
+                <span class="row-count">慢变维表 · 一年只变动几次</span>
+              </div>
+            </div>
+            <div class="er-table-card">
+              <div class="er-table-header">
+                <div class="schema-name">Schema: market</div>
+                <div class="table-name">行情与估值（时序）</div>
+              </div>
+              <div class="er-table-body">
+                <div class="er-field"><span class="field-name">daily_prices</span><span class="field-type">3 行</span></div>
+                <div class="er-field"><span class="field-name">daily_valuations</span><span class="field-type">3 行</span></div>
+                <div class="er-field"><span class="field-name">valuation_history</span><span class="field-type">4,423,212 行</span></div>
+                <div class="er-field"><span class="field-name">industry_valuations</span><span class="field-type">0 行</span></div>
+              </div>
+              <div class="er-table-footer">
+                <span class="row-count">事实表 · 每天增长</span>
+              </div>
+            </div>
+            <div class="er-table-card">
+              <div class="er-table-header">
+                <div class="schema-name">Schema: sys</div>
+                <div class="table-name">同步过程状态</div>
+              </div>
+              <div class="er-table-body">
+                <div class="er-field"><span class="field-name">sync_tasks</span><span class="field-type">0 行</span></div>
+              </div>
+              <div class="er-table-footer">
+                <span class="row-count">运维元数据 · 预留表</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="callout callout-warn" style="margin-top: 16px;">
+          <strong>⚠️ 为什么是 sys 而不是 system：</strong><code>system</code> 是 DuckDB 保留字，直接用作 schema 名会抛 <code>BinderException</code>。
+        </div>
+      </div>
+
+      <h4>原则二：NULL 语义保留</h4>
+      <div class="callout callout-error">
+        <strong>估值字段的 NULL 表示「亏损或无数据」，严禁转换为 0。</strong>
+      </div>
+      <p>这是本库最容易违反、后果最严重的一条纪律。原因：</p>
+      <ul>
+        <li><code>PE = 0</code> 与 <code>PE = NULL</code> 含义完全不同——前者是数学值，后者是「不存在」</li>
+        <li>若把亏损股的 NULL 填成 0，全市场 PE 中位数会被系统性拉向 0，所有分布统计结论失真</li>
+        <li>分析器依赖「排除非正值」来剔除亏损期，一旦数据被填 0，亏损期就会被当作极低估值计入分母</li>
+      </ul>
+      <div class="callout callout-warn">
+        <strong>配套约定：数据源不提供的列必须写 NULL，绝不省略列。</strong><br>
+        UPSERT 使用 <code>SELECT *</code> 按位置匹配，省略列会导致列数不匹配而整体失败。
+      </div>
+
+      <h4>原则三：幂等写入</h4>
+      <p>所有写入走同一条路径：</p>
+      <pre><code>DataFrame → conn.register(临时表) → INSERT INTO ... SELECT * FROM 临时表
+           ON CONFLICT (主键) DO UPDATE SET ...</code></pre>
+      <ul>
+        <li><strong>绝不逐行插入</strong>（性能灾难）</li>
+        <li><strong>中断重跑不产生重复记录</strong>（由主键 + ON CONFLICT 保证）</li>
+      </ul>
+
+      <h3>1.3 两套估值数据的分工（最关键的区分）</h3>
+      <p>本库存在两张结构相似的估值表，<strong>服务的分析问题完全不同，不可互相替代</strong>：</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>表</th>
+            <th>粒度</th>
+            <th>回答的问题</th>
+            <th>典型用法</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>market.daily_valuations</code></td>
+            <td>全市场 × 单日</td>
+            <td>「今天谁贵谁便宜」</td>
+            <td>全市场 PE 分布横截面比较</td>
+          </tr>
+          <tr>
+            <td><code>market.valuation_history</code></td>
+            <td>单只 × 跨年序列</td>
+            <td>「它相对自己历史上贵不贵」</td>
+            <td>历史分位计算</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>举例说明差异：</strong><br>
+        平安银行 PE-TTM = 5.17，在<strong>全市场分布</strong>里属于极低档；<br>
+        但在<strong>自身 602 个历史采样点</strong>里，它位于 <strong>8.3% 分位</strong>——只比过去 8% 的时间便宜。<br><br>
+        前者回答「相对别人」，后者回答「相对自己」。<strong>混用会导致完全错误的结论。</strong>
+      </div>
+    </div>
+
+    <!-- 二、整体框架 -->
+    <div class="section" id="framework">
+      <h2>二、整体框架</h2>
+
+      <h3>2.1 七张表与规模</h3>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="number">5,572</div>
+          <div class="label">证券总数</div>
+        </div>
+        <div class="stat-card">
+          <div class="number">4,423,212</div>
+          <div class="label">历史估值记录</div>
+        </div>
+        <div class="stat-card">
+          <div class="number">4,350</div>
+          <div class="label">指数成分记录</div>
+        </div>
+        <div class="stat-card">
+          <div class="number">144 MB</div>
+          <div class="label">数据库大小</div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Schema</th>
+            <th>表名</th>
+            <th>行数</th>
+            <th>主键</th>
+            <th>数据状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>reference</code></td>
+            <td><code>securities</code></td>
+            <td>5,572</td>
+            <td><code>ts_code</code></td>
+            <td><span class="badge badge-ok">✓ 全市场完整</span></td>
+          </tr>
+          <tr>
+            <td><code>reference</code></td>
+            <td><code>index_memberships</code></td>
+            <td>4,350</td>
+            <td><code>ts_code</code> + <code>index_code</code> + <code>effective_date</code></td>
+            <td><span class="badge badge-ok">✓ 6 个宽基指数</span></td>
+          </tr>
+          <tr>
+            <td><code>market</code></td>
+            <td><code>valuation_history</code></td>
+            <td>4,423,212</td>
+            <td><code>ts_code</code> + <code>trade_date</code></td>
+            <td><span class="badge badge-ok">✓ 100% 覆盖</span></td>
+          </tr>
+          <tr>
+            <td><code>market</code></td>
+            <td><code>daily_valuations</code></td>
+            <td>3</td>
+            <td><code>ts_code</code> + <code>trade_date</code></td>
+            <td><span class="badge badge-warn">⚠ 仅样本</span></td>
+          </tr>
+          <tr>
+            <td><code>market</code></td>
+            <td><code>daily_prices</code></td>
+            <td>3</td>
+            <td><code>ts_code</code> + <code>trade_date</code></td>
+            <td><span class="badge badge-warn">⚠ 仅样本</span></td>
+          </tr>
+          <tr>
+            <td><code>market</code></td>
+            <td><code>industry_valuations</code></td>
+            <td>0</td>
+            <td><code>industry_code</code> + <code>stat_date</code></td>
+            <td><span class="badge badge-info">待同步</span></td>
+          </tr>
+          <tr>
+            <td><code>sys</code></td>
+            <td><code>sync_tasks</code></td>
+            <td>0</td>
+            <td>无</td>
+            <td><span class="badge badge-purple">预留表</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-warn">
+        <strong>总计约 443.3 万行</strong>，其中 99.8% 来自 <code>valuation_history</code>。
+      </div>
+
+      <h3>2.2 关联关系图</h3>
+
+      <div class="er-diagram">
+        <div class="er-container">
+          <!-- 主表 securities -->
+          <div class="er-row">
+            <div class="er-table-card" style="max-width: 320px;">
+              <div class="er-table-header">
+                <div class="schema-name">reference</div>
+                <div class="table-name">securities</div>
+              </div>
+              <div class="er-table-body">
+                <div class="er-field pk"><span class="field-name">ts_code</span><span class="field-type">VARCHAR</span></div>
+                <div class="er-field"><span class="field-name">symbol</span><span class="field-type">VARCHAR</span></div>
+                <div class="er-field"><span class="field-name">name</span><span class="field-type">VARCHAR</span></div>
+                <div class="er-field"><span class="field-name">exchange</span><span class="field-type">VARCHAR</span></div>
+                <div class="er-field"><span class="field-name">market</span><span class="field-type">VARCHAR</span></div>
+                <div class="er-field"><span class="field-name">industry</span><span class="field-type">VARCHAR</span></div>
+                <div class="er-field"><span class="field-name">list_date</span><span class="field-type">DATE</span></div>
+                <div class="er-field"><span class="field-name">list_status</span><span class="field-type">VARCHAR</span></div>
+              </div>
+              <div class="er-table-footer">
+                <span class="row-count">5,572 行 · 全市场证券档案（权威主体表）</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 连接线 -->
+          <div class="er-connector">
+            <span class="er-connector-label">ts_code（唯一关联键，全库通用）</span>
+          </div>
+
+          <!-- 分支表 -->
+          <div class="er-branch">
+            <div class="er-branch-item">
+              <div class="er-table-card">
+                <div class="er-table-header">
+                  <div class="schema-name">market</div>
+                  <div class="table-name">daily_prices</div>
+                </div>
+                <div class="er-table-body">
+                  <div class="er-field pk"><span class="field-name">ts_code</span><span class="field-type">VARCHAR</span></div>
+                  <div class="er-field pk"><span class="field-name">trade_date</span><span class="field-type">DATE</span></div>
+                  <div class="er-field"><span class="field-name">open</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">high</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">low</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">close</span><span class="field-type">DOUBLE</span></div>
+                </div>
+                <div class="er-table-footer">
+                  <span class="row-count">3 行 · 日K（不复权）</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="er-branch-item">
+              <div class="er-table-card">
+                <div class="er-table-header">
+                  <div class="schema-name">market</div>
+                  <div class="table-name">daily_valuations</div>
+                </div>
+                <div class="er-table-body">
+                  <div class="er-field pk"><span class="field-name">ts_code</span><span class="field-type">VARCHAR</span></div>
+                  <div class="er-field pk"><span class="field-name">trade_date</span><span class="field-type">DATE</span></div>
+                  <div class="er-field"><span class="field-name">pe</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">pe_ttm</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">pb</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">total_mv</span><span class="field-type">DOUBLE</span></div>
+                </div>
+                <div class="er-table-footer">
+                  <span class="row-count">3 行 · 全市场估值快照</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="er-branch-item">
+              <div class="er-table-card">
+                <div class="er-table-header">
+                  <div class="schema-name">market</div>
+                  <div class="table-name">valuation_history</div>
+                </div>
+                <div class="er-table-body">
+                  <div class="er-field pk"><span class="field-name">ts_code</span><span class="field-type">VARCHAR</span></div>
+                  <div class="er-field pk"><span class="field-name">trade_date</span><span class="field-type">DATE</span></div>
+                  <div class="er-field"><span class="field-name">pe_ttm</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">pe_static</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">pb</span><span class="field-type">DOUBLE</span></div>
+                  <div class="er-field"><span class="field-name">pcf</span><span class="field-type">DOUBLE</span></div>
+                </div>
+                <div class="er-table-footer">
+                  <span class="row-count">4,423,212 行 · 历史估值序列</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="er-branch-item">
+              <div class="er-table-card">
+                <div class="er-table-header">
+                  <div class="schema-name">reference</div>
+                  <div class="table-name">index_memberships</div>
+                </div>
+                <div class="er-table-body">
+                  <div class="er-field pk"><span class="field-name">ts_code</span><span class="field-type">VARCHAR</span></div>
+                  <div class="er-field pk"><span class="field-name">index_code</span><span class="field-type">VARCHAR</span></div>
+                  <div class="er-field pk"><span class="field-name">effective_date</span><span class="field-type">DATE</span></div>
+                  <div class="er-field"><span class="field-name">index_name</span><span class="field-type">VARCHAR</span></div>
+                </div>
+                <div class="er-table-footer">
+                  <span class="row-count">4,350 行 · 指数成分</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 预留表 -->
+          <div class="er-connector" style="margin-top: 20px;">
+            <span class="er-connector-label">预留表（无关联）</span>
+          </div>
+          <div class="er-row">
+            <div class="er-table-card" style="max-width: 280px; opacity: 0.6;">
+              <div class="er-table-header">
+                <div class="schema-name">sys</div>
+                <div class="table-name">sync_tasks</div>
+              </div>
+              <div class="er-table-body">
+                <div class="er-field"><span class="field-name">task_id</span><span class="field-type">BIGINT</span></div>
+                <div class="er-field"><span class="field-name">data_type</span><span class="field-type">VARCHAR</span></div>
+                <div class="er-field"><span class="field-name">status</span><span class="field-type">VARCHAR</span></div>
+              </div>
+              <div class="er-table-footer">
+                <span class="row-count">0 行 · 预留表，尚无代码写入</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 图例 -->
+          <div class="er-legend">
+            <div class="er-legend-item">
+              <div class="er-legend-color" style="background: var(--accent-yellow);"></div>
+              <span>PK = 主键</span>
+            </div>
+            <div class="er-legend-item">
+              <div class="er-legend-color" style="background: var(--accent-green);"></div>
+              <span>FK = 外键（逻辑关联）</span>
+            </div>
+            <div class="er-legend-item">
+              <div class="er-legend-color" style="background: var(--border-color);"></div>
+              <span>关联线 = ts_code</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3>2.3 关联关系的三条规则</h3>
+      <ol>
+        <li><code>ts_code</code> 是全库唯一关联键，格式统一为 <code>{6位数字}.{交易所后缀}</code>，如 <code>600519.SH</code> / <code>000001.SZ</code> / <code>430047.BJ</code></li>
+        <li><strong>不存在物理外键约束</strong>——DuckDB 对 FK 支持有限，且批量 UPSERT 下 FK 校验成本高。关联完整性由<strong>同步脚本保证</strong>（实测差集为 0）</li>
+        <li><code>securities</code> 是权威主体表：其他表的 <code>ts_code</code> 必须在其中存在，否则为孤儿记录（实测 0 条）</li>
+      </ol>
+    </div>
+
+    <!-- 三、逐表字段说明 -->
+    <div class="section" id="tables">
+      <h2>三、逐表字段说明</h2>
+
+      <!-- 3.1 securities -->
+      <h3>3.1 <code>reference.securities</code> — 证券基础信息</h3>
+      <p><strong>粒度</strong>：一只证券一行 ｜ <strong>5,572 行</strong> ｜ <strong>主键</strong>：<code>ts_code</code></p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型</th>
+            <th>可空</th>
+            <th>填充率</th>
+            <th>含义与说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ts_code</code></td>
+            <td>VARCHAR</td>
+            <td>否</td>
+            <td>100%</td>
+            <td><strong>标准证券代码</strong>，<code>{数字}.{交易所后缀}</code>。PK，由纯数字代码 + 交易所后缀归一化生成</td>
+          </tr>
+          <tr>
+            <td><code>symbol</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>6 位纯数字代码，不含后缀</td>
+          </tr>
+          <tr>
+            <td><code>name</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>证券简称。<strong>保留 <code>*ST</code> / <code>ST</code> / <code>XD</code> 等状态前缀，原样不做清洗</strong></td>
+          </tr>
+          <tr>
+            <td><code>exchange</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>交易所：<code>SH</code> / <code>SZ</code> / <code>BJ</code></td>
+          </tr>
+          <tr>
+            <td><code>market</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>市场：<code>SH</code> / <code>SZ</code> / <code>BJ</code>。当前与 <code>exchange</code> 同值，两字段语义重叠</td>
+          </tr>
+          <tr>
+            <td><code>industry</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td><span class="badge badge-error">0%</span></td>
+            <td>行业分类。<strong>当前数据源不可用</strong>（巨潮接口已需授权）</td>
+          </tr>
+          <tr>
+            <td><code>area</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td><span class="badge badge-error">0%</span></td>
+            <td>地区。同上，当前不可用</td>
+          </tr>
+          <tr>
+            <td><code>list_date</code></td>
+            <td>DATE</td>
+            <td>是</td>
+            <td><span class="badge badge-error">0%</span></td>
+            <td>上市日期。同上，当前不可用</td>
+          </tr>
+          <tr>
+            <td><code>delist_date</code></td>
+            <td>DATE</td>
+            <td>是</td>
+            <td><span class="badge badge-error">0%</span></td>
+            <td>退市日期。同上，当前不可用（当前无退市记录）</td>
+          </tr>
+          <tr>
+            <td><code>list_status</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>上市状态。当前全部为 <code>'L'</code>（上市中），无退市样本</td>
+          </tr>
+          <tr>
+            <td><code>is_hs</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td><span class="badge badge-error">0%</span></td>
+            <td>沪深港通标记。当前不可用</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>当前分布</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>交易所</th>
+            <th>家数</th>
+            <th>占比</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>SH（上交所）</td>
+            <td>2,320</td>
+            <td>41.6%</td>
+          </tr>
+          <tr>
+            <td>SZ（深交所）</td>
+            <td>2,904</td>
+            <td>52.1%</td>
+          </tr>
+          <tr>
+            <td>BJ（北交所）</td>
+            <td>348</td>
+            <td>6.2%</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-success">
+        <strong>已可用于生产的字段：</strong>
+        <ul style="margin-top: 8px;">
+          <li><code>name</code> 含 <code>ST</code> 字样的有 <strong>201 只</strong>（如 <code>ST嘉应</code>、<code>*ST天喻</code>）→ <strong>ST 风险可离线识别，无需额外数据源</strong></li>
+          <li><code>market</code> 可做交易所分组统计</li>
+        </ul>
+      </div>
+
+      <div class="callout callout-warn">
+        <strong>待补齐的四个字段：</strong>
+        <code>industry</code> / <code>area</code> / <code>list_date</code> / <code>is_hs</code><br>
+        实现已就绪（<code>MarketDataProvider.fetch_company_profile()</code>），待数据源开放后可直接灌入。<br>
+        在此之前，<strong>用 <code>index_memberships</code> 的指数成分作为同业分组的替代维度</strong>。
+      </div>
+
+      <!-- 3.2 index_memberships -->
+      <h3>3.2 <code>reference.index_memberships</code> — 指数成分股</h3>
+      <p><strong>粒度</strong>：某标的 × 某指数 × 某生效日 ｜ <strong>4,350 行</strong> ｜ <strong>主键</strong>：<code>(ts_code, index_code, effective_date)</code></p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型</th>
+            <th>可空</th>
+            <th>填充率</th>
+            <th>含义与说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ts_code</code></td>
+            <td>VARCHAR</td>
+            <td>否</td>
+            <td>100%</td>
+            <td>证券代码，关联 <code>securities.ts_code</code></td>
+          </tr>
+          <tr>
+            <td><code>index_code</code></td>
+            <td>VARCHAR</td>
+            <td>否</td>
+            <td>100%</td>
+            <td>指数代码，如 <code>000300</code></td>
+          </tr>
+          <tr>
+            <td><code>index_name</code></td>
+            <td>VARCHAR</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>指数名称，如 <code>沪深300</code></td>
+          </tr>
+          <tr>
+            <td><code>effective_date</code></td>
+            <td>DATE</td>
+            <td>否</td>
+            <td>100%</td>
+            <td>成分生效日期（调样日）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>当前覆盖的 6 个宽基指数</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>指数代码</th>
+            <th>指数名称</th>
+            <th>成分数</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>932000</code></td><td>中证2000</td><td>2,000</td></tr>
+          <tr><td><code>000852</code></td><td>中证1000</td><td>1,000</td></tr>
+          <tr><td><code>000905</code></td><td>中证500</td><td>500</td></tr>
+          <tr><td><code>000510</code></td><td>中证A500</td><td>500</td></tr>
+          <tr><td><code>000300</code></td><td>沪深300</td><td>300</td></tr>
+          <tr><td><code>000016</code></td><td>上证50</td><td>50</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        合计覆盖全市场 <strong>3,826 只（68.7%）</strong>，其余 1,746 只属中小盘未被宽基纳入。
+      </div>
+
+      <h4>重叠情况（说明分组维度是正交的）</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>所属指数数</th>
+            <th>标的数</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>1 个</td><td>3,349</td></tr>
+          <tr><td>2 个</td><td>430</td></tr>
+          <tr><td>3 个</td><td>47</td></tr>
+        </tbody>
+      </table>
+
+      <!-- 3.3 valuation_history -->
+      <h3>3.3 <code>market.valuation_history</code> — 历史估值序列 ⭐</h3>
+      <p><strong>粒度</strong>：某标的 × 某采样日 ｜ <strong>4,423,212 行</strong> ｜ <strong>主键</strong>：<code>(ts_code, trade_date)</code></p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型</th>
+            <th>可空</th>
+            <th>填充率</th>
+            <th>含义与说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ts_code</code></td>
+            <td>VARCHAR</td>
+            <td>否</td>
+            <td>100%</td>
+            <td>证券代码</td>
+          </tr>
+          <tr>
+            <td><code>trade_date</code></td>
+            <td>DATE</td>
+            <td>否</td>
+            <td>100%</td>
+            <td>采样日期。<strong>非交易日</strong>，详见下方「采样频率」说明</td>
+          </tr>
+          <tr>
+            <td><code>pe_ttm</code></td>
+            <td>DOUBLE</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>市盈率 TTM，滚动 12 个月。<strong>跨期可比，分位计算的默认口径</strong></td>
+          </tr>
+          <tr>
+            <td><code>pe_static</code></td>
+            <td>DOUBLE</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>市盈率（静），基于最近年报。跨期不可比，仅供参考</td>
+          </tr>
+          <tr>
+            <td><code>pb</code></td>
+            <td>DOUBLE</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>市净率</td>
+          </tr>
+          <tr>
+            <td><code>ps</code></td>
+            <td>DOUBLE</td>
+            <td>是</td>
+            <td><span class="badge badge-error">0%</span></td>
+            <td>市销率。<strong>数据源不提供，整列 NULL</strong></td>
+          </tr>
+          <tr>
+            <td><code>pcf</code></td>
+            <td>DOUBLE</td>
+            <td>是</td>
+            <td>100%</td>
+            <td>市现率</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>数据规模</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>项</th>
+            <th>值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>记录总数</td><td>4,423,212</td></tr>
+          <tr><td>覆盖标的</td><td><strong>5,572 / 5,572（100%）</strong></td></tr>
+          <tr><td>时间跨度</td><td>1991-03-19 ~ 2026-10-01</td></tr>
+          <tr><td>同步失败</td><td>0</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-warn">
+        <strong>⚠️ 采样频率说明（重要，容易误读）：</strong><br>
+        数据源为百度股市通 <code>stock_zh_valuation_baidu</code>。实测该接口的 <code>period="全部"</code>
+        返回的<strong>不是逐日数据，而是约每半月的采样点</strong>——因此：
+        <ul style="margin-top: 8px;">
+          <li>单只标的记录数为 2 ~ 1,676 个采样点（不是 35 年 × 240 交易日 ≈ 8,400）</li>
+          <li><strong>约 27.9% 的记录落在周六/周日</strong>（因采样按自然日对齐）</li>
+          <li><strong>对分位计算无实质影响</strong>：分位 =「低于当前值的样本占比」，采样密度不改变分布形状</li>
+          <li><strong>但报告措辞须准确</strong>：应表述为「N 个历史采样点」，而非「N 个交易日」</li>
+        </ul>
+      </div>
+
+      <div class="callout callout-error">
+        <strong>⚠️ 非正值的处理：</strong>
+        <ul style="margin-top: 8px;">
+          <li><code>pe_ttm < 0</code> 共 <strong>647,850 条</strong>，代表<strong>亏损期</strong>——PE 为负没有估值比较意义</li>
+          <li>分析器 <code>ValuationPercentileAnalyzer</code> 已将 <code>PE <= 0</code> 排除出分位计算的分母</li>
+          <li>负值<strong>保留在库中不做篡改</strong>，只在统计口径上排除</li>
+        </ul>
+        实测效果（金科股份）：606 个采样点中 PE-TTM 仅 <strong>402 个有效</strong>，排除 204 个亏损期。
+      </div>
+
+      <h4>已知数据盲区</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>盲区</th>
+            <th>标的数</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>pe_ttm</code> 恒为负</td>
+            <td>29 只</td>
+            <td>持续亏损公司（未盈利生物医药、AI 芯片等），无法计算 PE 分位。分析器会正确返回 <code>is_available() == False</code>，不会给出错误分位</td>
+          </tr>
+          <tr>
+            <td><code>ps</code> 全 NULL</td>
+            <td>全市场</td>
+            <td>数据源不支持该指标。如需市销率分位须另找数据源</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 3.4 daily_valuations -->
+      <h3>3.4 <code>market.daily_valuations</code> — 全市场估值快照</h3>
+      <p><strong>粒度</strong>：全市场 × 单日 ｜ <strong>当前 3 行</strong> ｜ <strong>主键</strong>：<code>(ts_code, trade_date)</code></p>
+
+      <div class="callout callout-warn">
+        <strong>⚠️ 当前状态：仅样本数据。</strong> 数据源为东方财富 <code>stock_zh_a_spot_em</code>（全市场实时快照，1 次请求），但该接口在当前环境下被阻断，未能灌入全量。表结构与 Repository 已完整就绪，数据源恢复后执行 <code>./venv/bin/python scripts/sync_market_data.py valuations</code> 即可灌满。
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型</th>
+            <th>含义与说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ts_code</code></td><td>VARCHAR</td><td>证券代码</td></tr>
+          <tr><td><code>trade_date</code></td><td>DATE</td><td>快照写入日期。<strong>不一定是真实交易日</strong></td></tr>
+          <tr><td><code>turnover_rate</code></td><td>DOUBLE</td><td>换手率（%）</td></tr>
+          <tr><td><code>turnover_rate_f</code></td><td>DOUBLE</td><td>自由流通换手率。<span class="badge badge-warn">NULL</span></td></tr>
+          <tr><td><code>pe</code></td><td>DOUBLE</td><td>市盈率（动态）</td></tr>
+          <tr><td><code>pe_ttm</code></td><td>DOUBLE</td><td>市盈率 TTM</td></tr>
+          <tr><td><code>pb</code></td><td>DOUBLE</td><td>市净率</td></tr>
+          <tr><td><code>ps</code></td><td>DOUBLE</td><td>市销率。<span class="badge badge-warn">NULL</span></td></tr>
+          <tr><td><code>ps_ttm</code></td><td>DOUBLE</td><td>市销率 TTM。<span class="badge badge-warn">NULL</span></td></tr>
+          <tr><td><code>dv_ratio</code></td><td>DOUBLE</td><td>股息率。<span class="badge badge-warn">NULL</span>，<strong>需自行计算</strong></td></tr>
+          <tr><td><code>dv_ttm</code></td><td>DOUBLE</td><td>股息率 TTM。<span class="badge badge-warn">NULL</span></td></tr>
+          <tr><td><code>total_share</code></td><td>DOUBLE</td><td>总股本。<span class="badge badge-warn">NULL</span></td></tr>
+          <tr><td><code>float_share</code></td><td>DOUBLE</td><td>流通股本。<span class="badge badge-warn">NULL</span></td></tr>
+          <tr><td><code>free_share</code></td><td>DOUBLE</td><td>自由流通股本。<span class="badge badge-warn">NULL</span></td></tr>
+          <tr><td><code>total_mv</code></td><td>DOUBLE</td><td>总市值（元）</td></tr>
+          <tr><td><code>circ_mv</code></td><td>DOUBLE</td><td>流通市值（元）</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-error">
+        <strong>⚠️ 列序即契约：</strong>本表 16 列的顺序与 <code>MarketDataProvider.fetch_realtime_valuations()</code> 的 DataFrame 输出<strong>严格同名同序</strong>。UPSERT 使用 <code>SELECT *</code> 按位置匹配，<strong>修改任一侧必须同步修改另一侧</strong>，否则会因列数不匹配导致整体写入失败。
+      </div>
+
+      <div class="callout">
+        <strong>股息率说明：</strong>所有数据源都不提供股息率这个派生指标（东财不映射、百度接口抛 TypeError、腾讯 88 字段无此语义）。需由「每股股利 ÷ 当前股价」组合计算。
+      </div>
+
+      <!-- 3.5 daily_prices -->
+      <h3>3.5 <code>market.daily_prices</code> — 日 K 行情</h3>
+      <p><strong>粒度</strong>：某标的 × 某交易日 ｜ <strong>当前 3 行</strong> ｜ <strong>主键</strong>：<code>(ts_code, trade_date)</code></p>
+
+      <div class="callout callout-warn">
+        <strong>⚠️ 当前状态：仅样本数据</strong>，同为东财阻断所致。
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型</th>
+            <th>含义与说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ts_code</code></td><td>VARCHAR</td><td>证券代码</td></tr>
+          <tr><td><code>trade_date</code></td><td>DATE</td><td>交易日期</td></tr>
+          <tr><td><code>open</code> / <code>high</code> / <code>low</code> / <code>close</code></td><td>DOUBLE</td><td>开 / 高 / 低 / 收（<strong>不复权价</strong>，<code>adjust=""</code>）</td></tr>
+          <tr><td><code>pre_close</code></td><td>DOUBLE</td><td>昨收</td></tr>
+          <tr><td><code>change</code></td><td>DOUBLE</td><td>涨跌额</td></tr>
+          <tr><td><code>pct_chg</code></td><td>DOUBLE</td><td>涨跌幅（%）</td></tr>
+          <tr><td><code>volume</code></td><td>DOUBLE</td><td>成交量</td></tr>
+          <tr><td><code>amount</code></td><td>DOUBLE</td><td>成交额</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>价格固定为不复权：</strong>跨越除权日会失真。若需计算复权价或以价格为分母的指标（如「股息率 = 每股股利 ÷ 股价」），应在查询层处理，不在存储层冗余。
+      </div>
+
+      <!-- 3.6 sync_tasks -->
+      <h3>3.6 <code>sys.sync_tasks</code> — 同步任务状态（预留）</h3>
+      <p><strong>当前 0 行，尚无代码写入。</strong></p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型</th>
+            <th>含义与说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>task_id</code></td><td>BIGINT</td><td>任务序号</td></tr>
+          <tr><td><code>data_type</code></td><td>VARCHAR</td><td>数据类型：<code>securities</code> / <code>prices</code> / <code>valuations</code></td></tr>
+          <tr><td><code>start_date</code> / <code>end_date</code></td><td>DATE</td><td>同步日期范围</td></tr>
+          <tr><td><code>status</code></td><td>VARCHAR</td><td>状态：<code>running</code> / <code>success</code> / <code>failed</code></td></tr>
+          <tr><td><code>row_count</code></td><td>BIGINT</td><td>写入行数</td></tr>
+          <tr><td><code>started_at</code> / <code>finished_at</code></td><td>TIMESTAMP</td><td>起止时间</td></tr>
+          <tr><td><code>error_message</code></td><td>VARCHAR</td><td>失败原因</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>现状说明：</strong>这是为任务级审计预留的表。<strong>断点续传目前由 <code>DailyPriceRepository.get_max_trade_date()</code> 实现</strong>（查本地最大交易日后增量同步），尚未接入本表。若后续需要任务级审计可在此落地。
+      </div>
+
+      <!-- 3.7 industry_valuations -->
+      <h3>3.7 <code>market.industry_valuations</code> — 行业估值横截面</h3>
+      <p><strong>粒度</strong>：某行业 × 某统计日 ｜ <strong>当前 0 行</strong> ｜ <strong>主键</strong>：<code>(industry_code, stat_date)</code></p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型</th>
+            <th>含义与说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>industry_code</code></td><td>VARCHAR</td><td>行业编码</td></tr>
+          <tr><td><code>stat_date</code></td><td>DATE</td><td>统计日期</td></tr>
+          <tr><td><code>classification</code></td><td>VARCHAR</td><td>分类体系（国证/证监会）</td></tr>
+          <tr><td><code>industry_level</code></td><td>INTEGER</td><td>行业层级</td></tr>
+          <tr><td><code>industry_name</code></td><td>VARCHAR</td><td>行业名称</td></tr>
+          <tr><td><code>company_count</code></td><td>BIGINT</td><td>公司数量</td></tr>
+          <tr><td><code>priced_company_count</code></td><td>BIGINT</td><td>纳入计算公司数量</td></tr>
+          <tr><td><code>total_market_value</code></td><td>DOUBLE</td><td>总市值</td></tr>
+          <tr><td><code>net_profit</code></td><td>DOUBLE</td><td>净利润</td></tr>
+          <tr><td><code>pe_weighted</code></td><td>DOUBLE</td><td>静态市盈率-加权平均</td></tr>
+          <tr><td><code>pe_median</code></td><td>DOUBLE</td><td>静态市盈率-中位数</td></tr>
+          <tr><td><code>pe_arithmetic</code></td><td>DOUBLE</td><td>静态市盈率-算术平均</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-warn">
+        <strong>数据源边界：</strong>巨潮资讯 <code>stock_industry_pe_ratio_cninfo</code> 不提供 PB；历史仅可回溯至 2023 年。
+      </div>
+    </div>
+
+    <!-- 四、字段填充率总览 -->
+    <div class="section" id="integrity">
+      <h2>四、字段填充率总览</h2>
+      <p>用 <code>COUNT(NULLIF(TRIM(col),''))</code> 排除空字符串后的<strong>真实</strong>填充率：</p>
+
+      <h3><code>reference.securities</code>（5,572 行）</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>填充率</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ts_code</code> / <code>symbol</code> / <code>name</code></td><td>100%</td><td><span class="badge badge-ok">✓ 可用</span></td></tr>
+          <tr><td><code>exchange</code> / <code>market</code></td><td>100%</td><td><span class="badge badge-ok">✓ 可用</span></td></tr>
+          <tr><td><code>list_status</code></td><td>100%</td><td><span class="badge badge-ok">✓ 全为 'L'</span></td></tr>
+          <tr><td><code>industry</code> / <code>area</code></td><td><strong>0%</strong></td><td><span class="badge badge-error">⬜ 数据源不可用</span></td></tr>
+          <tr><td><code>list_date</code> / <code>delist_date</code> / <code>is_hs</code></td><td><strong>0%</strong></td><td><span class="badge badge-error">⬜ 数据源不可用</span></td></tr>
+        </tbody>
+      </table>
+
+      <h3><code>market.valuation_history</code>（4,423,212 行）</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>填充率</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>pe_ttm</code> / <code>pe_static</code> / <code>pb</code> / <code>pcf</code></td><td>100%</td><td><span class="badge badge-ok">✓ 可用</span></td></tr>
+          <tr><td><code>ps</code></td><td><strong>0%</strong></td><td><span class="badge badge-error">⬜ 数据源不支持</span></td></tr>
+        </tbody>
+      </table>
+
+      <h3><code>reference.index_memberships</code>（4,350 行）</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>填充率</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>index_code</code> / <code>index_name</code> / <code>effective_date</code></td><td>100%</td><td><span class="badge badge-ok">✓ 可用</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 五、数据完整性核验 -->
+    <div class="section" id="verify">
+      <h2>五、数据完整性核验</h2>
+
+      <h3>5.1 已验证通过的项</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>核验项</th>
+            <th>结果</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>securities</code> 与 <code>valuation_history</code> 差集</td><td><span class="badge badge-ok">0</span></td></tr>
+          <tr><td>孤儿记录（估值有档案无）</td><td><span class="badge badge-ok">0</span></td></tr>
+          <tr><td>同步失败标的</td><td><span class="badge badge-ok">0</span></td></tr>
+          <tr><td>指数成分中有历史估值的比例</td><td><span class="badge badge-ok">3,826 / 3,826（100%）</span></td></tr>
+          <tr><td>重复同步行数是否变化</td><td><span class="badge badge-ok">幂等（4,350 行不变）</span></td></tr>
+        </tbody>
+      </table>
+
+      <h3>5.2 已知待处理项</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>问题</th>
+            <th>影响</th>
+            <th>建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>27.9% 记录落在周末</td>
+            <td><strong>对分位计算无影响</strong>，但报告措辞易误导</td>
+            <td>修正表述为「采样点」而非「交易日」</td>
+          </tr>
+          <tr>
+            <td>118 只标的样本 < 250 个采样点</td>
+            <td>分位结论稳定性不足</td>
+            <td>需进一步区分「次新股」与「数据异常」</td>
+          </tr>
+          <tr>
+            <td>29 只标的 PE 恒为负</td>
+            <td>无法计算 PE 分位</td>
+            <td>属正确行为（持续亏损），非缺陷</td>
+          </tr>
+          <tr>
+            <td><code>industry</code> 全空</td>
+            <td>同业比较缺「行业」维度</td>
+            <td>暂用指数成分替代；待数据源开放后补齐</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 六、同步与访问路径 -->
+    <div class="section" id="sync">
+      <h2>六、同步与访问路径</h2>
+
+      <h3>6.1 同步命令</h3>
+      <pre><code>./venv/bin/python scripts/sync_market_data.py securities          # 阶段一：证券档案
+./venv/bin/python scripts/sync_market_data.py prices --incremental # 阶段二：日 K
+./venv/bin/python scripts/sync_market_data.py valuations          # 阶段三：估值快照
+./venv/bin/python scripts/sync_market_data.py indexes             # 阶段五：指数成分
+./venv/bin/python scripts/sync_market_data.py valuation-history \
+    --period 全部 --workers 8                                     # 阶段四：历史估值（耗时最长）</code></pre>
+
+      <div class="callout">
+        不带子命令时按顺序执行阶段一 → 二 → 三 → 五（<strong>阶段四默认不参与</strong>，因耗时以小时计）。
+      </div>
+
+      <h3>6.2 分层约束（写代码前必读）</h3>
+      <pre><code>stocklab.persistence   —— 只负责「往本地存数」
+  ├─ 不 import 任何数据源（AkShare / BaoStock / 百度 / 腾讯）
+  └─ 仅依赖 pandas 与本层 storage/，保证可独立测试与移植</code></pre>
+
+      <p>Repository 层因此可以在没有网络的情况下完整测试。</p>
+
+      <h3>6.3 并发约束（阶段四特有）</h3>
+      <p>DuckDB <strong>连接非线程安全</strong>。阶段四采用：</p>
+      <pre><code>工作线程池 → 取数（并发，线程间无共享状态）
+主线程     → upsert（串行，单连接）</code></pre>
+      <p>这是既能并发加速、又不引入数据库并发风险的唯一组合。修改并发逻辑时必须保持这个分工。</p>
+    </div>
+
+    <!-- 七、常见误用提醒 -->
+    <div class="section" id="misuse">
+      <h2>七、常见误用提醒</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>误用</th>
+            <th>正确做法</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>用 <code>daily_valuations</code> 算历史分位</td>
+            <td>用 <code>valuation_history</code>，前者只有单日快照</td>
+          </tr>
+          <tr>
+            <td>用 <code>valuation_history</code> 做全市场比较</td>
+            <td>用 <code>daily_valuations</code>，后者才有全市场横截面</td>
+          </tr>
+          <tr>
+            <td>把 NULL 当 0 计算均值</td>
+            <td>NULL 表示「亏损或无数据」，必须排除</td>
+          </tr>
+          <tr>
+            <td>相信 <code>ps</code> 字段有值</td>
+            <td>数据源不支持，恒为 NULL</td>
+          </tr>
+          <tr>
+            <td>认为 <code>trade_date</code> 是交易日</td>
+            <td>历史表是<strong>采样日</strong>，可能落在周末</td>
+          </tr>
+          <tr>
+            <td>直接改 <code>valuation_history</code> 列顺序</td>
+            <td>必须同步改 <code>fetch_valuation_history()</code> 的输出顺序</td>
+          </tr>
+          <tr>
+            <td>写入时省略数据源不提供的列</td>
+            <td>必须保留并写 NULL，否则 UPSERT 列数不匹配而整体失败</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 八、演进方向 -->
+    <div class="section" id="evolution">
+      <h2>八、演进方向</h2>
+
+      <p>当前数据覆盖可支撑<strong>「低估值」单一维度</strong>的量化分析（历史分位 + 指数内横向比较）。</p>
+      <p>尚未覆盖的选股维度及所需数据：</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>所需表</th>
+            <th>数据源</th>
+            <th>优先级</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>高 ROE</td>
+            <td>财务指标表（ROE / 毛利率 / 资产负债率）</td>
+            <td>新浪 <code>stock_financial_analysis_indicator</code></td>
+            <td><span class="badge badge-error">高</span></td>
+          </tr>
+          <tr>
+            <td>高股息</td>
+            <td>分红明细表（每股股利 / 报告期）</td>
+            <td>巨潮 <code>stock_dividend_cninfo</code></td>
+            <td><span class="badge badge-error">高</span></td>
+          </tr>
+          <tr>
+            <td>DCF 前提</td>
+            <td>三大报表（利润表 / 资产负债表 / 现金流量表）</td>
+            <td>新浪 <code>stock_financial_report_sina</code></td>
+            <td><span class="badge badge-info">中</span></td>
+          </tr>
+          <tr>
+            <td>行业分类</td>
+            <td><code>securities.industry</code> 补齐</td>
+            <td>巨潮 <code>stock_profile_cninfo</code>（已需授权）</td>
+            <td><span class="badge badge-info">中</span></td>
+          </tr>
+          <tr>
+            <td>风险识别</td>
+            <td>已可用 <code>name</code> 含 <code>ST</code> 离线识别（201 只）</td>
+            <td>无需新源</td>
+            <td><span class="badge badge-ok">—</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p>相关文档：</p>
+      <p><code>AGENT.md</code> —— 项目架构、分层约定、运行方式（本库的架构上下文在此）</p>
+      <p><code>stocklab/persistence/storage/schema.py</code> —— DDL 唯一来源，一切结构以该文件为准</p>
+      <p><code>stocklab/persistence/repository/</code> —— 各表的数据访问接口</p>
+    </div>
+
+  </div>
+</body>
+</html>
