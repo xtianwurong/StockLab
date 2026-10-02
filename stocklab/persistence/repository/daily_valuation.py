@@ -18,7 +18,7 @@ import logging
 
 import pandas as pd
 
-from stocklab.persistence.storage.duckdb import Database
+from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ __all__ = [
 ]
 
 
-class DailyValuationRepository:
+class DailyValuationRepository(BaseRepository):
     """
     每日估值数据访问类
 
@@ -39,15 +39,6 @@ class DailyValuationRepository:
     """
 
     _TABLE_NAME = "market.daily_valuations"
-
-    def __init__(self, database=None):
-        """
-        初始化 Repository
-
-        Args:
-            database (Database, optional): 数据库管理器实例，默认创建新实例
-        """
-        self._db = database if database else Database()
 
     def upsert(self, valuations_df):
         """
@@ -61,43 +52,15 @@ class DailyValuationRepository:
         Returns:
             int: 实际写入的行数
         """
-        if valuations_df is None or valuations_df.empty:
-            _logger.warning("upsert 接收到空数据，跳过写入")
-            return 0
-
-        conn = self._db.get_connection()
-        conn.register("_valuations_tmp", valuations_df)
-
-        try:
-            conn.execute(
-                f"""
-                INSERT INTO {self._TABLE_NAME}
-                SELECT * FROM _valuations_tmp
-                ON CONFLICT (ts_code, trade_date) DO UPDATE SET
-                    turnover_rate = excluded.turnover_rate,
-                    turnover_rate_f = excluded.turnover_rate_f,
-                    pe = excluded.pe,
-                    pe_ttm = excluded.pe_ttm,
-                    pb = excluded.pb,
-                    ps = excluded.ps,
-                    ps_ttm = excluded.ps_ttm,
-                    dv_ratio = excluded.dv_ratio,
-                    dv_ttm = excluded.dv_ttm,
-                    total_share = excluded.total_share,
-                    float_share = excluded.float_share,
-                    free_share = excluded.free_share,
-                    total_mv = excluded.total_mv,
-                    circ_mv = excluded.circ_mv
-                """
-            )
-            row_count = len(valuations_df)
-            _logger.info("daily_valuations 表 UPSERT 完成: %d 条记录", row_count)
-            return row_count
-        except Exception as error:
-            _logger.error("daily_valuations 表 UPSERT 失败: %s", error)
-            return 0
-        finally:
-            conn.unregister("_valuations_tmp")
+        return super().upsert(
+            valuations_df,
+            conflict_columns=["ts_code", "trade_date"],
+            update_columns=[
+                "turnover_rate", "turnover_rate_f", "pe", "pe_ttm", "pb",
+                "ps", "ps_ttm", "dv_ratio", "dv_ttm", "total_share",
+                "float_share", "free_share", "total_mv", "circ_mv"
+            ]
+        )
 
     def find_by_code(self, ts_code, start_date=None, end_date=None):
         """

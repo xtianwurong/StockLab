@@ -30,7 +30,7 @@ import logging
 
 import pandas as pd
 
-from stocklab.persistence.storage.duckdb import Database
+from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -39,21 +39,12 @@ __all__ = [
 ]
 
 
-class IndexMembershipRepository:
+class IndexMembershipRepository(BaseRepository):
     """
     指数成分股数据访问类
     """
 
     _TABLE_NAME = "reference.index_memberships"
-
-    def __init__(self, database=None):
-        """
-        初始化 Repository
-
-        Args:
-            database (Database, optional): 数据库管理器实例，默认创建新实例
-        """
-        self._db = database if database else Database()
 
     def upsert(self, membership_df):
         """
@@ -69,30 +60,11 @@ class IndexMembershipRepository:
         Returns:
             int: 实际写入的行数
         """
-        if membership_df is None or membership_df.empty:
-            _logger.warning("upsert 接收到空数据，跳过写入")
-            return 0
-
-        conn = self._db.get_connection()
-        conn.register("_membership_tmp", membership_df)
-
-        try:
-            conn.execute(
-                f"""
-                INSERT INTO {self._TABLE_NAME}
-                SELECT * FROM _membership_tmp
-                ON CONFLICT (ts_code, index_code, effective_date) DO UPDATE SET
-                    index_name = excluded.index_name
-                """
-            )
-            row_count = len(membership_df)
-            _logger.info("index_memberships 表 UPSERT 完成: %d 条记录", row_count)
-            return row_count
-        except Exception as error:
-            _logger.error("index_memberships 表 UPSERT 失败: %s", error)
-            return 0
-        finally:
-            conn.unregister("_membership_tmp")
+        return super().upsert(
+            membership_df,
+            conflict_columns=["ts_code", "index_code", "effective_date"],
+            update_columns=["index_name"]
+        )
 
     def find_by_index(self, index_code, effective_date=None):
         """

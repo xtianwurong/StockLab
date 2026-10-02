@@ -18,7 +18,7 @@ import logging
 
 import pandas as pd
 
-from stocklab.persistence.storage.duckdb import Database
+from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ __all__ = [
 ]
 
 
-class SecurityRepository:
+class SecurityRepository(BaseRepository):
     """
     证券基础信息数据访问类
 
@@ -39,21 +39,9 @@ class SecurityRepository:
 
     _TABLE_NAME = "reference.securities"
 
-    def __init__(self, database=None):
-        """
-        初始化 Repository
-
-        Args:
-            database (Database, optional): 数据库管理器实例，默认创建新实例
-        """
-        self._db = database if database else Database()
-
     def upsert(self, securities_df):
         """
         批量写入或更新证券基础信息（幂等操作）
-
-        使用 DuckDB 的 INSERT INTO ... ON CONFLICT DO UPDATE 语法实现 UPSERT，
-        重复执行不会产生重复记录。
 
         Args:
             securities_df (pd.DataFrame): 证券基础信息表，必须包含 ts_code 列
@@ -61,41 +49,14 @@ class SecurityRepository:
         Returns:
             int: 实际写入的行数
         """
-        if securities_df is None or securities_df.empty:
-            _logger.warning("upsert 接收到空数据，跳过写入")
-            return 0
-
-        conn = self._db.get_connection()
-
-        # 注册 DataFrame 为临时表，然后执行 UPSERT
-        conn.register("_securities_tmp", securities_df)
-
-        try:
-            conn.execute(
-                f"""
-                INSERT INTO {self._TABLE_NAME}
-                SELECT * FROM _securities_tmp
-                ON CONFLICT (ts_code) DO UPDATE SET
-                    symbol = excluded.symbol,
-                    name = excluded.name,
-                    exchange = excluded.exchange,
-                    market = excluded.market,
-                    industry = excluded.industry,
-                    area = excluded.area,
-                    list_date = excluded.list_date,
-                    delist_date = excluded.delist_date,
-                    list_status = excluded.list_status,
-                    is_hs = excluded.is_hs
-                """
-            )
-            row_count = len(securities_df)
-            _logger.info("securities 表 UPSERT 完成: %d 条记录", row_count)
-            return row_count
-        except Exception as error:
-            _logger.error("securities 表 UPSERT 失败: %s", error)
-            return 0
-        finally:
-            conn.unregister("_securities_tmp")
+        return super().upsert(
+            securities_df,
+            conflict_columns=["ts_code"],
+            update_columns=[
+                "symbol", "name", "exchange", "market", "industry",
+                "area", "list_date", "delist_date", "list_status", "is_hs"
+            ]
+        )
 
     def find_all(self):
         """

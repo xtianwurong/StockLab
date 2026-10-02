@@ -31,7 +31,7 @@ import logging
 
 import pandas as pd
 
-from stocklab.persistence.storage.duckdb import Database
+from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -40,21 +40,12 @@ __all__ = [
 ]
 
 
-class IndustryValuationRepository:
+class IndustryValuationRepository(BaseRepository):
     """
     行业估值数据访问类
     """
 
     _TABLE_NAME = "market.industry_valuations"
-
-    def __init__(self, database=None):
-        """
-        初始化 Repository
-
-        Args:
-            database (Database, optional): 数据库管理器实例，默认创建新实例
-        """
-        self._db = database if database else Database()
 
     def upsert(self, industry_df):
         """
@@ -70,39 +61,15 @@ class IndustryValuationRepository:
         Returns:
             int: 实际写入的行数
         """
-        if industry_df is None or industry_df.empty:
-            _logger.warning("upsert 接收到空数据，跳过写入")
-            return 0
-
-        conn = self._db.get_connection()
-        conn.register("_industry_tmp", industry_df)
-
-        try:
-            conn.execute(
-                f"""
-                INSERT INTO {self._TABLE_NAME}
-                SELECT * FROM _industry_tmp
-                ON CONFLICT (industry_code, stat_date) DO UPDATE SET
-                    classification = excluded.classification,
-                    industry_level = excluded.industry_level,
-                    industry_name = excluded.industry_name,
-                    company_count = excluded.company_count,
-                    priced_company_count = excluded.priced_company_count,
-                    total_market_value = excluded.total_market_value,
-                    net_profit = excluded.net_profit,
-                    pe_weighted = excluded.pe_weighted,
-                    pe_median = excluded.pe_median,
-                    pe_arithmetic = excluded.pe_arithmetic
-                """
-            )
-            row_count = len(industry_df)
-            _logger.info("industry_valuations 表 UPSERT 完成: %d 条记录", row_count)
-            return row_count
-        except Exception as error:
-            _logger.error("industry_valuations 表 UPSERT 失败: %s", error)
-            return 0
-        finally:
-            conn.unregister("_industry_tmp")
+        return super().upsert(
+            industry_df,
+            conflict_columns=["industry_code", "stat_date"],
+            update_columns=[
+                "classification", "industry_level", "industry_name",
+                "company_count", "priced_company_count", "total_market_value",
+                "net_profit", "pe_weighted", "pe_median", "pe_arithmetic"
+            ]
+        )
 
     def find_by_date(self, stat_date, classification=None, industry_level=None):
         """

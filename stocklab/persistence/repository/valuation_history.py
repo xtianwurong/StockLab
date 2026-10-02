@@ -26,7 +26,7 @@ import logging
 
 import pandas as pd
 
-from stocklab.persistence.storage.duckdb import Database
+from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -35,21 +35,12 @@ __all__ = [
 ]
 
 
-class ValuationHistoryRepository:
+class ValuationHistoryRepository(BaseRepository):
     """
     历史估值序列数据访问类
     """
 
     _TABLE_NAME = "market.valuation_history"
-
-    def __init__(self, database=None):
-        """
-        初始化 Repository
-
-        Args:
-            database (Database, optional): 数据库管理器实例，默认创建新实例
-        """
-        self._db = database if database else Database()
 
     def upsert(self, history_df):
         """
@@ -63,34 +54,11 @@ class ValuationHistoryRepository:
         Returns:
             int: 实际写入的行数
         """
-        if history_df is None or history_df.empty:
-            _logger.warning("upsert 接收到空数据，跳过写入")
-            return 0
-
-        conn = self._db.get_connection()
-        conn.register("_history_tmp", history_df)
-
-        try:
-            conn.execute(
-                f"""
-                INSERT INTO {self._TABLE_NAME}
-                SELECT * FROM _history_tmp
-                ON CONFLICT (ts_code, trade_date) DO UPDATE SET
-                    pe_ttm = excluded.pe_ttm,
-                    pe_static = excluded.pe_static,
-                    pb = excluded.pb,
-                    ps = excluded.ps,
-                    pcf = excluded.pcf
-                """
-            )
-            row_count = len(history_df)
-            _logger.info("valuation_history 表 UPSERT 完成: %d 条记录", row_count)
-            return row_count
-        except Exception as error:
-            _logger.error("valuation_history 表 UPSERT 失败: %s", error)
-            return 0
-        finally:
-            conn.unregister("_history_tmp")
+        return super().upsert(
+            history_df,
+            conflict_columns=["ts_code", "trade_date"],
+            update_columns=["pe_ttm", "pe_static", "pb", "ps", "pcf"]
+        )
 
     def find_by_code(self, ts_code, start_date=None, end_date=None):
         """

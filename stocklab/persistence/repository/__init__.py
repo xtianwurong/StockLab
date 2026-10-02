@@ -6,6 +6,7 @@ StockLab 数据访问层 (stocklab.persistence.repository)
    不依赖任何外部数据源。
 """
 
+from .base import BaseRepository
 from .daily_price import DailyPriceRepository
 from .daily_valuation import DailyValuationRepository
 from .index_membership import IndexMembershipRepository
@@ -14,6 +15,7 @@ from .security import SecurityRepository
 from .valuation_history import ValuationHistoryRepository
 
 __all__ = [
+    "BaseRepository",
     "SecurityRepository",
     "DailyPriceRepository",
     "DailyValuationRepository",
