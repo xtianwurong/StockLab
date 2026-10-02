@@ -204,6 +204,118 @@ class MarketDataProvider:
         _logger.error("获取全市场估值快照失败")
         return pd.DataFrame()
 
+    def fetch_valuation_history(self, ts_code, period="全部"):
+        """
+        获取单只股票的逐日历史估值序列（百度股市通）
+
+        【用途】
+           与 fetch_realtime_valuations() 的「全市场单日快照」互补：
+           本方法返回单只股票跨年的完整序列，用于计算当前估值的历史分位。
+
+        【数据源选择理由】
+           百度股市通接口不走东财风控，且直接提供多指标历史序列，
+           是当前环境下唯一稳定可用的历史估值来源。
+
+        【为何不含股息率】
+           该接口不提供股息率指标（实测 indicator="股息率" 抛 TypeError），
+           股息率需由「每股股利 / 股价」自行计算，不在本方法职责内。
+
+        【已知数据源缺口】
+           实测该接口的「市销率」不可用（抛 TypeError），对应列整列写 NULL，
+           与 daily_valuations 表的 ps 列现状一致。
+
+        Args:
+            ts_code (str): 证券代码，如 "600519.SH"
+            period (str, optional): 历史区间，"全部" 或 "近五年" 等
+
+        Returns:
+            pd.DataFrame: 历史估值表，列为
+                          ts_code / trade_date / pe_ttm / pe_static / pb / ps / pcf；
+                          单个指标取不到时整列为 NaN，不省略列
+        """
+        # 百度接口接受 6 位纯数字代码；部分指标缺失时整列 NaN，不抛错
+        indicator_map = [
+            ("pe_ttm", "市盈率(TTM)"),
+            ("pe_static", "市盈率(静)"),
+            ("pb", "市净率"),
+            ("ps", "市销率"),
+            ("pcf", "市现率"),
+        ]
+
+        symbol = ts_code.split(".")[0]
+
+        # 以 PE-TTM 的交易日为基准轴，其余指标按日期对齐后并入；
+        # PE-TTM 缺失时退化用 PB，仍缺失则说明该标的完全无可用估值数据
+        base_dates, base_values = self._fetch_baidu_indicator_frame(
+            symbol, "市盈率(TTM)", period
+        )
+        if base_dates.empty:
+            base_dates, _ = self._fetch_baidu_indicator_frame(symbol, "市净率", period)
+        if base_dates.empty:
+            _logger.warning("[%s] 未返回任何历史估值数据", ts_code)
+            return pd.DataFrame()
+
+        result = pd.DataFrame()
+        result["trade_date"] = base_dates
+        result["pe_ttm"] = base_values
+
+        for column_name, indicator in indicator_map[1:]:
+            _, series_values = self._fetch_baidu_indicator_frame(symbol, indicator, period)
+            result[column_name] = series_values
+
+        result["ts_code"] = ts_code
+        # 列序必须与 market.valuation_history 表定义严格一致（UPSERT 按位置匹配）
+        result = result[["ts_code", "trade_date"] + [item[0] for item in indicator_map]]
+        result = result.sort_values(by="trade_date")
+
+        _logger.info(
+            "获取 %s 历史估值序列: %d 个交易日（%s ~ %s）",
+            ts_code,
+            len(result),
+            result["trade_date"].iloc[0],
+            result["trade_date"].iloc[-1],
+        )
+        return result.reset_index(drop=True)
+
+    def _fetch_baidu_indicator_frame(self, symbol, indicator, period):
+        """
+        调用百度股市通接口取单个估值指标的逐日序列（日期 + 数值）
+
+        【为何逐指标单独调用】
+           各指标可用性不一致（如市销率缺失），逐个调用可让单个失败
+           不影响其余指标，符合「数据源不提供的列写 NULL，绝不省略列」。
+
+        Args:
+            symbol (str): 6 位纯数字代码
+            indicator (str): 百度接口的指标名
+            period (str): 历史区间
+
+        Returns:
+            tuple: (date_series, value_series)；失败返回 (空 Series, 空 Series)
+        """
+        for attempt in range(1, self._retry_count + 1):
+            try:
+                raw = ak.stock_zh_valuation_baidu(
+                    symbol=symbol, indicator=indicator, period=period
+                )
+                if raw is None or raw.empty:
+                    return pd.Series(dtype="object"), pd.Series(dtype="float64")
+                return raw["date"], pd.to_numeric(raw["value"], errors="coerce")
+            except Exception as error:
+                _logger.debug(
+                    "stock_zh_valuation_baidu [%s/%s] 第 %d/%d 次失败: %s",
+                    symbol,
+                    indicator,
+                    attempt,
+                    self._retry_count,
+                    error,
+                )
+                if attempt < self._retry_count:
+                    time.sleep(self._retry_interval_seconds)
+
+        _logger.info("指标 [%s] 在 %s 上不可用，写入 NULL", indicator, symbol)
+        return pd.Series(dtype="object"), pd.Series(dtype="float64")
+
     def _normalize_ts_code(self, code):
         """
         将纯数字代码转换为标准 ts_code 格式

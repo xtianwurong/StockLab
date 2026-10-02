@@ -22,6 +22,9 @@ StockLab - A 股市场数据同步 CLI (scripts/sync_market_data.py)
 
    # 阶段三：仅同步估值快照
    python scripts/sync_market_data.py valuations
+
+   # 阶段四：仅同步历史估值序列（逐只抓取，耗时最长；不参与一键全跑）
+   python scripts/sync_market_data.py valuation-history --period 近五年
 """
 
 import argparse
@@ -39,6 +42,7 @@ from stocklab.persistence import (
     DailyValuationRepository,
     Database,
     SecurityRepository,
+    ValuationHistoryRepository,
     initialize_database,
 )
 
@@ -56,19 +60,26 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=(
             "A 股市场数据同步工具 - 将全市场数据同步到本地 DuckDB\n\n"
-            "子命令（缺省 = 一键全跑三个阶段）：\n"
-            "  securities   阶段一：同步股票基础信息（约 18 次子请求，几十秒）\n"
-            "  prices       阶段二：同步日 K 行情（逐只抓取，全历史约 5400 次请求）\n"
-            "  valuations   阶段三：同步最新全市场估值快照（1 次请求）"
+            "子命令（缺省 = 一键全跑前三个阶段）：\n"
+            "  securities         阶段一：同步股票基础信息（约 18 次子请求，几十秒）\n"
+            "  prices             阶段二：同步日 K 行情（逐只抓取，全历史约 5400 次请求）\n"
+            "  valuations         阶段三：同步最新全市场估值快照（1 次请求）\n"
+            "  valuation-history  阶段四：同步历史估值序列（逐只抓取，用于历史分位；耗时最长）"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["securities", "prices", "valuations"],
+        choices=["securities", "prices", "valuations", "valuation-history"],
         default=None,
         help="要执行的同步阶段（不传则按顺序全跑）",
+    )
+    parser.add_argument(
+        "--period",
+        type=str,
+        default="近五年",
+        help="valuation-history 阶段的历史区间：近五年 / 近十年 / 全部（默认 近五年）",
     )
     parser.add_argument(
         "--start-date",
@@ -206,6 +217,72 @@ def sync_daily_prices(database, start_date, end_date):
     return True
 
 
+def sync_valuation_history(database, period, ts_code_list=None):
+    """
+    阶段四：同步历史估值序列（用于计算历史估值分位）
+
+    【与阶段三的区别】
+       阶段三 valuations        = 全市场单日快照，横截面比较用；
+       阶段四 valuation-history = 单只跨年序列，历史分位计算用。
+       逐只抓取，全市场约 5572 次请求，耗时远长于阶段二。
+
+    Args:
+        database (Database): 数据库连接管理器
+        period (str): 历史区间，如 近五年 / 近十年 / 全部
+        ts_code_list (list, optional): 指定同步的证券代码列表；
+                                        为空时同步全市场
+
+    Returns:
+        bool: 是否同步成功
+    """
+    _logger.info("=" * 60)
+    _logger.info("阶段四：同步历史估值序列（区间: %s）", period)
+    _logger.info("=" * 60)
+
+    provider = MarketDataProvider()
+    repository = ValuationHistoryRepository(database)
+
+    securities = SecurityRepository(database).find_all()
+    if securities.empty:
+        _logger.error("证券列表为空，请先执行: sync_market_data.py securities")
+        return False
+
+    if ts_code_list:
+        targets = list(ts_code_list)
+        _logger.info("限定同步 %d 只指定标的", len(targets))
+    else:
+        targets = securities["ts_code"].tolist()
+        _logger.info("全市场 %d 只，逐只抓取中（耗时较长，可按批次分次执行）", len(targets))
+
+    total_count = 0
+    failed_count = 0
+
+    for index, ts_code in enumerate(targets):
+        df = provider.fetch_valuation_history(ts_code, period)
+        if df.empty:
+            failed_count += 1
+        else:
+            total_count += repository.upsert(df)
+
+        # 每 100 只打印一次进度：全市场同步耗时数小时，无进度反馈难以判断是否卡死
+        if (index + 1) % 100 == 0:
+            _logger.info(
+                "进度 %d/%d | 已写入 %d 条 | 失败 %d 只",
+                index + 1, len(targets), total_count, failed_count,
+            )
+
+    _logger.info(
+        "历史估值同步完成: 成功 %d 只，失败 %d 只，共 %d 条记录",
+        len(targets) - failed_count, failed_count, total_count,
+    )
+
+    if failed_count == len(targets):
+        _logger.error("全部 %d 只标的历史估值抓取失败", len(targets))
+        return False
+
+    return True
+
+
 def sync_valuations(database):
     """阶段三：同步最新全市场估值快照"""
     _logger.info("=" * 60)
@@ -278,6 +355,15 @@ def main():
                     _logger.error("估值快照同步失败")
                     sys.exit(1)
                 _logger.warning("估值快照同步失败（日 K 数据已写入，可稍后重试）")
+            if command == "valuations":
+                return
+
+        # 阶段四：同步历史估值序列（默认不参与一键全跑：逐只抓取耗时过长）
+        if command == "valuation-history":
+            if not sync_valuation_history(database, args.period):
+                _logger.error("历史估值序列同步失败")
+                sys.exit(1)
+            return
 
     _logger.info("=" * 60)
     _logger.info("同步任务完成")

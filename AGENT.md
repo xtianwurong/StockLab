@@ -41,32 +41,36 @@ StockLab/
 │   │   ├── stock_data.py               #     【个股多源数据服务】MarketDataService（三级容错 + 估值独立降级）
 │   │   └── market_provider.py          #     【全市场数据 Provider】MarketDataProvider（全市场批量取数）
 │   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
-│   │   ├── __init__.py                 #     本层统一出口（Database + 三个 Repository）
+│   │   ├── __init__.py                 #     本层统一出口（Database + 四个 Repository）
 │   │   ├── storage/                    #     数据存储基础设施
 │   │   │   ├── __init__.py             #       导出 Database / initialize_database
 │   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with）
 │   │   │   └── schema.py               #       DDL 唯一定义与 initialize_database()
 │   │   └── repository/                 #     数据访问层（表级 SQL 封装）
-│   │       ├── __init__.py             #       导出三个 Repository
+│   │       ├── __init__.py             #       导出四个 Repository
 │   │       ├── security.py             #       reference.securities 读写
 │   │       ├── daily_price.py          #       market.daily_prices 读写
-│   │       └── daily_valuation.py      #       market.daily_valuations 读写
+│   │       ├── daily_valuation.py      #       market.daily_valuations 读写
+│   │       └── valuation_history.py    #       market.valuation_history 读写
 │   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
 │   │   ├── __init__.py                 #     导出 MarketDataFacade
 │   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
 │   ├── analytics/                      #   统计分析层（纯变换，不取数不落库）
 │   │   ├── __init__.py                 #     导出分析器 / 渲染器 / 口径常量
 │   │   ├── valuation_distribution.py   #     ValuationDistributionAnalyzer：全市场市盈率分布统计
+│   │   ├── valuation_percentile.py     #     ValuationPercentileAnalyzer：个股历史估值分位计算
 │   │   ├── profile_reporter.py         #     ValuationDistributionReporter：统计报告文本渲染（控制台）
-│   │   └── markdown_reporter.py        #     ValuationDistributionMarkdownReporter：统计报告 Markdown 渲染（归档）
+│   │   ├── markdown_reporter.py        #     ValuationDistributionMarkdownReporter：统计报告 Markdown 渲染（归档）
+│   │   └── percentile_reporter.py      #     ValuationPercentileReporter：分位报告渲染（文本 + Markdown）
 │   └── visualizer/                     #   可视化 / Web 呈现层
 │       ├── __init__.py                 #     导出编排类与网页生成类
 │       ├── sector_trend.py             #     SectorTrendVisualizer 端到端编排
 │       └── page_generator.py           #     SectorWebPageGenerator 模板填充 → HTML
 ├── scripts/                            # ── 入口脚本（只做参数解析 + 调用库）──
 │   ├── generate_sector_trend.py        #     命令行入口：生成板块走势网页
-│   ├── sync_market_data.py             #     命令行入口：全市场数据同步到本地 DuckDB
-│   └── analyze_pe_distribution.py      #     命令行入口：全市场市盈率分布统计
+│   ├── sync_market_data.py             #     命令行入口：全市场数据同步到本地 DuckDB（四个阶段）
+│   ├── analyze_pe_distribution.py      #     命令行入口：全市场市盈率分布统计
+│   └── analyze_valuation_percentile.py #     命令行入口：个股历史估值分位计算
 ├── tests/                              # ── 自检脚本 ──
 │   └── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
 ├── templates/                          # ── 静态资源 ──
@@ -170,7 +174,8 @@ with MarketDataFacade() as facade:          # 优先级取自 config.ini
 |------|------|
 | `fetch_securities()` | 全市场证券基础信息；本地非空即命中，否则远端取并回写 |
 | `fetch_daily_prices(ts_code, start_date, end_date)` | 单只日 K（不复权）；日期入参用 `YYYY-MM-DD`，转调远端时自动压缩为 `YYYYMMDD` |
-| `fetch_valuations(trade_date=None)` | 全市场估值；`trade_date` 为空时取本地最新交易日，否则回退远端实时快照 |
+| `fetch_valuations(trade_date=None)` | 全市场估值快照；`trade_date` 为空时取本地最新交易日，否则回退远端实时快照 |
+| `fetch_valuation_history(ts_code, period)` | 单只个股的逐日历史估值序列；**无论优先级如何都遵循「先查本地 → 未命中取远端并回写」**（本地是缓存而非唯一副本） |
 | `priority` | 只读属性，返回当前生效的优先级 |
 | `close()` / `with` | 释放本地数据库连接（支持上下文管理） |
 
@@ -261,7 +266,40 @@ print(ValuationDistributionReporter().format_text_report(profile))
 > **为何不用等宽分桶**：PE 的业务关注区间高度非线性（0~50 密集、50 以上迅速稀疏），
 > 固定边界让每档都有明确的投资含义；等宽分桶会把 0~30 全挤进同一根柱子。
 
-### 报告排版约束
+### 历史估值分位（valuation_percentile）
+
+回答「当前估值在历史上贵不贵」，产出可量化、可复算的分位结论。
+
+```python
+from stocklab.analytics import ValuationPercentileAnalyzer, ValuationPercentileReporter
+
+results = ValuationPercentileAnalyzer().analyze(
+    history_df, current_values={"pe_ttm": 19.32}, start_date="2021-01-01"
+)
+print(ValuationPercentileReporter().format_console_report("600519.SH", results))
+```
+
+| 模块 | 职责 |
+|------|------|
+| `valuation_percentile.py` | `ValuationPercentileAnalyzer` 分析器 + `ValuationPercentileResult` 实体；纯计算 |
+| `percentile_reporter.py` | `ValuationPercentileReporter` 渲染；控制台文本 + Markdown 双形态 |
+
+> **分位口径（唯一实现，不可与其他工具混用）**：
+> `分位 = (区间内低于当前值的样本数 / 有效样本总数) × 100%`
+>
+> 这是**经验分布函数 CDF** 口径，与 `pandas.Series.quantile()`（线性插值分位点）
+> **不是同一件事**：`quantile(0.25)` 返回「第 25 百分位的数值」，本模块返回「第 25 百分位的时间占比」。
+> 两者用途不同，**绝不可互相替代或混报**。
+
+关键规则：
+
+- **亏损期必须排除**：`PE <= 0` 的样本不参与分母计算，否则亏损股的分位被严重扭曲。
+  负值保留在原始序列中（不篡改数据），仅在统计口径上排除。
+- **当前值优先级**：显式传入 > 区间内最新交易日值。
+- **档位划分**：分位 ≤ 30% 相对低位，30%~70% 中性，≥ 70% 相对高位。
+- **不可用的指标要显式标记**：表内存在但无有效样本的指标返回 `is_available() == False`，
+  调用方据此区分「算不出来」与「不存在」。
+- 单指标分位**不等于**「低估值」结论：仍需与行业、同业横向比较后才能定性。
 
 - **分位数不配条形**：右偏极端时最大值可达数千倍，若以最大值为满格线性映射，
   P5~P95 的条形会全部塌缩成空条反而误导读者。分布形态由区间直方图承担。
@@ -345,6 +383,28 @@ print(ValuationDistributionReporter().format_text_report(profile))
 
 > **NULL 语义红线**：估值字段 NULL 表示亏损或无数据，**严禁**强制转换为 0；数据源不提供的列写 `NaN`（落库即 NULL），绝不省略列——省略会导致 UPSERT 列数不匹配而整体失败。
 
+#### `market.valuation_history` — 历史估值序列（单只个股，跨年）
+
+主键：`(ts_code, trade_date)`
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `ts_code` | VARCHAR | 证券代码 |
+| `trade_date` | DATE | 交易日期 |
+| `pe_ttm` | DOUBLE | 市盈率 TTM |
+| `pe_static` | DOUBLE | 市盈率（静） |
+| `pb` | DOUBLE | 市净率 |
+| `ps` | DOUBLE | 市销率（**数据源不提供 → 恒为 NULL**） |
+| `pcf` | DOUBLE | 市现率 |
+
+> **与 `market.daily_valuations` 的区别（务必分清，不可互替）**：
+> - `daily_valuations` = 全市场**单日快照**，每只股票每日一行 → 用于当下估值**横截面**比较（全市场 PE 分布）
+> - `valuation_history` = 单只**跨年序列**，一次可含数百上千个交易日 → 用于计算**历史分位**
+>
+> 数据源：百度股市通 `stock_zh_valuation_baidu`（不走东财风控，单只约 600~900 个交易日）。
+> 实测该接口的 `市销率` 与 `股息率` 均不可用，对应列写 NULL。
+> **股息率需由「每股股利 / 股价」自行计算**，数据源不直接提供。
+
 #### `sys.sync_tasks` — 同步任务状态
 
 | 列 | 类型 | 说明 |
@@ -372,7 +432,8 @@ print(ValuationDistributionReporter().format_text_report(profile))
 |----|------|------|
 | `SecurityRepository` | `upsert(df)` / `find_all()` / `find_by_code(ts_code)` / `count()` | 证券信息读写 |
 | `DailyPriceRepository` | `upsert(df)` / `find_by_code(ts_code, start_date, end_date)` / `find_by_date(trade_date)` / `get_max_trade_date()` / `count()` | 日 K 读写；`get_max_trade_date()` 供增量同步定位断点 |
-| `DailyValuationRepository` | `upsert(df)` / `find_by_code(...)` / `find_by_date(trade_date)` / `count()` | 估值读写 |
+| `DailyValuationRepository` | `upsert(df)` / `find_by_code(...)` / `find_by_date(trade_date)` / `count()` | 估值快照读写 |
+| `ValuationHistoryRepository` | `upsert(df)` / `find_by_code(ts_code, start_date, end_date)` / `find_latest_date(ts_code)` / `count()` | 历史估值序列读写 |
 
 ### 使用约束
 
@@ -406,9 +467,21 @@ print(ValuationDistributionReporter().format_text_report(profile))
 ./venv/bin/python scripts/sync_market_data.py prices --incremental       # 阶段二：日 K 行情
 ./venv/bin/python scripts/sync_market_data.py prices --start-date 1990-12-19   # 阶段二：全历史回补
 ./venv/bin/python scripts/sync_market_data.py valuations                 # 阶段三：估值快照
+./venv/bin/python scripts/sync_market_data.py valuation-history --period 近五年  # 阶段四：历史估值序列
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
 ./venv/bin/python scripts/sync_market_data.py --securities-only
+
+# 个股历史估值分位（替代「处于低位/高位」这类无法复核的定性描述）
+./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH
+
+# 指定计算区间与当前值（当前值缺省取历史序列最新一日）
+./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH \
+    --start-date 2021-01-01 --pe-ttm 19.32
+
+# 导出 Markdown
+./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH \
+    --markdown output/600519_percentile.md
 
 # 统计 A 股全市场市盈率分布（PE-TTM 口径，默认仅打印到控制台）
 ./venv/bin/python scripts/analyze_pe_distribution.py
@@ -467,18 +540,22 @@ pip install -r requirements.txt
 3. 腾讯接口返回 `~` 分隔长串，读取时编码必须设为 `gbk`。
 4. DuckDB 的 `system` 是保留字，同步状态表使用 `sys` schema。
 5. 全市场数据同步耗时较长（全历史回补约 5400 次请求），建议日常用 `--incremental`，或按交易所分批执行以控制失败影响面。
-6. 估值字段（PE/PB 等）允许 NULL，表示亏损或无数据，不应强制转换为 0。
-7. `output/` 与 `data/` 已被 `.gitignore` 排除；`templates/` 与 `config.ini` 则是入库的运行必需文件，删除后网页生成会失败。
-8. **市盈率分布统计依赖 `market.daily_valuations` 有数据**。`local_first` 下只要本地快照非空即判定命中，
+6. **`valuation-history` 阶段四不参与一键全跑**：逐只抓取全市场约 5572 次请求（每次含 5 个指标子请求），耗时以小时计。日常按需单只调用 `analyze_valuation_percentile.py <代码>` 即可，它会自动「本地未命中 → 取远端 → 回写本地」。
+7. 估值字段（PE/PB 等）允许 NULL，表示亏损或无数据，不应强制转换为 0。
+8. `output/` 与 `data/` 已被 `.gitignore` 排除；`templates/` 与 `config.ini` 则是入库的运行必需文件，删除后网页生成会失败。
+9. **市盈率分布统计依赖 `market.daily_valuations` 有数据**。`local_first` 下只要本地快照非空即判定命中，
    即使只有个位数条数。代表性判定在库层（`is_representative()`，阈值 1000 只），
    报告表头会自动标注「分布结论不成立」，入口脚本再补充补救提示。
    首次使用先跑 `sync_market_data.py valuations`，或加 `--priority remote_first` 直接取远端快照。
-9. 估值快照的 `trade_date` 是**写入快照的日期**，不一定是真实交易日；报告展示的日期取自实际样本的最大值。
-10. **两个估值数据源的「亏损」表达方式不同，但分析口径等价**：
+10. 估值快照的 `trade_date` 是**写入快照的日期**，不一定是真实交易日；报告展示的日期取自实际样本的最大值。
+11. **两个估值数据源的「亏损」表达方式不同，但分析口径等价**：
     - 东财（`stock_zh_a_spot_em`）对亏损股返回 `-`，`to_numeric(errors="coerce")` 后为 **NaN** → 计入「无有效 PE」；
     - 腾讯（`qt.gtimg.cn` 字段 39）对亏损股返回**负值**（如 ST嘉应 -703）→ 计入「PE ≤ 0」。
     两者都会被排除出分位数与分桶，但分别落在不同分类里，对比不同数据源的报告时需注意。
     > 实测回测：同一批 5572 只证券，负值形态与 NaN 形态下有效样本数与中位数完全一致。
+12. **历史估值分位的样本数会小于交易日数**：差额即被排除的亏损期。
+    例如金科股份 606 个交易日中 PE-TTM 仅 402 个有效样本（排除 204 个亏损期），
+    这是刻意为之——亏损期不具备估值比较意义，计入分母会扭曲结论。
 
 ## 许可证
 

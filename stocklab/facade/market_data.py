@@ -42,6 +42,7 @@ from stocklab.persistence import (
     DailyValuationRepository,
     Database,
     SecurityRepository,
+    ValuationHistoryRepository,
     initialize_database,
 )
 
@@ -86,6 +87,7 @@ class MarketDataFacade:
         self._security_repo = SecurityRepository(self._database)
         self._price_repo = DailyPriceRepository(self._database)
         self._valuation_repo = DailyValuationRepository(self._database)
+        self._history_repo = ValuationHistoryRepository(self._database)
 
     def _resolve_priority(self, priority):
         """
@@ -213,6 +215,40 @@ class MarketDataFacade:
             return remote_data
         _logger.warning("远端估值快照获取失败，回退本地库")
         return self._read_local_valuations(trade_date)
+
+    def fetch_valuation_history(self, ts_code, period="全部"):
+        """
+        获取单只证券的逐日历史估值序列
+
+        【与 fetch_valuations 的区别】
+           fetch_valuations      = 全市场「单日快照」，用于当下估值横截面比较；
+           fetch_valuation_history = 单只「跨年序列」，用于计算历史分位。
+           二者服务的分析问题不同，不可互相替代。
+
+        【优先级策略的特殊性】
+           本方法只有远端来源（本地库是缓存而非唯一副本），因此无论
+           local_first 还是 remote_first，都遵循「先查本地 → 未命中或不足则取远端并回写」。
+           这是 cache-aside 的标准形态，与前三个方法的「命中即返回」不同。
+
+        Args:
+            ts_code (str): 标准证券代码，如 "600519.SH"
+            period (str, optional): 历史区间，"全部" 或 "近五年" 等
+
+        Returns:
+            pd.DataFrame: 历史估值表，列为
+                          ts_code / trade_date / pe_ttm / pe_static / pb / ps / pcf
+        """
+        local_data = self._history_repo.find_by_code(ts_code)
+        if not local_data.empty:
+            _logger.debug(
+                "历史估值命中本地库: %s %d 条", ts_code, len(local_data)
+            )
+            return local_data
+
+        _logger.info("本地库无 %s 的历史估值，取远端接口", ts_code)
+        remote_data = self._provider.fetch_valuation_history(ts_code, period)
+        self._write_back(self._history_repo, remote_data, "valuation_history")
+        return remote_data
 
     def _read_local_valuations(self, trade_date):
         """

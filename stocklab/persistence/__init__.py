@@ -14,6 +14,7 @@ from .repository import (
     DailyPriceRepository,
     DailyValuationRepository,
     SecurityRepository,
+    ValuationHistoryRepository,
 )
 from .storage import DEFAULT_DB_PATH, Database, initialize_database
 
@@ -24,4 +25,5 @@ __all__ = [
     "SecurityRepository",
     "DailyPriceRepository",
     "DailyValuationRepository",
+    "ValuationHistoryRepository",
 ]
