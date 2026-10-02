@@ -41,17 +41,18 @@ StockLab/
 │   │   ├── stock_data.py               #     【个股多源数据服务】MarketDataService（三级容错 + 估值独立降级）
 │   │   └── market_provider.py          #     【全市场数据 Provider】MarketDataProvider（全市场批量取数）
 │   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
-│   │   ├── __init__.py                 #     本层统一出口（Database + 四个 Repository）
+│   │   ├── __init__.py                 #     本层统一出口（Database + 五个 Repository）
 │   │   ├── storage/                    #     数据存储基础设施
 │   │   │   ├── __init__.py             #       导出 Database / initialize_database
 │   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with）
 │   │   │   └── schema.py               #       DDL 唯一定义与 initialize_database()
 │   │   └── repository/                 #     数据访问层（表级 SQL 封装）
-│   │       ├── __init__.py             #       导出四个 Repository
+│   │       ├── __init__.py             #       导出五个 Repository
 │   │       ├── security.py             #       reference.securities 读写
 │   │       ├── daily_price.py          #       market.daily_prices 读写
 │   │       ├── daily_valuation.py      #       market.daily_valuations 读写
-│   │       └── valuation_history.py    #       market.valuation_history 读写
+│   │       ├── valuation_history.py    #       market.valuation_history 读写
+│   │       └── index_membership.py     #       reference.index_memberships 读写
 │   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
 │   │   ├── __init__.py                 #     导出 MarketDataFacade
 │   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
@@ -317,8 +318,8 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 
 | Schema | 职责 | 表 |
 |--------|------|----|
-| `reference` | 证券身份（慢变维表） | `securities` |
-| `market` | 行情与估值（时间序列事实表） | `daily_prices`、`daily_valuations` |
+| `reference` | 证券身份（慢变维表） | `securities`、`index_memberships` |
+| `market` | 行情与估值（时间序列事实表） | `daily_prices`、`daily_valuations`、`valuation_history` |
 | `sys` | 同步任务状态 | `sync_tasks` |
 
 > **为什么是 `sys` 不是 `system`**：`system` 是 DuckDB 保留字，直接用作 schema 名会抛 `BinderException`。
@@ -405,6 +406,28 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 > 实测该接口的 `市销率` 与 `股息率` 均不可用，对应列写 NULL。
 > **股息率需由「每股股利 / 股价」自行计算**，数据源不直接提供。
 
+#### `reference.index_memberships` — 指数成分股
+
+主键：`(ts_code, index_code, effective_date)`
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `ts_code` | VARCHAR | 证券代码 |
+| `index_code` | VARCHAR | 指数代码，如 `000300` |
+| `index_name` | VARCHAR | 指数名称，如 `沪深300` |
+| `effective_date` | DATE | 成分生效日期（调样日） |
+
+> **为什么按 `effective_date` 分区而非只存当前状态**：指数每年定期调样两次，
+> 保留生效日期才能回溯「某只股票在历史某时点属于哪个指数」，
+> 避免用今天的成分去解释历史估值分位。
+
+> **本表解决的选股问题**：`reference.securities.industry` 在多数免费数据源上不可用，
+> 指数成分是「同业分组」的近似替代维度 —— 同指数成分股构成可比样本池，
+> 低估值可做指数内横向比较以替代「行业平均估值」，全市场预筛时可先在指数内缩样本。
+
+当前覆盖 6 个宽基指数（上证50 / 沪深300 / 中证500 / 中证A500 / 中证1000 / 中证2000），
+合计 4350 条记录，覆盖全市场 **68.7%**（3826 / 5572 只）。
+
 #### `sys.sync_tasks` — 同步任务状态
 
 | 列 | 类型 | 说明 |
@@ -434,6 +457,7 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 | `DailyPriceRepository` | `upsert(df)` / `find_by_code(ts_code, start_date, end_date)` / `find_by_date(trade_date)` / `get_max_trade_date()` / `count()` | 日 K 读写；`get_max_trade_date()` 供增量同步定位断点 |
 | `DailyValuationRepository` | `upsert(df)` / `find_by_code(...)` / `find_by_date(trade_date)` / `count()` | 估值快照读写 |
 | `ValuationHistoryRepository` | `upsert(df)` / `find_by_code(ts_code, start_date, end_date)` / `find_latest_date(ts_code)` / `count()` | 历史估值序列读写 |
+| `IndexMembershipRepository` | `upsert(df)` / `find_by_index(index_code, effective_date=None)` / `find_by_code(ts_code)` / `find_latest_date(index_code)` / `list_indexes()` / `count()` | 指数成分读写；`list_indexes()` 列出已入库指数及最新生效日 |
 
 ### 使用约束
 
@@ -468,6 +492,7 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 ./venv/bin/python scripts/sync_market_data.py prices --start-date 1990-12-19   # 阶段二：全历史回补
 ./venv/bin/python scripts/sync_market_data.py valuations                 # 阶段三：估值快照
 ./venv/bin/python scripts/sync_market_data.py valuation-history --period 近五年  # 阶段四：历史估值序列
+./venv/bin/python scripts/sync_market_data.py indexes             # 阶段五：主流宽基指数成分
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
 ./venv/bin/python scripts/sync_market_data.py --securities-only
@@ -541,6 +566,7 @@ pip install -r requirements.txt
 4. DuckDB 的 `system` 是保留字，同步状态表使用 `sys` schema。
 5. 全市场数据同步耗时较长（全历史回补约 5400 次请求），建议日常用 `--incremental`，或按交易所分批执行以控制失败影响面。
 6. **`valuation-history` 阶段四不参与一键全跑**：逐只抓取全市场约 5572 次请求（每次含 5 个指标子请求），耗时以小时计。日常按需单只调用 `analyze_valuation_percentile.py <代码>` 即可，它会自动「本地未命中 → 取远端 → 回写本地」。
+6.1 **`indexes` 阶段五参与一键全跑**：仅 6 次请求、数秒完成，无副作用。
 7. 估值字段（PE/PB 等）允许 NULL，表示亏损或无数据，不应强制转换为 0。
 8. `output/` 与 `data/` 已被 `.gitignore` 排除；`templates/` 与 `config.ini` 则是入库的运行必需文件，删除后网页生成会失败。
 9. **市盈率分布统计依赖 `market.daily_valuations` 有数据**。`local_first` 下只要本地快照非空即判定命中，
@@ -556,6 +582,11 @@ pip install -r requirements.txt
 12. **历史估值分位的样本数会小于交易日数**：差额即被排除的亏损期。
     例如金科股份 606 个交易日中 PE-TTM 仅 402 个有效样本（排除 204 个亏损期），
     这是刻意为之——亏损期不具备估值比较意义，计入分母会扭曲结论。
+13. **巨潮 `stock_profile_cninfo` 已需授权**：实测返回
+    `{"resultcode": 451, "resultmsg": "ApiFilter 未经授权的访问,code:003 token null"}`，
+    HTTP 200 但数据为空。`MarketDataProvider.fetch_company_profile()` 已实现，
+    在接口开放的环境可直接用于补齐 `securities.industry` / `list_date`；
+    接口不可用时以 `reference.index_memberships` 的指数成分作为同业分组的替代维度。
 
 ## 许可证
 

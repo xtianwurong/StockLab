@@ -42,16 +42,19 @@ class MarketDataProvider:
       3. 获取最新全市场估值快照
     """
 
-    def __init__(self, retry_count=2, retry_interval_seconds=2):
+    def __init__(self, retry_count=2, retry_interval_seconds=2, interval_seconds=0.2):
         """
         初始化全市场数据 Provider
 
         Args:
-            retry_count (int): 失败重试次数
-            retry_interval_seconds (int): 重试间隔秒数
+            retry_count (int, optional): 失败重试次数
+            retry_interval_seconds (int, optional): 重试间隔秒数
+            interval_seconds (float, optional): 同一数据源的两次调用之间的最小间隔，
+                                               用于规避巨潮等接口的高频限流
         """
         self._retry_count = retry_count
         self._retry_interval_seconds = retry_interval_seconds
+        self._interval_seconds = interval_seconds
 
     def fetch_securities(self):
         """
@@ -276,6 +279,169 @@ class MarketDataProvider:
             result["trade_date"].iloc[-1],
         )
         return result.reset_index(drop=True)
+
+    def fetch_index_membership(self, index_code):
+        """
+        获取指数成分股（中证指数官网）
+
+        【用途】
+           在行业分类数据不可用时，指数成分可作为「同业分组」的近似维度：
+             - 同指数成分股构成可比样本池；
+             - 低估值可做指数内横向比较，替代「行业平均估值」；
+             - 全市场预筛时先在指数内缩样本。
+
+        【为何用中证官网】
+           一次请求即返回全量成分（含成分券代码、名称、交易所、生效日期），
+           无需逐只拼接，且为指数编制机构官方口径。
+
+        Args:
+            index_code (str): 指数代码，如 "000300"（沪深300）
+
+        Returns:
+            pd.DataFrame: 指数成分表，列为
+                          ts_code / index_code / index_name / effective_date
+        """
+        raw = pd.DataFrame()
+        for attempt in range(1, self._retry_count + 1):
+            try:
+                fetched = ak.index_stock_cons_csindex(symbol=index_code)
+                if fetched is None or fetched.empty:
+                    _logger.warning("指数 [%s] 未返回成分数据", index_code)
+                    return pd.DataFrame()
+                raw = fetched
+                break
+            except Exception as error:
+                _logger.debug(
+                    "index_stock_cons_csindex [%s] 第 %d/%d 次失败: %s",
+                    index_code, attempt, self._retry_count, error,
+                )
+                if attempt < self._retry_count:
+                    time.sleep(self._retry_interval_seconds)
+
+        if raw.empty:
+            return pd.DataFrame()
+
+        result = pd.DataFrame()
+        # _normalize_ts_code 是标量函数，对 Series 需逐元素调用
+        constituent_codes = raw["成分券代码"].astype(str).str.zfill(6)
+        result["ts_code"] = constituent_codes.apply(self._normalize_ts_code)
+        result["index_code"] = str(raw["指数代码"].iloc[0])
+        result["index_name"] = str(raw["指数名称"].iloc[0])
+        result["effective_date"] = pd.to_datetime(raw["日期"]).dt.date
+
+        # 同一次返回里生效日期一致，去重后写入
+        result = result.drop_duplicates(subset=["ts_code", "index_code", "effective_date"])
+
+        _logger.info(
+            "获取指数 [%s] %s 成分: %d 只（生效日 %s）",
+            result["index_code"].iloc[0],
+            result["index_name"].iloc[0],
+            len(result),
+            result["effective_date"].iloc[0],
+        )
+        return result[["ts_code", "index_code", "index_name", "effective_date"]]
+
+    def fetch_company_profile(self, ts_code):
+        """
+        获取个股公司概况（巨潮资讯）
+
+        【为何用它补全证券基础信息】
+           reference.securities 的 industry / area / list_date 三个字段
+           建表时留空（原数据源不提供）。本接口一次请求即可补齐：
+             - 所属行业  -> industry（分组做同业比较的基础）
+             - 上市日期  -> list_date（上市时长 / 次新股识别）
+             - 入选指数  -> index_membership（沪深300 / 上证50 等，
+                            可作为「同业」的近似分组维度）
+           巨潮为官方披露平台，不走东财风控，实测单只约 0.2 秒、无封禁。
+
+        Args:
+            ts_code (str): 证券代码，如 "600519.SH"
+
+        Returns:
+            pd.DataFrame: 含 ts_code / industry / list_date / index_membership
+                          的单行表；取不到时返回空表
+        """
+        symbol = ts_code.split(".")[0]
+
+        raw = pd.DataFrame()
+        for attempt in range(1, self._retry_count + 1):
+            try:
+                # 巨潮对高频请求会静默限流（返回 HTTP 200 但数据为空），
+                # 因此每次调用之间保持固定间隔，并对空结果也退避重试
+                if attempt > 1:
+                    time.sleep(self._interval_seconds)
+                    time.sleep(self._retry_interval_seconds)
+
+                fetched = ak.stock_profile_cninfo(symbol=symbol)
+                if fetched is not None and not fetched.empty:
+                    raw = fetched
+                    break
+                _logger.debug(
+                    "stock_profile_cninfo [%s] 返回空数据（第 %d/%d 次）",
+                    symbol, attempt, self._retry_count,
+                )
+            except Exception as error:
+                _logger.debug(
+                    "stock_profile_cninfo [%s] 第 %d/%d 次失败: %s",
+                    symbol, attempt, self._retry_count, error,
+                )
+                if attempt < self._retry_count:
+                    time.sleep(self._retry_interval_seconds)
+
+        if raw.empty:
+            _logger.warning("[%s] 公司概况不可用（巨潮限流或该标的未收录）", ts_code)
+            return pd.DataFrame()
+
+        row = raw.iloc[0]
+        result = pd.DataFrame()
+        result["ts_code"] = ts_code
+        result["industry"] = self._clean_text_field(row, "所属行业")
+        result["list_date"] = self._clean_date_field(row, "上市日期")
+        result["index_membership"] = self._clean_text_field(row, "入选指数")
+        return result
+
+    def _clean_text_field(self, row, column_name):
+        """
+        提取并清洗概况表中的文本字段
+
+        Args:
+            row (pd.Series): 概况表的一行
+            column_name (str): 目标列名
+
+        Returns:
+            str: 清洗后的文本；缺失或为占位值时返回空字符串
+        """
+        if column_name not in row:
+            return ""
+        value = row[column_name]
+        # NaN 自身不等于自身，据此识别缺失
+        if value is None or value != value:
+            return ""
+        text = str(value).strip()
+        if text in ("None", "nan", "NaT", "-"):
+            return ""
+        return text
+
+    def _clean_date_field(self, row, column_name):
+        """
+        提取并清洗概况表中的日期字段
+
+        Args:
+            row (pd.Series): 概况表的一行
+            column_name (str): 目标列名
+
+        Returns:
+            datetime.date: 日期对象；缺失或无法解析时返回 None（落库即 NULL）
+        """
+        if column_name not in row:
+            return None
+        value = row[column_name]
+        if value is None or value != value:
+            return None
+        try:
+            return pd.to_datetime(str(value).strip()).date()
+        except (ValueError, TypeError):
+            return None
 
     def _fetch_baidu_indicator_frame(self, symbol, indicator, period):
         """

@@ -25,6 +25,9 @@ StockLab - A 股市场数据同步 CLI (scripts/sync_market_data.py)
 
    # 阶段四：仅同步历史估值序列（逐只抓取，耗时最长；不参与一键全跑）
    python scripts/sync_market_data.py valuation-history --period 近五年
+
+   # 阶段五：仅同步主流宽基指数成分（同业分组维度，数秒完成）
+   python scripts/sync_market_data.py indexes
 """
 
 import argparse
@@ -41,12 +44,24 @@ from stocklab.persistence import (
     DailyPriceRepository,
     DailyValuationRepository,
     Database,
+    IndexMembershipRepository,
     SecurityRepository,
     ValuationHistoryRepository,
     initialize_database,
 )
 
 _logger = logging.getLogger("StockLab.Sync")
+
+# 主流宽基指数清单（中证官网口径），用于建立「同业分组」的近似维度。
+# 行业分类数据不可用时，指数成分可替代「同行业可比样本池」。
+_INDEX_CODES = (
+    ("000016", "上证50"),
+    ("000300", "沪深300"),
+    ("000905", "中证500"),
+    ("000510", "中证A500"),
+    ("000852", "中证1000"),
+    ("932000", "中证2000"),
+)
 
 
 def parse_args():
@@ -64,14 +79,15 @@ def parse_args():
             "  securities         阶段一：同步股票基础信息（约 18 次子请求，几十秒）\n"
             "  prices             阶段二：同步日 K 行情（逐只抓取，全历史约 5400 次请求）\n"
             "  valuations         阶段三：同步最新全市场估值快照（1 次请求）\n"
-            "  valuation-history  阶段四：同步历史估值序列（逐只抓取，用于历史分位；耗时最长）"
+            "  valuation-history  阶段四：同步历史估值序列（逐只抓取，用于历史分位；耗时最长）\n"
+            "  indexes             阶段五：同步主流宽基指数成分（同业分组维度；约 6 次请求，数秒）"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["securities", "prices", "valuations", "valuation-history"],
+        choices=["securities", "prices", "valuations", "valuation-history", "indexes"],
         default=None,
         help="要执行的同步阶段（不传则按顺序全跑）",
     )
@@ -215,6 +231,46 @@ def sync_daily_prices(database, start_date, end_date):
         return False
 
     return True
+
+
+def sync_index_membership(database):
+    """
+    阶段五：同步主流宽基指数成分（建立「同业分组」的近似维度）
+
+    【用途】
+       reference.securities.industry 在多数免费数据源上不可用，
+       指数成分可作为同业的近似替代：同指数成分股构成可比样本池，
+       低估值判断可做指数内横向比较，替代「行业平均估值」。
+
+    【规模】
+       6 个指数合计约 4350 条记录，每指数 1 次请求，耗时数秒。
+
+    Returns:
+        bool: 是否同步成功
+    """
+    _logger.info("=" * 60)
+    _logger.info("阶段五：同步主流宽基指数成分")
+    _logger.info("=" * 60)
+
+    provider = MarketDataProvider()
+    repository = IndexMembershipRepository(database)
+
+    total_count = 0
+    success_count = 0
+
+    for index_code, index_name in _INDEX_CODES:
+        df = provider.fetch_index_membership(index_code)
+        if df.empty:
+            _logger.warning("指数 [%s] %s 成分获取失败，跳过", index_code, index_name)
+            continue
+        total_count += repository.upsert(df)
+        success_count += 1
+
+    _logger.info(
+        "指数成分同步完成: 成功 %d/%d 个指数，共 %d 条记录",
+        success_count, len(_INDEX_CODES), total_count,
+    )
+    return success_count > 0
 
 
 def sync_valuation_history(database, period, ts_code_list=None):
@@ -364,6 +420,13 @@ def main():
                 _logger.error("历史估值序列同步失败")
                 sys.exit(1)
             return
+
+        # 阶段五：同步指数成分（耗时极短，默认参与一键全跑）
+        if command in (None, "indexes"):
+            if not sync_index_membership(database):
+                _logger.warning("指数成分同步失败（不影响其他阶段数据）")
+            if command == "indexes":
+                return
 
     _logger.info("=" * 60)
     _logger.info("同步任务完成")

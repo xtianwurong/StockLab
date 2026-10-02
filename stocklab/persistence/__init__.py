@@ -13,6 +13,7 @@ StockLab 本地数据持久化层 (stocklab.persistence)
 from .repository import (
     DailyPriceRepository,
     DailyValuationRepository,
+    IndexMembershipRepository,
     SecurityRepository,
     ValuationHistoryRepository,
 )
@@ -26,4 +27,5 @@ __all__ = [
     "DailyPriceRepository",
     "DailyValuationRepository",
     "ValuationHistoryRepository",
+    "IndexMembershipRepository",
 ]

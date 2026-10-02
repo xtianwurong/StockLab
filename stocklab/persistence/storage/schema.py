@@ -129,6 +129,18 @@ CREATE TABLE IF NOT EXISTS market.valuation_history (
 );
 """
 
+# --- reference.index_memberships ---
+
+_CREATE_TABLE_INDEX_MEMBERSHIPS = """
+CREATE TABLE IF NOT EXISTS reference.index_memberships (
+    ts_code          VARCHAR,
+    index_code       VARCHAR,
+    index_name       VARCHAR,
+    effective_date   DATE,
+    PRIMARY KEY (ts_code, index_code, effective_date)
+);
+"""
+
 # --- sys.sync_tasks ---
 
 _CREATE_TABLE_SYNC_TASKS = """
@@ -154,6 +166,7 @@ _ALL_DDL_STATEMENTS = [
     _CREATE_TABLE_DAILY_PRICES,
     _CREATE_TABLE_DAILY_VALUATIONS,
     _CREATE_TABLE_VALUATION_HISTORY,
+    _CREATE_TABLE_INDEX_MEMBERSHIPS,
     _CREATE_TABLE_SYNC_TASKS,
 ]
 

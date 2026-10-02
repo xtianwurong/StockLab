@@ -8,6 +8,7 @@ StockLab 数据访问层 (stocklab.persistence.repository)
 
 from .daily_price import DailyPriceRepository
 from .daily_valuation import DailyValuationRepository
+from .index_membership import IndexMembershipRepository
 from .security import SecurityRepository
 from .valuation_history import ValuationHistoryRepository
 
@@ -16,4 +17,5 @@ __all__ = [
     "DailyPriceRepository",
     "DailyValuationRepository",
     "ValuationHistoryRepository",
+    "IndexMembershipRepository",
 ]
