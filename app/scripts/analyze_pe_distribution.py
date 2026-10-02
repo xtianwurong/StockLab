@@ -27,24 +27,24 @@ StockLab - A 股全市场市盈率分布统计 CLI (app/scripts/analyze_pe_distr
 
 【运行方式】
    # 默认统计 PE-TTM 的最新快照（优先级取自 config.ini）
-   ./venv/bin/python scripts/analyze_pe_distribution.py
+   ./venv/bin/python app/scripts/analyze_pe_distribution.py
 
    # 统计市盈率(动态)口径
-   ./venv/bin/python scripts/analyze_pe_distribution.py --pe-column dynamic
+   ./venv/bin/python app/scripts/analyze_pe_distribution.py --pe-column dynamic
 
    # 强制走远端接口取最新快照（本地库快照过旧时使用）
-   ./venv/bin/python scripts/analyze_pe_distribution.py --priority remote_first
+   ./venv/bin/python app/scripts/analyze_pe_distribution.py --priority remote_first
 
    # 指定统计交易日并把报告落盘
-   ./venv/bin/python scripts/analyze_pe_distribution.py \
+   ./venv/bin/python app/scripts/analyze_pe_distribution.py \
        --trade-date 2026-09-30 --output output/pe_distribution.txt
 
    # 只归档 Markdown 报告（长期留存、可被 grep 与引用）
-   ./venv/bin/python scripts/analyze_pe_distribution.py \
+   ./venv/bin/python app/scripts/analyze_pe_distribution.py \
        --markdown output/pe_distribution.md
 
    # 同时输出两种形态
-   ./venv/bin/python scripts/analyze_pe_distribution.py \
+   ./venv/bin/python app/scripts/analyze_pe_distribution.py \
        --output output/pe_distribution.txt --markdown output/pe_distribution.md
 ==============================================================================
 """
@@ -55,7 +55,7 @@ import os
 import sys
 
 # 将项目根目录加入模块搜索路径，保证直接运行脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from stocklab.analytics import (
     PE_MIN_REASONABLE_SAMPLE_COUNT,
@@ -66,6 +66,7 @@ from stocklab.analytics import (
     ValuationDistributionReporter,
 )
 from stocklab.common.config import load_data_source_priority
+from stocklab.common.http_client import install_browser_user_agent
 from stocklab.facade import MarketDataFacade
 
 _logger = logging.getLogger("StockLab.AnalyzePeDistribution")
@@ -186,7 +187,7 @@ def warn_if_sample_not_representative(profile):
     )
     _logger.warning(
         "  本地估值快照可能不完整。请先执行 "
-        "./venv/bin/python scripts/sync_market_data.py valuations，"
+        "./venv/bin/python app/scripts/sync_market_data.py valuations，"
         "或改用 --priority remote_first 直接取远端快照。"
     )
 
@@ -203,6 +204,9 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    # 全局安装浏览器 UA 补丁（规避东财 WAF 反爬阻断），仅在入口显式调用一次
+    install_browser_user_agent()
 
     args = parse_args()
     pe_column = _PE_COLUMN_CHOICES[args.pe_column]

@@ -121,7 +121,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 
 | 包 | 依赖的 StockLab 包 | 第三方库 | 标准库 |
 |----|------------------|---------|--------|
-| `stocklab.common` | 无 | 无 | `configparser` `logging` `math` `os` `types` |
+| `stocklab.common` | 无 | `requests`（仅 `http_client` 补丁用） | `configparser` `logging` `math` `os` `types` |
 | `stocklab.datasource` | `common`（层内互引 `datasource`） | `akshare` `baostock` `pandas` `requests` | `concurrent.futures` `contextlib` `datetime` `io` `logging` `time` |
 | `stocklab.persistence` | 无（仅层内 `persistence.storage`） | `duckdb` `pandas` | `logging` `os` |
 | `stocklab.facade` | `common` `datasource` `persistence` | `pandas` | `logging` |
@@ -130,7 +130,8 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 
 > `stocklab.persistence` **不依赖 `common`**：持久化层无配置语义，解析 `config.ini` 对它没有意义。
 
-- `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换）。
+- `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换、HTTP 全局配置）。
+  - `http_client.py`：浏览器 UA 补丁，**由入口脚本显式调用**，导入本包不产生任何全局副作用。
 - `stocklab/datasource`：**只负责对外取数**，不感知本地存储。
   - `tencent_client.py`：腾讯直连行情网关，统一接入股票/ETF/指数。
   - `stock_data.py`：单股多源数据服务（三级容错策略 + 估值对齐）。
@@ -165,6 +166,7 @@ StockLab/
 │   ├── common/                         #   通用基础层
 │   │   ├── __init__.py                 #     导出 safe_float / safe_int / load_ini_config
 │   │   ├── config.py                   #     config.ini 解析与逐级向上查找
+│   │   ├── http_client.py              #     浏览器 UA 全局补丁（入口显式调用，导入无副作用）
 │   │   └── type_conversion.py          #     safe_float / safe_int 类型安全转换
 │   ├── datasource/                     #   数据源接入层（只负责「从外部取数」）
 │   │   ├── __init__.py                 #     导出个股服务与腾讯网关的公共 API
@@ -178,12 +180,14 @@ StockLab/
 │   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with）
 │   │   │   └── schema.py               #       DDL 唯一定义与 initialize_database()
 │   │   └── repository/                 #     数据访问层（表级 SQL 封装）
-│   │       ├── __init__.py             #       导出五个 Repository
+│   │       ├── __init__.py             #       导出 BaseRepository 与五个 Repository
+│   │       ├── base.py                 #       BaseRepository：通用 UPSERT / 异常处理 / 日志模板
 │   │       ├── security.py             #       reference.securities 读写
 │   │       ├── daily_price.py          #       market.daily_prices 读写
 │   │       ├── daily_valuation.py      #       market.daily_valuations 读写
 │   │       ├── valuation_history.py    #       market.valuation_history 读写
-│   │       └── index_membership.py     #       reference.index_memberships 读写
+│   │       ├── index_membership.py     #       reference.index_memberships 读写
+│   │       └── industry_valuation.py   #       market.industry_valuations 读写
 │   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
 │   │   ├── __init__.py                 #     导出 MarketDataFacade
 │   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
@@ -229,7 +233,7 @@ StockLab/
 | **外观** | `stocklab.facade.market_data` | **统一取数门面**：本地优先/远端优先策略、Cache-Aside 回写 |
 | **持久化** | `stocklab.persistence.storage.schema` | DuckDB DDL 定义：7 张表、3 个 Schema、复合主键 |
 | | `stocklab.persistence.storage.duckdb` | 连接管理：延迟初始化、上下文管理器 |
-| | `stocklab.persistence.repository.*` | 表级 Repository：批量 UPSERT、按代码/日期查询 |
+| | `stocklab.persistence.repository.*` | 表级 Repository：继承 `BaseRepository` 统一 UPSERT / 异常处理，按代码/日期查询 |
 | **分析** | `stocklab.analytics.valuation_percentile` | **历史分位 CDF 口径**：排除亏损期、输出档位判定 |
 | | `stocklab.analytics.valuation_distribution` | **全市场 PE 分布**：中位数/分位/固定语义分桶/交易所对比/极值榜单 |
 | **渲染** | `stocklab.analytics.percentile_reporter` | 单股分位：控制台表格 + Markdown |

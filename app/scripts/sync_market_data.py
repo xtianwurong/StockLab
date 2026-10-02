@@ -43,8 +43,9 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 # 将项目根目录加入模块搜索路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from stocklab.common.http_client import install_browser_user_agent
 from stocklab.datasource.market_provider import MarketDataProvider
 from stocklab.persistence import (
     DailyPriceRepository,
@@ -453,6 +454,9 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    # 全局安装浏览器 UA 补丁（规避东财 WAF 反爬阻断），仅在入口显式调用一次
+    install_browser_user_agent()
 
     args = parse_args()
     command = args.command  # None 表示无子命令，一键全跑

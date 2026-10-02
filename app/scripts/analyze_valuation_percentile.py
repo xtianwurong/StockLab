@@ -20,14 +20,14 @@ StockLab - 个股历史估值分位 CLI (app/scripts/analyze_valuation_percentil
 
 【运行方式】
    # 查某只股票的历史估值分位
-   ./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH
+   ./venv/bin/python app/scripts/analyze_valuation_percentile.py 600519.SH
 
    # 指定区间与当前值（当前值缺省取历史序列中最新的一个）
-   ./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH \
+   ./venv/bin/python app/scripts/analyze_valuation_percentile.py 600519.SH \
        --start-date 2021-01-01 --pe-ttm 19.32
 
    # 导出 Markdown
-   ./venv/bin/python scripts/analyze_valuation_percentile.py 600519.SH \
+   ./venv/bin/python app/scripts/analyze_valuation_percentile.py 600519.SH \
        --markdown output/600519_percentile.md
 ==============================================================================
 """
@@ -38,7 +38,7 @@ import os
 import sys
 
 # 将项目根目录加入模块搜索路径，保证直接运行脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from stocklab.analytics import (
     VALUATION_INDICATOR_PB,
@@ -47,6 +47,7 @@ from stocklab.analytics import (
     ValuationPercentileReporter,
 )
 from stocklab.common.config import load_data_source_priority
+from stocklab.common.http_client import install_browser_user_agent
 from stocklab.facade import MarketDataFacade
 
 _logger = logging.getLogger("StockLab.ValuationPercentile")
@@ -192,6 +193,9 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    # 全局安装浏览器 UA 补丁（规避东财 WAF 反爬阻断），仅在入口显式调用一次
+    install_browser_user_agent()
 
     args = parse_args()
 

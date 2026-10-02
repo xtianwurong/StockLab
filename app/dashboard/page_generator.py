@@ -23,28 +23,28 @@ __all__ = [
 
 def find_template_path(template_name="dashboard.html"):
     """
-    智能查找模板路径：
+    查找模板路径：
     1. 用户指定的绝对路径或直接相对路径
-    2. 模块 templates/ 目录
-    3. 项目根目录
+    2. 本模块旁的 templates/ 目录（app/dashboard/templates/）
+    3. 项目根目录（兼容历史布局）
     """
     if os.path.exists(template_name):
         return os.path.abspath(template_name)
 
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-    # 候选 1: 模块 templates/ 目录下
-    c1 = os.path.join(base_dir, "app", "dashboard", "templates", template_name)
+    # 候选 1: 本模块 templates/ 目录
+    c1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", template_name)
     if os.path.exists(c1):
         return c1
 
-    # 候选 2: 根目录下
+    # 候选 2: 项目根目录（兼容历史布局）
     c2 = os.path.join(base_dir, template_name)
     if os.path.exists(c2):
         return c2
 
-    # 候选 3: 模块 templates/dashboard.html 兜底
-    c3 = os.path.join(base_dir, "app", "dashboard", "templates", "dashboard.html")
+    # 候选 3: 本模块 templates/dashboard.html 兜底
+    c3 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "dashboard.html")
     if os.path.exists(c3):
         return c3
 

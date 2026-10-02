@@ -14,14 +14,18 @@ import os
 import sys
 
 # 将项目根目录加入模块搜索路径，保证直接运行脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from stocklab.common.config import load_ini_config
+from stocklab.common.http_client import install_browser_user_agent
 from app.dashboard import SectorTrendVisualizer
 
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    # 全局安装浏览器 UA 补丁（规避东财 WAF 反爬阻断），仅在入口显式调用一次
+    install_browser_user_agent()
 
     # 从 config.ini 读取默认配置供命令行参数回退与提示
     _, default_months, default_output, _ = load_ini_config()

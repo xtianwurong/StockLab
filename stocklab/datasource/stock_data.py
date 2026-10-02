@@ -29,7 +29,10 @@ StockLab - 股票市场数据服务模块 (stocklab.datasource.stock_data)
   - _AkShareDataSource    : 东方财富主通道实现（基于 akshare）
   - _BaoStockDataSource   : 证券宝备用通道实现（基于 baostock，含 Socket 会话生命周期管理）
   - _TencentDataSource    : 腾讯财经直连通道实现（基于 qt.gtimg.cn，极速实时行情与备用日 K）
-  - _install_browser_user_agent: 浏览器 UA 运行时补丁（规避东财 WAF 反爬阻断）
+
+  注：浏览器 UA 运行时补丁（规避东财 WAF 反爬阻断）已迁出至
+      stocklab.common.http_client.install_browser_user_agent，由应用入口显式调用，
+      本模块导入时不再产生任何全局副作用。
 
 【依赖清单】
   - 标准库：contextlib（重定向输出）、io（内存缓冲区）、logging（分级日志）、
@@ -38,7 +41,7 @@ StockLab - 股票市场数据服务模块 (stocklab.datasource.stock_data)
       * akshare (>=1.10)   : 主通道月线行情、百度股市通估值
       * baostock (>=0.8.8) : 备通道月线行情、日线估值、基础信息
       * pandas (>=2.0)     : 数据表格清洗、类型转换、时序重采样
-      * requests (>=2.22)  : 底层 HTTP 通信及会话猴子补丁
+      * requests (>=2.22)  : 底层 HTTP 通信
 ==============================================================================
 """
 
@@ -51,7 +54,6 @@ from datetime import datetime
 import akshare as ak
 import baostock as bs
 import pandas as pd
-import requests
 
 from stocklab.common.type_conversion import safe_float, safe_int
 from stocklab.datasource.tencent_client import TencentMarketClient
@@ -1018,41 +1020,3 @@ class MarketDataService:
         # 清除临时对齐辅助列
         merged = merged.drop(columns=[month_key])
         return merged
-
-
-# ============================================================================
-# 浏览器 User-Agent 运行时补丁 (Monkey Patch)
-# ============================================================================
-# 【问题根因】
-#   东方财富底层服务对调用方有反爬安全策略。如果请求头中为 Python requests 库的默认
-#   User-Agent（如 "python-requests/2.31.0"），东财网关会立即执行 TCP Reset / 断连
-#   （客户端抛出 RemoteDisconnected / Connection reset by peer 异常）。
-#
-# 【C++ 类似实现映射】
-#   本操作相当于在运行时 Hook 或替换虚拟函数指针表（虚表 Hook / 函数拦截器）。
-#   在模块导入时，拦截 requests.Session.request 方法，为其默认补齐真实的 Mac Chrome 浏览器 UA。
-_BROWSER_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-)
-
-
-def _install_browser_user_agent():
-    """在运行时为 requests 全局 Session.request 挂载浏览器 User-Agent 补丁"""
-    original_session_request = requests.Session.request
-
-    def session_request_with_browser_user_agent(self, method, url, **kwargs):
-        headers = kwargs.get("headers")
-        if headers is None:
-            headers = {}
-        # 仅当调用方未显式传递 User-Agent 时才赋默认值，不覆盖显式入参
-        headers.setdefault("User-Agent", _BROWSER_USER_AGENT)
-        kwargs["headers"] = headers
-        return original_session_request(self, method, url, **kwargs)
-
-    # 替换函数绑定
-    requests.Session.request = session_request_with_browser_user_agent
-
-
-# 模块被初次加载 (import) 时自动执行挂载
-_install_browser_user_agent()
