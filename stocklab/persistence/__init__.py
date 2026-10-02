@@ -14,6 +14,7 @@ from .repository import (
     DailyPriceRepository,
     DailyValuationRepository,
     IndexMembershipRepository,
+    IndustryValuationRepository,
     SecurityRepository,
     ValuationHistoryRepository,
 )
@@ -28,4 +29,5 @@ __all__ = [
     "DailyValuationRepository",
     "ValuationHistoryRepository",
     "IndexMembershipRepository",
+    "IndustryValuationRepository",
 ]

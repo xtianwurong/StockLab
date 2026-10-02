@@ -8,7 +8,7 @@ StockLab - DuckDB 数据库 Schema 定义 (stocklab.persistence.storage.schema)
    定义本地 A 股数据仓库的全部 DDL（数据定义语言），包括：
      1. Schema 创建（reference / market / sys）
      2. 表结构定义（securities / daily_prices / daily_valuations /
-        valuation_history / sync_tasks）
+        valuation_history / index_memberships / industry_valuations / sync_tasks）
      3. 初始化入口 initialize_database()
 
 【设计原则】
@@ -141,6 +141,26 @@ CREATE TABLE IF NOT EXISTS reference.index_memberships (
 );
 """
 
+# --- market.industry_valuations ---
+
+_CREATE_TABLE_INDUSTRY_VALUATIONS = """
+CREATE TABLE IF NOT EXISTS market.industry_valuations (
+    industry_code         VARCHAR,
+    stat_date             DATE,
+    classification        VARCHAR,
+    industry_level        INTEGER,
+    industry_name         VARCHAR,
+    company_count         BIGINT,
+    priced_company_count  BIGINT,
+    total_market_value    DOUBLE,
+    net_profit            DOUBLE,
+    pe_weighted           DOUBLE,
+    pe_median             DOUBLE,
+    pe_arithmetic         DOUBLE,
+    PRIMARY KEY (industry_code, stat_date)
+);
+"""
+
 # --- sys.sync_tasks ---
 
 _CREATE_TABLE_SYNC_TASKS = """
@@ -167,6 +187,7 @@ _ALL_DDL_STATEMENTS = [
     _CREATE_TABLE_DAILY_VALUATIONS,
     _CREATE_TABLE_VALUATION_HISTORY,
     _CREATE_TABLE_INDEX_MEMBERSHIPS,
+    _CREATE_TABLE_INDUSTRY_VALUATIONS,
     _CREATE_TABLE_SYNC_TASKS,
 ]
 

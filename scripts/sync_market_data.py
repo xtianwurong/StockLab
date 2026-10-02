@@ -28,6 +28,9 @@ StockLab - A 股市场数据同步 CLI (scripts/sync_market_data.py)
 
    # 阶段五：仅同步主流宽基指数成分（同业分组维度，数秒完成）
    python scripts/sync_market_data.py indexes
+
+   # 阶段六：仅同步行业估值横截面（板块洼地判断依据）
+   python scripts/sync_market_data.py industries --stat-date 2026-09-30
 """
 
 import argparse
@@ -48,6 +51,7 @@ from stocklab.persistence import (
     DailyValuationRepository,
     Database,
     IndexMembershipRepository,
+    IndustryValuationRepository,
     SecurityRepository,
     ValuationHistoryRepository,
     initialize_database,
@@ -83,14 +87,15 @@ def parse_args():
             "  prices             阶段二：同步日 K 行情（逐只抓取，全历史约 5400 次请求）\n"
             "  valuations         阶段三：同步最新全市场估值快照（1 次请求）\n"
             "  valuation-history  阶段四：同步历史估值序列（逐只抓取，用于历史分位；耗时最长）\n"
-            "  indexes             阶段五：同步主流宽基指数成分（同业分组维度；约 6 次请求，数秒）"
+            "  indexes             阶段五：同步主流宽基指数成分（同业分组维度；约 6 次请求，数秒）\n"
+            "  industries          阶段六：同步行业估值横截面（板块洼地判断依据；默认不参与全跑）"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["securities", "prices", "valuations", "valuation-history", "indexes"],
+        choices=["securities", "prices", "valuations", "valuation-history", "indexes", "industries"],
         default=None,
         help="要执行的同步阶段（不传则按顺序全跑）",
     )
@@ -99,6 +104,18 @@ def parse_args():
         type=str,
         default="近五年",
         help="valuation-history 阶段的历史区间：近五年 / 近十年 / 全部（默认 近五年）",
+    )
+    parser.add_argument(
+        "--stat-date",
+        type=str,
+        default=None,
+        help="industries 阶段的统计日期 YYYY-MM-DD；缺省为今天",
+    )
+    parser.add_argument(
+        "--classification",
+        type=str,
+        default="国证行业分类",
+        help="industries 阶段的行业分类体系：国证行业分类 / 证监会行业分类",
     )
     parser.add_argument(
         "--workers",
@@ -240,6 +257,44 @@ def sync_daily_prices(database, start_date, end_date):
         return False
 
     return True
+
+
+def sync_industry_valuation(database, stat_date, classification="国证行业分类"):
+    """
+    阶段六：同步行业估值横截面
+
+    【用途】
+       个股估值分位只能回答「相对自己历史上贵不贵」，回答不了「相对同行业贵不贵」。
+       本阶段提供行业级估值，用于定位价值洼地板块与同业比较。
+
+    【为何存三个 PE 口径】
+       加权平均 PE 反映龙头主导的估值，中位数 PE 反映「典型公司」的估值。
+       三者差异本身即信息：加权远低于中位数说明估值集中在少数权重股上，
+       此时只看单一口径会误判洼地程度。
+
+    Args:
+        database (Database): 数据库连接管理器
+        stat_date (str): 统计日期 YYYY-MM-DD
+        classification (str, optional): 行业分类体系（国证 293 个 4 层 / 证监会 120 个 2 层）
+
+    Returns:
+        bool: 是否同步成功
+    """
+    _logger.info("=" * 60)
+    _logger.info("阶段六：同步行业估值（%s @ %s）", classification, stat_date)
+    _logger.info("=" * 60)
+
+    provider = MarketDataProvider()
+    repository = IndustryValuationRepository(database)
+
+    df = provider.fetch_industry_valuation(stat_date, classification)
+    if df.empty:
+        _logger.warning("行业估值 [%s @ %s] 获取失败，跳过", classification, stat_date)
+        return False
+
+    count = repository.upsert(df)
+    _logger.info("行业估值同步完成: %d 条记录", count)
+    return count > 0
 
 
 def sync_index_membership(database):
@@ -452,6 +507,13 @@ def main():
                 _logger.warning("指数成分同步失败（不影响其他阶段数据）")
             if command == "indexes":
                 return
+
+        # 阶段六：同步行业估值（默认不参与一键全跑：数据源可能不可用且需指定日期）
+        if command == "industries":
+            stat_date = args.stat_date if args.stat_date else datetime.now().strftime("%Y-%m-%d")
+            if not sync_industry_valuation(database, stat_date, args.classification):
+                sys.exit(1)
+            return
 
     _logger.info("=" * 60)
     _logger.info("同步任务完成")

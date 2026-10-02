@@ -49,12 +49,13 @@ StockLab/
 │   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with）
 │   │   │   └── schema.py               #       DDL 唯一定义与 initialize_database()
 │   │   └── repository/                 #     数据访问层（表级 SQL 封装）
-│   │       ├── __init__.py             #       导出五个 Repository
+│   │       ├── __init__.py             #       导出六个 Repository
 │   │       ├── security.py             #       reference.securities 读写
 │   │       ├── daily_price.py          #       market.daily_prices 读写
 │   │       ├── daily_valuation.py      #       market.daily_valuations 读写
 │   │       ├── valuation_history.py    #       market.valuation_history 读写
-│   │       └── index_membership.py     #       reference.index_memberships 读写
+│   │       ├── index_membership.py     #       reference.index_memberships 读写
+│   │       └── industry_valuation.py   #       market.industry_valuations 读写
 │   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
 │   │   ├── __init__.py                 #     导出 MarketDataFacade
 │   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
@@ -321,7 +322,7 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 | Schema | 职责 | 表 |
 |--------|------|----|
 | `reference` | 证券身份（慢变维表） | `securities`、`index_memberships` |
-| `market` | 行情与估值（时间序列事实表） | `daily_prices`、`daily_valuations`、`valuation_history` |
+| `market` | 行情与估值（时间序列事实表） | `daily_prices`、`daily_valuations`、`valuation_history`、`industry_valuations` |
 | `sys` | 同步任务状态 | `sync_tasks` |
 
 > **为什么是 `sys` 不是 `system`**：`system` 是 DuckDB 保留字，直接用作 schema 名会抛 `BinderException`。
@@ -441,6 +442,41 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 当前覆盖 6 个宽基指数（上证50 / 沪深300 / 中证500 / 中证A500 / 中证1000 / 中证2000），
 合计 4350 条记录，覆盖全市场 **68.7%**（3826 / 5572 只）。
 
+#### `market.industry_valuations` — 行业估值横截面
+
+主键：`(industry_code, stat_date)`
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `industry_code` | VARCHAR | 行业编码（如 `L1` / `C15`） |
+| `stat_date` | DATE | 统计日期 |
+| `classification` | VARCHAR | 分类体系：`国证行业分类`（293 个，4 层）/ `证监会行业分类`（120 个，2 层） |
+| `industry_level` | INTEGER | 行业层级，1 为最粗（一级行业） |
+| `industry_name` | VARCHAR | 行业名称 |
+| `company_count` | BIGINT | 行业公司总数 |
+| `priced_company_count` | BIGINT | 纳入 PE 计算的公司数（剔除亏损等） |
+| `total_market_value` | DOUBLE | 行业总市值 |
+| `net_profit` | DOUBLE | 行业净利润（静态） |
+| `pe_weighted` | DOUBLE | 静态市盈率 — **加权平均**（龙头主导口径） |
+| `pe_median` | DOUBLE | 静态市盈率 — **中位数**（典型公司口径，抵御极端值） |
+| `pe_arithmetic` | DOUBLE | 静态市盈率 — 算术平均（完整分布参考） |
+
+> **为何同时存三个 PE 口径**：三者差异本身即信息。实测金融业加权 8.06 倍 vs 中位数 11.95 倍，
+> 说明估值集中在少数权重股上；房地产加权 12.81 倍 vs 中位数 53.60 倍，差距更大——
+> **只看单一口径会严重误判洼地程度**。判断价值洼地板块须两个口径同时低。
+
+> **行业 ROE 可直接算出**：`net_profit / total_market_value`。实测该值与 `pe_weighted` 的倒数
+> 完全吻合（如金融 12.41% vs 100/8.06=12.41），确认字段口径可信。这是「高 ROE + 低估值」
+> 双轴判定在板块层面的实现。
+
+> **⚠️ 当前数据受限**：巨潮接口已全面需要 token（`resultcode 451 ApiFilter 未经授权`），
+> 目前仅入库 2026-09-30 一期（293 个行业，11 个一级）。
+> **单期数据无法计算行业估值分位**（样本量为 1），仅能做横截面排序。
+> 接口恢复后执行 `./venv/bin/python scripts/sync_market_data.py industries --stat-date <日期>`
+> 逐期补齐即可启用分位计算。
+
+> **数据源不提供市净率（PB）**，故本表无 PB 字段。
+
 #### `sys.sync_tasks` — 同步任务状态
 
 | 列 | 类型 | 说明 |
@@ -471,6 +507,7 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 | `DailyValuationRepository` | `upsert(df)` / `find_by_code(...)` / `find_by_date(trade_date)` / `count()` | 估值快照读写 |
 | `ValuationHistoryRepository` | `upsert(df)` / `find_by_code(ts_code, start_date, end_date)` / `find_latest_date(ts_code)` / `count()` | 历史估值序列读写 |
 | `IndexMembershipRepository` | `upsert(df)` / `find_by_index(index_code, effective_date=None)` / `find_by_code(ts_code)` / `find_latest_date(index_code)` / `list_indexes()` / `count()` | 指数成分读写；`list_indexes()` 列出已入库指数及最新生效日 |
+| `IndustryValuationRepository` | `upsert(df)` / `find_by_date(stat_date, classification, industry_level)` / `find_series(industry_code)` / `find_cross_section_dates(classification)` / `list_industries(stat_date, classification)` / `count()` | 行业估值读写；`find_by_date` 默认按 PE 升序（便宜的在前） |
 
 ### 使用约束
 
@@ -506,6 +543,7 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
 ./venv/bin/python scripts/sync_market_data.py valuations                 # 阶段三：估值快照
 ./venv/bin/python scripts/sync_market_data.py valuation-history --period 近五年  # 阶段四：历史估值序列
 ./venv/bin/python scripts/sync_market_data.py indexes             # 阶段五：主流宽基指数成分
+./venv/bin/python scripts/sync_market_data.py industries --stat-date 2026-09-30  # 阶段六：行业估值
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
 ./venv/bin/python scripts/sync_market_data.py --securities-only
@@ -586,6 +624,7 @@ pip install -r requirements.txt
    > 新增并发逻辑时务必保持这个分工。
    日常按需单只调用 `analyze_valuation_percentile.py <代码>` 即可，它会自动「本地未命中 → 取远端 → 回写本地」。
 6.1 **`indexes` 阶段五参与一键全跑**：仅 6 次请求、数秒完成，无副作用。
+6.2 **`industries` 阶段六不参与一键全跑**：需显式指定 `--stat-date`，且数据源可能不可用。
 7. 估值字段（PE/PB 等）允许 NULL，表示亏损或无数据，不应强制转换为 0。
 8. `output/` 与 `data/` 已被 `.gitignore` 排除；`templates/` 与 `config.ini` 则是入库的运行必需文件，删除后网页生成会失败。
 9. **市盈率分布统计依赖 `market.daily_valuations` 有数据**。`local_first` 下只要本地快照非空即判定命中，
@@ -601,11 +640,13 @@ pip install -r requirements.txt
 12. **历史估值分位的样本数会小于交易日数**：差额即被排除的亏损期。
     例如金科股份 606 个交易日中 PE-TTM 仅 402 个有效样本（排除 204 个亏损期），
     这是刻意为之——亏损期不具备估值比较意义，计入分母会扭曲结论。
-13. **巨潮 `stock_profile_cninfo` 已需授权**：实测返回
-    `{"resultcode": 451, "resultmsg": "ApiFilter 未经授权的访问,code:003 token null"}`，
-    HTTP 200 但数据为空。`MarketDataProvider.fetch_company_profile()` 已实现，
-    在接口开放的环境可直接用于补齐 `securities.industry` / `list_date`；
-    接口不可用时以 `reference.index_memberships` 的指数成分作为同业分组的替代维度。
+13. **巨潮接口已全面需要授权**：`stock_profile_cninfo` 与 `stock_industry_pe_ratio_cninfo`
+    均返回 `{"resultcode": 451, "resultmsg": "ApiFilter 未经授权的访问,code:003 token null"}`，
+    HTTP 200 但 `records` 为空（akshare 内表现为 `KeyError: 'records'`）。
+    受影响的能力：`securities.industry` / `list_date` 补齐、`industry_valuations` 历史补齐。
+    接口开放后按各阶段命令逐期补数即可，无需改代码。
+14. **注意区分「HTTP 200」与「取到数据」**：巨潮在授权失效时仍返回 200，
+    必须在代码层判断 `records` 为空 / DataFrame 为空，不可仅凭状态码判定成功。
 
 ## 许可证
 

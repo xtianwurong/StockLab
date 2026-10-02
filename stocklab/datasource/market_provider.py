@@ -280,6 +280,103 @@ class MarketDataProvider:
         )
         return result.reset_index(drop=True)
 
+    def fetch_industry_valuation(self, stat_date, classification="国证行业分类"):
+        """
+        获取某个时点的行业估值横截面（巨潮资讯）
+
+        【用途】
+           个股估值分位只能回答「相对自己历史上贵不贵」，回答不了「相对同行业贵不贵」。
+           本方法提供行业级估值，用于定位价值洼地板块与同业比较。
+
+        【为何同时取三个 PE 口径】
+           加权平均 PE 反映龙头主导的估值；中位数 PE 反映「典型公司」的估值，
+           抵御极端值干扰。三者差异本身即信息：加权远低于中位数，
+           说明估值集中在少数权重股上，此时只看单一口径会误判洼地程度。
+
+        【已知数据源边界】
+           - 该接口**不提供市净率（PB）**，故本表无 PB 字段；
+           - 历史仅可回溯至 2023 年（实测更早日期抛 ValueError）；
+           - 支持任意有效日期，不限于季末。
+
+        Args:
+            stat_date (str): 统计日期 YYYY-MM-DD
+            classification (str, optional): 行业分类体系，
+                                            "国证行业分类"（293 个，4 层）
+                                            或 "证监会行业分类"（120 个，2 层）
+
+        Returns:
+            pd.DataFrame: 行业估值表，含 industry_code / stat_date / classification /
+                          industry_level / industry_name / company_count /
+                          priced_company_count / total_market_value / net_profit /
+                          pe_weighted / pe_median / pe_arithmetic
+        """
+        raw = pd.DataFrame()
+        for attempt in range(1, self._retry_count + 1):
+            try:
+                fetched = ak.stock_industry_pe_ratio_cninfo(
+                    symbol=classification, date=stat_date
+                )
+                if fetched is None or fetched.empty:
+                    _logger.warning(
+                        "行业估值 [%s @ %s] 返回空数据", classification, stat_date
+                    )
+                    return pd.DataFrame()
+                raw = fetched
+                break
+            except Exception as error:
+                _logger.debug(
+                    "stock_industry_pe_ratio_cninfo [%s @ %s] 第 %d/%d 次失败: %s",
+                    classification, stat_date, attempt, self._retry_count, error,
+                )
+                if attempt < self._retry_count:
+                    time.sleep(self._retry_interval_seconds)
+
+        if raw.empty:
+            return pd.DataFrame()
+
+        result = pd.DataFrame()
+        result["industry_code"] = raw["行业编码"].astype(str)
+        result["stat_date"] = pd.to_datetime(stat_date).date()
+        result["classification"] = classification
+        result["industry_level"] = pd.to_numeric(
+            raw["行业层级"], errors="coerce"
+        ).astype("Int64")
+        result["industry_name"] = raw["行业名称"].astype(str).str.strip()
+        result["company_count"] = pd.to_numeric(raw["公司数量"], errors="coerce")
+        result["priced_company_count"] = pd.to_numeric(
+            raw["纳入计算公司数量"], errors="coerce"
+        )
+        result["total_market_value"] = self._numeric_or_nan(raw["总市值-静态"])
+        result["net_profit"] = self._numeric_or_nan(raw["净利润-静态"])
+        result["pe_weighted"] = self._numeric_or_nan(raw["静态市盈率-加权平均"])
+        result["pe_median"] = self._numeric_or_nan(raw["静态市盈率-中位数"])
+        result["pe_arithmetic"] = self._numeric_or_nan(raw["静态市盈率-算术平均"])
+
+        _logger.info(
+            "获取行业估值 [%s @ %s]: %d 个行业（%d 个一级）",
+            classification, stat_date, len(result),
+            int((result["industry_level"] == 1).sum()),
+        )
+        return result
+
+    def _numeric_or_nan(self, series):
+        """
+        安全转数值；列缺失或无法解析时返回全 NaN
+
+        【为何不省略列】
+           UPSERT 按位置匹配列序，省略列会导致整体写入失败。
+           数据源不提供的列必须保留并写 NULL。
+
+        Args:
+            series (pd.Series): 原始列
+
+        Returns:
+            pd.Series: 数值列
+        """
+        if series is None:
+            return float("nan")
+        return pd.to_numeric(series, errors="coerce")
+
     def fetch_index_membership(self, index_code):
         """
         获取指数成分股（中证指数官网）
