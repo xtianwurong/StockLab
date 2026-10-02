@@ -8,7 +8,7 @@ StockLab 统一数据取数门面层 (stocklab.facade)
 【分层约束】
    - 本层可依赖 datasource 与 persistence；
    - datasource 与 persistence 不得反向 import 本层（避免循环依赖）；
-   - 上层（visualizer / 入口脚本）应经由本层取数，不直接拼接两层。
+   - 上层（dashboard / 入口脚本）应经由本层取数，不直接拼接两层。
 """
 
 from .market_data import MarketDataFacade

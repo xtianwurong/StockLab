@@ -103,7 +103,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 ```
 入口脚本 (scripts/)            ← 取数与落库的唯一编排方
          │
-         ├──►  stocklab.visualizer  ──►  stocklab.datasource  ──►  stocklab.common
+         ├──►  stocklab.dashboard  ──►  stocklab.facade  ──►  stocklab.datasource
          │                                  （只对外取数）
          │
          ├──►  stocklab.facade  ──┬──►  stocklab.datasource
@@ -126,7 +126,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 | `stocklab.persistence` | 无（仅层内 `persistence.storage`） | `duckdb` `pandas` | `logging` `os` |
 | `stocklab.facade` | `common` `datasource` `persistence` | `pandas` | `logging` |
 | `stocklab.analytics` | 无（层内互引 `analytics`） | `pandas` | `logging` `os` `unicodedata` |
-| `stocklab.visualizer` | `common` `datasource`（层内互引 `visualizer`） | 无 | `datetime` `json` `logging` `os` |
+| `stocklab.dashboard` | `common` `facade`（层内互引 `dashboard`） | 无 | `datetime` `json` `logging` `os` |
 
 > `stocklab.persistence` **不依赖 `common`**：持久化层无配置语义，解析 `config.ini` 对它没有意义。
 
@@ -140,7 +140,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   - `repository/`：SQL 读写封装，仅依赖 pandas 与本层 `storage/`。
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
-- `stocklab/visualizer`：把数据渲染成网页。
+- `stocklab/dashboard`：把数据渲染成网页。
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
   - `facade` 可依赖两者，但 **`datasource` 与 `persistence` 绝不可反向 import `facade`**，否则形成循环依赖。
@@ -194,7 +194,7 @@ StockLab/
 │   │   ├── profile_reporter.py         #     ValuationDistributionReporter：统计报告文本渲染（控制台）
 │   │   ├── markdown_reporter.py        #     ValuationDistributionMarkdownReporter：统计报告 Markdown 渲染（归档）
 │   │   └── percentile_reporter.py      #     ValuationPercentileReporter：分位报告渲染（文本 + Markdown）
-│   └── visualizer/                     #   可视化 / Web 呈现层
+│   └── dashboard/                      #   仪表板 / Web 呈现层
 │       ├── __init__.py                 #     导出编排类与网页生成类
 │       ├── sector_trend.py             #     SectorTrendVisualizer 端到端编排
 │       └── page_generator.py           #     SectorWebPageGenerator 模板填充 → HTML
@@ -234,8 +234,8 @@ StockLab/
 | **渲染** | `stocklab.analytics.percentile_reporter` | 单股分位：控制台表格 + Markdown |
 | | `stocklab.analytics.profile_reporter` | 全市场分布：纯文本报告（ASCII 条形图） |
 | | `stocklab.analytics.markdown_reporter` | 全市场分布：归档级 Markdown（表格 + 自动结论） |
-| **可视化** | `stocklab.visualizer.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
-| | `stocklab.visualizer.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
+| **仪表板** | `stocklab.dashboard.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
+| | `stocklab.dashboard.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
 | **脚本** | `scripts/sync_market_data.py` | 5 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分 |
 | | `scripts/generate_sector_trend.py` | 可视化生成 CLI：月数/输出路径/配置文件可配 |
 

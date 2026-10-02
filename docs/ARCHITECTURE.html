@@ -379,7 +379,7 @@ with MarketDataFacade() as facade:          # 优先级取自 config.ini
 
       <h3>2.5 已知演进债</h3>
       <div class="callout callout-warn">
-        <code>visualizer</code> 目前仍直连 <code>TencentMarketClient</code> 出图，尚未改走 <code>MarketDataFacade</code>，因此「两条并行数据通路」尚未合流。<code>MarketDataFacade</code> 已是合流的落点：待本地库补齐 ETF / 指数覆盖与前复权口径后，把 <code>sector_trend.py</code> 的取数改为经由 facade 即可收口。
+        <code>dashboard</code> 层通过 <code>MarketDataFacade</code> 取数，支持取数优先级策略与本地缓存回写。直接调用 <code>TencentMarketClient</code> 则绕过这些机制。
       </div>
     </div>
 
@@ -586,7 +586,7 @@ print(ValuationPercentileReporter().format_console_report("600519.SH", results))
           </tr>
           <tr>
             <td><code>SectorWebPageGenerator</code></td>
-            <td><code>visualizer/page_generator.py</code></td>
+            <td><code>dashboard/page_generator.py</code></td>
             <td>模板视图生成器</td>
             <td>提取全标的月份并集 → 对齐缺失数据 → 填充 <code>dashboard.html</code> 的 <code>__DATA_PAYLOAD__</code> → 落盘单文件 HTML</td>
           </tr>

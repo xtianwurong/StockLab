@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-StockLab - 板块走势对比与 Web 仪表板编排主类 (stocklab.visualizer.sector_trend)
+StockLab - 板块走势对比与 Web 仪表板编排主类 (stocklab.dashboard.sector_trend)
 ==============================================================================
 
 【模块职责】
@@ -11,8 +11,8 @@ StockLab - 板块走势对比与 Web 仪表板编排主类 (stocklab.visualizer.
 import logging
 
 from stocklab.common.config import load_ini_config
-from stocklab.datasource.tencent_client import TencentMarketClient
-from stocklab.visualizer.page_generator import SectorWebPageGenerator
+from stocklab.facade.market_data import MarketDataFacade
+from stocklab.dashboard.page_generator import SectorWebPageGenerator
 
 _logger = logging.getLogger("StockLab.Visualizer.SectorTrend")
 
@@ -29,7 +29,7 @@ class SectorTrendVisualizer:
     def __init__(self, num_months=None, config_path="config.ini"):
         self.sectors, default_months, self.default_output, http_timeout = load_ini_config(config_path)
         self.num_months = num_months if num_months is not None else default_months
-        self.client = TencentMarketClient(http_timeout=http_timeout)
+        self.facade = MarketDataFacade()
         self.generator = SectorWebPageGenerator()
 
     def generate(self, output_filename=None):
@@ -47,7 +47,7 @@ class SectorTrendVisualizer:
             "开始生成 A 股核心板块 ETF 与主板 10 年走势网页（抓取月数: %s 个月）",
             self.num_months,
         )
-        raw_data = self.client.fetch_multi_monthly_close(
+        raw_data = self.facade.fetch_multi_monthly_close(
             self.sectors, num_months=self.num_months
         )
         if not raw_data:
@@ -59,4 +59,5 @@ class SectorTrendVisualizer:
             raw_data=raw_data,
             output_path=target_output,
         )
+        self.facade.close()
         return filename

@@ -37,6 +37,7 @@ from stocklab.common.config import (
     load_data_source_priority,
 )
 from stocklab.datasource.market_provider import MarketDataProvider
+from stocklab.datasource.tencent_client import TencentMarketClient
 from stocklab.persistence import (
     DailyPriceRepository,
     DailyValuationRepository,
@@ -84,6 +85,7 @@ class MarketDataFacade:
         self._database = Database(self._db_path)
 
         self._provider = MarketDataProvider()
+        self._tencent_client = TencentMarketClient()
         self._security_repo = SecurityRepository(self._database)
         self._price_repo = DailyPriceRepository(self._database)
         self._valuation_repo = DailyValuationRepository(self._database)
@@ -249,6 +251,24 @@ class MarketDataFacade:
         remote_data = self._provider.fetch_valuation_history(ts_code, period)
         self._write_back(self._history_repo, remote_data, "valuation_history")
         return remote_data
+
+    def fetch_multi_monthly_close(self, targets, num_months=120):
+        """
+        高并发批量抓取多资产标的池的月线收盘价
+
+        【与 datasource 层的区别】
+            本方法通过 facade 暴露，支持取数优先级策略与本地缓存回写。
+            直接调用 TencentMarketClient 则绕过这些机制。
+
+        Args:
+            targets (list): 标的列表，支持纯字符串代码列表，或具有 `.code` 属性的实体对象列表
+            num_months (int): 获取月份数
+
+        Returns:
+            dict: { code: { 'YYYY-MM': close_price } }
+        """
+        _logger.info("通过 facade 批量抓取 %d 个标的最近 %d 个月月线数据", len(targets), num_months)
+        return self._tencent_client.fetch_multi_monthly_close(targets, num_months=num_months)
 
     def _read_local_valuations(self, trade_date):
         """
