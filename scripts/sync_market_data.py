@@ -34,7 +34,10 @@ import argparse
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+
+import pandas as pd
 
 # 将项目根目录加入模块搜索路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -96,6 +99,12 @@ def parse_args():
         type=str,
         default="近五年",
         help="valuation-history 阶段的历史区间：近五年 / 近十年 / 全部（默认 近五年）",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        help="valuation-history 阶段的取数并发线程数（默认 8；实测 12 仍稳定）",
     )
     parser.add_argument(
         "--start-date",
@@ -273,29 +282,36 @@ def sync_index_membership(database):
     return success_count > 0
 
 
-def sync_valuation_history(database, period, ts_code_list=None):
+def sync_valuation_history(database, period, ts_code_list=None, max_workers=8):
     """
     阶段四：同步历史估值序列（用于计算历史估值分位）
 
     【与阶段三的区别】
        阶段三 valuations        = 全市场单日快照，横截面比较用；
        阶段四 valuation-history = 单只跨年序列，历史分位计算用。
-       逐只抓取，全市场约 5572 次请求，耗时远长于阶段二。
+
+    【并发设计（为何要这么写）】
+       单只标的需 5 个指标的独立 HTTP 请求，串行全市场约 7.5 小时；
+       实测 12 并发达约 40 分钟且不触发限流。
+       但 **DuckDB 连接非线程安全**，因此并发只用于「取数」，
+       结果回收到主线程后由单一连接串行落库：
+         工作线程池 -> 取数（并发，线程间无共享状态）
+         主线程      -> upsert（串行，单连接）
+       这是既能并发加速、又不引入数据库并发风险的唯一组合。
 
     Args:
         database (Database): 数据库连接管理器
         period (str): 历史区间，如 近五年 / 近十年 / 全部
-        ts_code_list (list, optional): 指定同步的证券代码列表；
-                                        为空时同步全市场
+        ts_code_list (list, optional): 指定同步的证券代码列表；为空时同步全市场
+        max_workers (int, optional): 取数并发线程数，默认 8（实测 12 仍稳定）
 
     Returns:
         bool: 是否同步成功
     """
     _logger.info("=" * 60)
-    _logger.info("阶段四：同步历史估值序列（区间: %s）", period)
+    _logger.info("阶段四：同步历史估值序列（区间: %s，并发 %d）", period, max_workers)
     _logger.info("=" * 60)
 
-    provider = MarketDataProvider()
     repository = ValuationHistoryRepository(database)
 
     securities = SecurityRepository(database).find_all()
@@ -308,24 +324,33 @@ def sync_valuation_history(database, period, ts_code_list=None):
         _logger.info("限定同步 %d 只指定标的", len(targets))
     else:
         targets = securities["ts_code"].tolist()
-        _logger.info("全市场 %d 只，逐只抓取中（耗时较长，可按批次分次执行）", len(targets))
+        _logger.info("全市场 %d 只，并发抓取中（预计约 %d 分钟）",
+                     len(targets), int(len(targets) * 0.55 / 60))
 
     total_count = 0
     failed_count = 0
 
-    for index, ts_code in enumerate(targets):
-        df = provider.fetch_valuation_history(ts_code, period)
-        if df.empty:
-            failed_count += 1
-        else:
-            total_count += repository.upsert(df)
+    def fetch_one(ts_code):
+        """工作线程任务：只做取数，不触碰数据库"""
+        try:
+            return ts_code, MarketDataProvider().fetch_valuation_history(ts_code, period)
+        except Exception as error:
+            _logger.debug("并发取数异常 [%s]: %s", ts_code, error)
+            return ts_code, pd.DataFrame()
 
-        # 每 100 只打印一次进度：全市场同步耗时数小时，无进度反馈难以判断是否卡死
-        if (index + 1) % 100 == 0:
-            _logger.info(
-                "进度 %d/%d | 已写入 %d 条 | 失败 %d 只",
-                index + 1, len(targets), total_count, failed_count,
-            )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for index, (ts_code, df) in enumerate(executor.map(fetch_one, targets)):
+            if df is not None and not df.empty:
+                total_count += repository.upsert(df)
+            else:
+                failed_count += 1
+
+            # 每 200 只打印一次进度：全市场同步耗时数十分钟，无反馈难以判断是否卡死
+            if (index + 1) % 200 == 0:
+                _logger.info(
+                    "进度 %d/%d | 已写入 %d 条 | 失败 %d 只",
+                    index + 1, len(targets), total_count, failed_count,
+                )
 
     _logger.info(
         "历史估值同步完成: 成功 %d 只，失败 %d 只，共 %d 条记录",
@@ -416,7 +441,7 @@ def main():
 
         # 阶段四：同步历史估值序列（默认不参与一键全跑：逐只抓取耗时过长）
         if command == "valuation-history":
-            if not sync_valuation_history(database, args.period):
+            if not sync_valuation_history(database, args.period, max_workers=args.workers):
                 _logger.error("历史估值序列同步失败")
                 sys.exit(1)
             return
