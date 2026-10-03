@@ -17,6 +17,7 @@ StockLab - Web 层测试 (tests/test_web_api.py)
     9. 指数列表与单指数详情
    10. 多窗口分位（全部 / 近十年 / 近五年 / 近三年）
    11. 选股器：因子覆盖率如实标注、算子表、模板就绪度、漏斗、散点、亏损股剔除
+   12. 多股对比：分位与个股页逐字一致、序列按交易日对齐（缺失断线不填充）、区间裁剪
 
 【运行方式】
   # 必须先停掉 serve_web.py —— DuckDB 同文件跨进程单写者（见 AGENT.md）
@@ -44,6 +45,12 @@ import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMMON_JS = os.path.join(BASE_DIR, "app", "web", "static", "common.js")
+
+# 七档评级语义色：对比页的走势分类色不得与之重复（红绿会暗示优劣）
+SL_LEVEL_COLORS = (
+    "#15803d", "#16a34a", "#65a30d", "#ca8a04",
+    "#ea580c", "#dc2626", "#991b1b",
+)
 
 # 抽样比对口径时使用的标的数
 CONSENSUS_SAMPLE_SIZE = 20
@@ -689,6 +696,123 @@ def run_screener_tests():
     print("  -> 页面要素与导航高亮齐备")
 
 
+def run_compare_tests():
+    """阶段十三：多股对比接口"""
+    print("\n" + "=" * 65)
+    print("【阶段十三：多股对比】")
+    print("=" * 65)
+
+    client = _client()
+
+    # 三只标的 + 近十年
+    codes = "600519.SH,000001.SZ,300750.SZ"
+    data = _json(client.get("/api/compare?codes=%s&period=近十年" % codes))
+    assert data["codes"] == ["600519.SH", "000001.SZ", "300750.SZ"], data["codes"]
+    assert data["rows"], "应返回标的行"
+    assert len(data["rows"]) == 3
+    assert data["interval_text"] == "近十年"
+    assert data["sample_rows"] > 0, "应对齐出交易日"
+    assert data["indicator_labels"], "应下发指标中文名"
+
+    # 每只标的都要有名称与市场
+    for row in data["rows"]:
+        assert row["ts_code"] in data["codes"]
+        assert row["metrics"], "%s 应有指标结论" % row["ts_code"]
+        assert row["sample_rows"] > 0, "%s 应有样本" % row["ts_code"]
+
+    # 分类色：逐只不同，且与七档语义色无关（不能用红绿暗示优劣）
+    colors = [entry["color"] for entry in data["names"]]
+    assert len(set(colors)) == len(colors), "分类色应互不相同"
+    assert not any(color in SL_LEVEL_COLORS for color in colors), \
+        "走势分类色不应复用七档语义色"
+    print("  -> 3 只标的 / 区间 %s / 交易日 %d，分类色 %s" % (
+        data["interval_text"], data["sample_rows"], colors))
+
+    # 分位口径必须与个股页一致：同一 analyzer + 同一计算窗口
+    # 注意「同窗口」是前提 —— 个股页的 period 只限制向远端取数的区间，
+    # 计算窗口由 start_date/end_date 决定；对比页的 period 直接决定计算窗口。
+    # 因此这里用「全部」两侧对齐地比。
+    full = _json(client.get("/api/compare?codes=%s&period=全部" % codes))
+    for row in full["rows"]:
+        pe = row["metrics"].get("pe_ttm")
+        if not pe:
+            continue
+        single = _json(client.get(
+            "/api/percentile?code=%s&period=全部" % row["ts_code"]))
+        match = [item for item in single["results"] if item["indicator"] == "pe_ttm"]
+        assert match, "%s 个股页应有 pe_ttm 结果" % row["ts_code"]
+        assert match[0]["percentile"] == pe["percentile"], \
+            "%s 分位与个股页不一致：对比 %s vs 个股 %s" % (
+                row["ts_code"], pe["percentile"], match[0]["percentile"])
+        assert match[0]["level7"] == pe["level7"], \
+            "%s 评级与个股页不一致：%s vs %s" % (
+                row["ts_code"], pe["level7"], match[0]["level7"])
+        print("  -> %s 分位 %.2f%%（%s）与个股页逐字一致" % (
+            row["ts_code"], pe["percentile"], pe["level7"]))
+
+    # 窗口不同 -> 分位必然不同（证明「口径一致」不是巧合，而是同 analyzer 的结果）
+    maotai_10y = [r for r in data["rows"] if r["ts_code"] == "600519.SH"][0]
+    maotai_full = [r for r in full["rows"] if r["ts_code"] == "600519.SH"][0]
+    assert maotai_10y["metrics"]["pe_ttm"]["percentile"] != \
+        maotai_full["metrics"]["pe_ttm"]["percentile"], \
+        "近十年与全部分位不应相同（否则说明窗口未生效）"
+
+    # 序列对齐：每只长度 == 交易日数，缺失必须为 None（断线），不得前向填充
+    dates = data["history"]["dates"]
+    assert len(dates) == data["sample_rows"]
+    for code, series in data["history"]["series"].items():
+        assert len(series) == len(dates), "%s 序列长度应等于交易日数" % code
+        assert all(value is None or isinstance(value, float) for value in series), \
+            "%s 序列只应含数值或 None" % code
+    # 上市晚的标的必然有一段前置缺失
+    gaps = sum(1 for series in data["history"]["series"].values()
+               for value in series if value is None)
+    assert gaps > 0, "上市较晚的标的应有前置空档（未做前向填充）"
+    print("  -> 序列对齐 %d 个交易日，缺失点 %d 处（断线而非填充）" % (len(dates), gaps))
+
+    # 区间裁剪生效：近五年样本数必须少于全部
+    assert full["sample_rows"] > data["sample_rows"], "全部区间交易日应更多"
+    assert maotai_full["sample_rows"] > maotai_10y["sample_rows"], \
+        "茅台全部区间样本数应多于近十年"
+    print("  -> 区间裁剪生效：茅台样本 %d（全部） > %d（近十年）" % (
+        maotai_full["sample_rows"], maotai_10y["sample_rows"]))
+
+    # 指定单一指标
+    only_pb = _json(client.get(
+        "/api/compare?codes=%s&indicators=pb" % codes))
+    assert only_pb["indicators"] == ["pb"], only_pb["indicators"]
+    assert only_pb["primary_indicator"] == "pb"
+    for row in only_pb["rows"]:
+        assert set(row["metrics"].keys()) <= {"pb"}, "只应返回 pb"
+    print("  -> 单指标模式：indicators=%s" % only_pb["indicators"])
+
+    # 参数校验
+    for query, label in (
+        ("", "缺 codes"),
+        ("codes=600519.SH", "仅 1 只"),
+        ("codes=%s&indicators=nope" % codes, "非法指标"),
+        ("codes=%s&period=xxx" % codes, "非法区间"),
+    ):
+        response = client.get("/api/compare?" + query)
+        assert response.status_code == 400, "%s 应 400，实际 %s" % (
+            label, response.status_code)
+        assert "error" in _json(response)
+    # 去重与上限
+    dup = _json(client.get("/api/compare?codes=600519.SH,600519.SH,000001.SZ"))
+    assert dup["codes"] == ["600519.SH", "000001.SZ"], "重复代码应去重"
+    too_many = ",".join("%06d.SZ" % (300000 + i) for i in range(11))
+    assert client.get("/api/compare?codes=" + too_many).status_code == 400, "超 10 只应 400"
+    print("  -> 5 组参数校验 + 代码去重 + 10 只上限 均正确")
+
+    # 页面要素
+    page = client.get("/compare").get_data(as_text=True)
+    for element_id in ("cmp-input", "chip-row", "cmp-chart", "radar-chart", "cmp-body"):
+        assert 'id="%s"' % element_id in page, "对比页缺少 %s" % element_id
+    assert "/static/compare.js" in page
+    assert 'class="nav-link active"' in page, "对比页导航未高亮"
+    print("  -> 页面要素与导航高亮齐备")
+
+
 def main():
     """按阶段顺序执行全部用例"""
     global _APP
@@ -710,6 +834,7 @@ def main():
         run_index_tests()
         run_percentile_detail_tests()
         run_screener_tests()
+        run_compare_tests()
 
     print("\n" + "=" * 65)
     print("全部测试通过")

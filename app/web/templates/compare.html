@@ -1,0 +1,232 @@
+{#  多股对比页 (app/web/templates/compare.html)  #}
+{% extends "_layout.html" %}
+{% set active_page = "compare" %}
+
+{% block main_class %}container{% endblock %}
+{% block page_title %}多股对比{% endblock %}
+
+{% block page_css %}
+<style>
+  /* ---------- 查询区 ---------- */
+  .pick-row {
+    display: grid;
+    grid-template-columns: minmax(300px, 2.4fr) minmax(150px, 1fr) auto;
+    gap: var(--space-3);
+    align-items: end;
+  }
+
+  /* 标的筹码行 */
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+  }
+  .stock-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 30px;
+    padding: 0 var(--space-2) 0 var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-full);
+    background: var(--bg-subtle);
+    font-size: var(--font-base);
+  }
+  .chip-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .chip-name { font-weight: 600; }
+  .chip-code { font-family: var(--font-mono); font-size: var(--font-xs); color: var(--text-faint); }
+  .chip-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 19px;
+    height: 19px;
+    border: none;
+    border-radius: 50%;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .chip-btn:hover { background: var(--danger-500); color: #fff; }
+
+  /* ---------- 指标对比卡 ---------- */
+  .cmp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: var(--space-3);
+  }
+  .cmp-card {
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+  }
+  .cmp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+  .cmp-name { display: flex; align-items: center; gap: var(--space-2); font-weight: 650; }
+  .cmp-rank {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-xs);
+    background: var(--accent-soft);
+    color: var(--text-brand);
+    font-family: var(--font-mono);
+    font-size: var(--font-xs);
+    font-weight: 700;
+  }
+  .cmp-value { font-size: 30px; font-weight: 700; font-family: var(--font-mono); line-height: 1.1; }
+  .cmp-label { font-size: var(--font-sm); color: var(--text-muted); }
+  .cmp-facts {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .cmp-fk { font-size: var(--font-xs); color: var(--text-faint); }
+  .cmp-fv { font-family: var(--font-mono); font-size: var(--font-base); font-weight: 600; }
+
+  /* ---------- 图表 ---------- */
+  #cmp-chart { width: 100%; height: 380px; }
+  #radar-chart { width: 100%; height: 320px; }
+
+  /* ---------- 表格 ---------- */
+  .cell-v { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+  .cell-p { font-size: var(--font-xs); color: var(--text-faint); font-family: var(--font-mono); }
+  .name-cell { display: flex; align-items: center; gap: var(--space-2); }
+  .col-indicator {
+    text-align: right;
+    cursor: pointer;
+    user-select: none;
+  }
+  .col-indicator.active { color: var(--accent); }
+
+  @media (max-width: 900px) {
+    .pick-row { grid-template-columns: 1fr; }
+    #cmp-chart { height: 300px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="page-title">多股对比</div>
+  <div class="page-desc">
+    2~10 只标的同屏对照：各指标当前值与
+    <span class="term" data-tip="分位口径与个股页、指数页完全一致：剔除 PE/PB ≤ 0 的亏损期样本，再算当前值在剩余样本中的百分位。">历史分位</span>，
+    以及叠加在同一张图上的估值走势。点表格里的指标名可切换主图指标。
+  </div>
+</div>
+
+<!-- 查询区 -->
+<section class="card card-pad">
+  <div class="pick-row">
+    <div class="field field-code">
+      <label class="field-label" for="cmp-input">添加标的</label>
+      <input class="input" id="cmp-input" type="text" autocomplete="off"
+             placeholder="输入代码或中文名后回车，如 600519.SH 或 贵州茅台" list="none">
+      <div class="suggest" id="cmp-suggest"></div>
+    </div>
+    <div class="field">
+      <label class="field-label" for="cmp-period">取数区间</label>
+      <select class="select" id="cmp-period">
+        <option value="全部">全部历史</option>
+        <option value="近五年">近五年</option>
+        <option value="近十年">近十年</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="btn-cmp">开始对比</button>
+  </div>
+  <div class="chip-row" id="chip-row"></div>
+  <div class="field-hint" style="margin-top: var(--space-2)">
+    最少 2 只、最多 10 只；走势与分位都只使用本地已有的历史估值数据。
+  </div>
+</section>
+
+<div class="message" id="message" style="margin-top: var(--space-3)"></div>
+
+<div id="result-area" class="stack" style="margin-top: var(--space-4)">
+  <div id="result-empty" class="card">
+    <div class="empty-state">
+      <div class="empty-state-icon">⇄</div>
+      <div class="empty-state-title">添加两只以上标的后开始对比</div>
+      <div class="empty-state-desc">
+        支持代码与中文名；把同一行业的几只票放一起最容易看出估值高低差。
+      </div>
+    </div>
+  </div>
+
+  <div id="result-body" class="hidden stack">
+    <!-- 指标对比卡 -->
+    <section class="section">
+      <div class="section-head">
+        <div class="section-title" id="cmp-card-title">指标对比</div>
+        <div class="section-desc" id="cmp-card-desc">-</div>
+      </div>
+      <div class="cmp-grid" id="cmp-cards"></div>
+    </section>
+
+    <!-- 走势图 -->
+    <section class="card section">
+      <div class="card-head">
+        <div>
+          <div class="card-title">估值走势对比</div>
+          <div class="card-hint">各标的交易日不完全重合，缺失日断线显示（不做前向填充）</div>
+        </div>
+        <div class="tabs" id="cmp-indicator-tabs"></div>
+      </div>
+      <div class="card-body"><div id="cmp-chart"></div></div>
+    </section>
+
+    <!-- 分位雷达 -->
+    <section class="card section">
+      <div class="card-head">
+        <div>
+          <div class="card-title">分位雷达</div>
+          <div class="card-hint">各标的在五项指标上的历史分位；越靠外越贵</div>
+        </div>
+      </div>
+      <div class="card-body"><div id="radar-chart"></div></div>
+    </section>
+
+    <!-- 明细表 -->
+    <section class="card section">
+      <div class="card-head">
+        <div>
+          <div class="card-title">分位明细</div>
+          <div class="card-hint" id="cmp-table-hint">-</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr id="cmp-head"></tr></thead>
+          <tbody id="cmp-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="/static/compare.js"></script>
+{% endblock %}

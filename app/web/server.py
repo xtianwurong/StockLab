@@ -15,6 +15,7 @@ StockLab - Web 服务装配模块 (app.web.server)
   /indices                       指数估值页面（模板渲染）
   /industries                    行业估值页面（模板渲染）
   /screener                      选股器页面（模板渲染）
+  /compare                       多股对比页面（模板渲染）
   /favicon.ico                   站点图标（消除每页 404 噪音）
   /static/*                      本地静态资源（含 vendored ECharts，离线可用）
   /api/health                    健康检查
@@ -26,6 +27,7 @@ StockLab - Web 服务装配模块 (app.web.server)
   /api/index/detail?code=        单指数估值走势与明细
   /api/screener/meta?as_of=      选股器元数据（因子覆盖率 / 算子 / 预置模板）
   /api/screener/run              选股器执行（POST {spec, as_of, sort, order, limit}）
+  /api/compare?codes=            多股对比（2~10 只 × 5 指标分位 + 对齐后的估值走势）
   ==============================================================================
 """
 
@@ -35,6 +37,7 @@ import os
 from flask import Flask
 
 from app.web import api
+from app.web import compare_api
 from app.web import market_api
 from app.web import screener_api
 
@@ -77,6 +80,9 @@ def create_app(priority=None, db_path=None):
     app.add_url_rule(
         "/screener", "screener", api.handle_screener_page, methods=["GET"]
     )
+    app.add_url_rule(
+        "/compare", "compare", api.handle_compare_page, methods=["GET"]
+    )
     app.add_url_rule("/favicon.ico", "favicon", api.handle_favicon, methods=["GET"])
 
     # 数据接口
@@ -116,10 +122,16 @@ def create_app(priority=None, db_path=None):
         screener_api.handle_screener_run,
         methods=["POST"],
     )
+    app.add_url_rule(
+        "/api/compare",
+        "compare_api",
+        compare_api.handle_compare,
+        methods=["GET"],
+    )
 
     # 错误兜底
     app.register_error_handler(404, api.handle_not_found)
     app.register_error_handler(500, api.handle_internal_error)
 
-    _logger.info("Flask 应用已创建，路由 15 条（页面 5 + 接口 9 + 图标 1）")
+    _logger.info("Flask 应用已创建，路由 17 条（页面 6 + 接口 10 + 图标 1）")
     return app

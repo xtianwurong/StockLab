@@ -43,6 +43,7 @@ __all__ = [
     "handle_indices_page",
     "handle_industries_page",
     "handle_screener_page",
+    "handle_compare_page",
     "handle_favicon",
     "handle_health",
     "handle_percentile",
@@ -395,6 +396,16 @@ def handle_screener_page():
         str: HTML 页面
     """
     return render_template("screener.html")
+
+
+def handle_compare_page():
+    """
+    多股对比页面（2~10 只标的同屏对照）
+
+    Returns:
+        str: HTML 页面
+    """
+    return render_template("compare.html")
 
 
 def handle_favicon():

@@ -576,6 +576,56 @@ def load_index_percentile(index_code, indicator):
     return frame, results
 
 
+def load_valuation_histories(codes, indicator):
+    """
+    一次取多只标的的同指标估值历史序列（多股对比页用）
+
+    【为何一次 IN 查询而不是逐只调门面】
+      逐只调用会走门面的取数优先级（可能触发远端请求 + 回写），
+      N 只标的串行下来页面要等好几秒；对比页要的就是本地已有的历史，
+      一次 IN 查询在 440 万行的表上也是毫秒级。
+
+    【口径】
+      与个股分位、指数分位完全一致：只取 indicator > 0 的样本
+      （亏损期 PE/PB <= 0 不参与，否则分位含义会变）。
+
+    Args:
+        codes (list): 证券代码列表（ts_code）
+        indicator (str): 指标列名 pe_ttm / pe_static / pb / ps / pcf
+
+    Returns:
+        pd.DataFrame | None: [ts_code, trade_date, indicator]；失败或无数据返回 None
+    """
+    if indicator not in _INDICATORS or not codes:
+        return None
+
+    code_list = [str(code).strip() for code in codes if str(code).strip()]
+    if not code_list:
+        return None
+
+    cache_key = "hist:%s:%s" % (indicator, ",".join(sorted(code_list)))
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    placeholders = ", ".join(["?"] * len(code_list))
+    sql = (
+        "SELECT ts_code, trade_date, {col} AS value "
+        "FROM market.valuation_history "
+        "WHERE ts_code IN ({marks}) AND {col} IS NOT NULL AND {col} > 0 "
+        "ORDER BY ts_code, trade_date"
+    ).format(col=indicator, marks=placeholders)
+
+    frame = _query(sql, code_list)
+    if frame is None or frame.empty:
+        _logger.warning("多股估值历史无结果 [%s, %d 只]", indicator, len(code_list))
+        return None
+
+    frame = frame.rename(columns={"value": indicator})
+    _cache_put(cache_key, frame)
+    return frame
+
+
 def industry_stat_dates():
     """
     列出本地已有的行业估值统计日期（最新在前），供行业页显示数据截止日期
