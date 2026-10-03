@@ -34,7 +34,6 @@
   var resultArea = document.getElementById("result-area");
   var emptyState = document.getElementById("empty-state");
   var metricGrid = document.getElementById("metric-grid");
-  var indicatorTabs = document.getElementById("indicator-tabs");
   var detailBody = document.getElementById("detail-body");
   var windowsBox = document.getElementById("windows");
   var chartDom = document.getElementById("trend-chart");
@@ -118,7 +117,7 @@
       var row = el("div", "suggest-item" + (index === activeIndex ? " active" : ""));
       row.appendChild(el("span", "suggest-code", item.code));
       row.appendChild(el("span", "suggest-name", item.name || "-"));
-      row.appendChild(el("span", "suggest-industry", item.market || ""));
+      row.appendChild(el("span", "suggest-market", item.market || ""));
       row.addEventListener("mousedown", function (event) {
         event.preventDefault();  // 防止输入框失焦导致列表先被关闭
         applySuggestItem(index);
@@ -343,7 +342,6 @@
     renderHero(data);
     renderWindows(data);
     renderMetricCards(data);
-    renderIndicatorTabs(data);
     renderDetailTable(data);
     renderMarketContext(data);
     renderTrendChart();
@@ -623,18 +621,6 @@
    *
    * @param {object} data 应答
    */
-  function renderIndicatorTabs(data) {
-    indicatorTabs.textContent = "";
-    data.results.forEach(function (item) {
-      var tab = el("button",
-        "tab" + (item.indicator === primaryIndicator ? " active" : ""), item.label);
-      tab.type = "button";
-      tab.addEventListener("click", function () {
-        setPrimary(item.indicator);
-      });
-      indicatorTabs.appendChild(tab);
-    });
-  }
 
   /**
    * 切换主指标并局部刷新
@@ -649,7 +635,6 @@
     renderHero(lastPayload);
     renderWindows(lastPayload);
     renderMetricCards(lastPayload);
-    renderIndicatorTabs(lastPayload);
     renderTrendChart();
   }
 

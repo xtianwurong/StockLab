@@ -1,41 +1,32 @@
 {#
-  StockLab 统一页面骨架 (app/web/templates/_layout.html)
+  StockLab 应用外壳 (app/web/templates/_layout.html)
 
-  所有页面统一从这里 extends，只覆盖三个块：
-    page_title    浏览器标题（不含 "StockLab - " 前缀）
-    page_css      页面私有样式
-    content       主体内容
-    page_scripts  页面脚本（最后加载，保证 DOM 已就绪）
-  另外用两个属性块控制容器宽度与导航高亮：
-    main_class    主体容器类名（默认 container）
-    active_page   当前导航项
+  外壳 = 左侧常驻导航 + 顶部工具条 + 独立滚动的内容区。
+  七个页面统一从这里 extends，只覆盖：
+    page_title / page_css / content / page_scripts / active_page / main_class
 
-  资源加载顺序（勿随意调整）：
-    tokens.css -> components.css -> base.css   令牌 → 组件 → 布局
-    echarts -> common.js -> charts.js -> ui.js -> theme.js -> 页面脚本
-    theme.js 放在最后：它要等 common.js 建好 SL 命名空间。
+  资源加载顺序（勿调整）：
+    tokens -> components -> base   令牌 → 组件 → 外壳与版式
+    echarts -> common -> charts -> ui -> theme -> 页面脚本
+    theme.js 放最后：要等 common.js 建好 window.SL 命名空间。
 #}<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>{% block page_title %}StockLab{% endblock %} · StockLab</title>
+  <title>{% block page_title %}StockLab{% endblock %} · StockLab 投研工作台</title>
   <link rel="icon" href="/favicon.ico" type="image/svg+xml">
 
-  <!-- 设计令牌（亮/暗双主题的唯一取值来源） -->
   <link rel="stylesheet" href="/static/tokens.css">
-  <!-- 可复用组件（按钮 / 表单 / 徽章 / 模态 / Toast / 抽屉 / 下拉） -->
   <link rel="stylesheet" href="/static/components.css">
-  <!-- 页面骨架与历史类名 -->
   <link rel="stylesheet" href="/static/base.css">
   <script src="/static/echarts.min.js"></script>
 
   <script>
     /*
-     * 首屏防闪烁（FOUC）：必须在 CSS 首次绘制前确定主题，
-     * 否则暗色用户会先看到一帧亮色再跳变。
-     * 只做「读 localStorage → 写 data-theme」，其余逻辑在 theme.js。
+     * 首屏防闪烁：必须在 CSS 首次绘制前确定主题，否则暗色用户会先看到一帧亮色。
+     * 只做「读 localStorage → 写 data-theme」，其余在 theme.js。
      */
     (function () {
       try {
@@ -43,8 +34,11 @@
         if (mode === "light" || mode === "dark") {
           document.documentElement.setAttribute("data-theme", mode);
         }
+        if (window.localStorage.getItem("sl-shell-collapsed") === "1") {
+          document.documentElement.classList.add("shell-collapsed");
+        }
       } catch (error) {
-        /* 隐私模式禁用存储：忽略，按 system 走 */
+        /* 禁用存储：按默认值走 */
       }
     })();
   </script>
@@ -52,15 +46,22 @@
   {% block page_css %}{% endblock %}
 </head>
 <body>
-  {% include "_topbar.html" %}
+  <div class="shell" id="shell">
+    {% include "_sidebar.html" %}
 
-  <main class="{% block main_class %}container{% endblock %} page-enter">
+    <div class="shell-main">
+      {% include "_topbar.html" %}
+
+      <div class="content">
+        <div class="content-inner">
 {% block content %}{% endblock %}
-  </main>
+        </div>
 
-  {% include "_footer.html" %}
+        {% include "_footer.html" %}
+      </div>
+    </div>
+  </div>
 
-  <!-- Toast 挂载点（ui.js 会惰性创建，这里预置以便样式稳定） -->
   <div class="toast-host" id="sl-toast-host"></div>
 
   <script src="/static/common.js"></script>

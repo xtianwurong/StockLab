@@ -922,13 +922,10 @@
       }
     });
 
-    // 快捷键：/ 聚焦条件区，R 重跑
-    SL.ui.shortcut("/", function () {
-      var select = dom.ruleList.querySelector("select");
-      if (select) {
-        select.focus();
-      }
-    }, "聚焦条件编辑");
+    // 快捷键：R 重跑。
+    // 「/ 聚焦条件区」已删除 —— 顶栏的全局证券搜索在所有页面都占着 /，
+    // 而 SL.ui.shortcut 按键位覆盖、后注册者胜出，等于同一个键在选股器页
+    // 指「编辑规则」、在其他页指「搜股票」。同键两义比少一个快捷键更糟。
     SL.ui.shortcut("r", function () {
       run();
     }, "重新筛选");

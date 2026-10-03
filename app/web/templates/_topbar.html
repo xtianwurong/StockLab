@@ -1,36 +1,42 @@
 {#
-  共享顶栏：品牌 + 主导航 + 服务状态 + 主题切换
-  调用方（_layout.html）通过 {% set active_page %} 指定高亮项：
-    analysis | market | indices | industries
-  新增页面时：在 NAV_ITEMS 里加一项，并把 active_page 传进来即可，
-  顶栏本身无需改动。
+  顶部工具条 (app/web/templates/_topbar.html)
+
+  只放「跨页面都常用」的三件事：全局证券搜索（回车进个股页）、
+  侧边栏折叠、主题切换。页面级筛选一律留在页面内部，不上浮到顶栏——
+  顶栏是外壳的一部分，混进业务筛选会让人分不清哪些是全局的。
 #}
-{% set NAV_ITEMS = [
-  ("analysis",  "01", "个股分析", "/"),
-  ("market",    "02", "全市场",   "/market"),
-  ("indices",   "03", "指数估值", "/indices"),
-  ("industries","04", "行业估值", "/industries"),
-  ("screener",  "05", "选股器",   "/screener"),
-  ("compare",   "06", "多股对比", "/compare"),
-  ("portfolio", "07", "组合监控", "/portfolio")
-] %}
 <header class="topbar">
-  <a class="brand" href="/"><span class="brand-mark">S</span>StockLab</a>
-  <nav class="nav" aria-label="主导航">
-    {% for key, idx, label, href in NAV_ITEMS %}
-    <a class="nav-link{{ ' active' if active_page == key else '' }}"
-       href="{{ href }}"{{ ' aria-current="page"' if active_page == key else '' }}>
-      <span class="nav-idx">{{ idx }}</span>{{ label }}
-    </a>
-    {% endfor %}
-  </nav>
-  <div class="topbar-right">
-    <span id="data-as-of" class="hidden"></span>
-    <span><span class="status-dot" id="status-dot"></span><span id="status-text">检测中</span></span>
-    <button class="theme-toggle" type="button" data-theme-toggle
-            aria-label="切换主题" title="切换主题（快捷键 T）">
-      <span class="icon-sun" aria-hidden="true">☀</span>
-      <span class="icon-moon" aria-hidden="true">☾</span>
-    </button>
+  <button class="btn btn-ghost btn-icon btn-sm" id="btn-collapse" type="button"
+          aria-label="折叠/展开导航" title="折叠/展开导航（快捷键 [）">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+         stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+      <path d="M4 6h16M4 12h16M4 18h16"></path>
+    </svg>
+  </button>
+
+  <div class="topbar-search">
+    <span class="topbar-search-icon">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="M20 20l-3.5-3.5"></path>
+      </svg>
+    </span>
+    <input class="input" id="global-search" type="text" autocomplete="off" list="none"
+           placeholder="搜股票：代码或中文名，回车直达个股页（快捷键 /）"
+           aria-label="全局证券搜索">
+    <div class="suggest" id="global-suggest"></div>
   </div>
+
+  <div class="topbar-spacer"></div>
+
+  <div class="topbar-meta">
+    <span class="nowrap">口径 <b>亏损期已剔除</b></span>
+  </div>
+
+  <button class="theme-toggle" type="button" data-theme-toggle
+          aria-label="切换主题" title="切换主题（快捷键 T）">
+    <span class="icon-sun" aria-hidden="true">☀</span>
+    <span class="icon-moon" aria-hidden="true">☾</span>
+  </button>
 </header>

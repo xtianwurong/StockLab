@@ -1,112 +1,142 @@
 {% extends "_layout.html" %}
 {% set active_page = "indices" %}
 
-{% block main_class %}container{% endblock %}
 {% block page_title %}指数估值{% endblock %}
 
 {% block page_css %}
 <style>
-    .toolbar { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+  /* ---------- 筛选条 ---------- */
+  .index-filter {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--rhythm-4);
+    flex-wrap: wrap;
+  }
+  .index-filter .btn { height: 34px; }
 
-    /* ---------- 指数卡片 ---------- */
-    .index-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
-      gap: 14px;
-    }
-    .index-card {
-      padding: 15px 16px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow-sm);
-      cursor: pointer;
-      transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
-    }
-    .index-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
-    .index-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.13); }
-    .index-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .index-name { font-size: 15.5px; font-weight: 680; }
-    .index-code { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); }
-    .index-value { font-size: 31px; font-weight: 700; font-family: var(--mono); line-height: 1.15; margin: 8px 0 2px; }
-    .index-current { font-size: 12.5px; color: var(--text-muted); font-family: var(--mono); }
-    .index-facts {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      margin-top: 12px;
-      padding-top: 11px;
-      border-top: 1px solid var(--border-color);
-      font-size: 11.5px;
-      color: var(--text-faint);
-    }
-    .index-facts b { display: block; color: var(--text-sub); font-family: var(--mono); font-size: 13px; font-weight: 650; margin-top: 2px; }
-    .index-temp { margin-top: 12px; }
+  /* ---------- 指数卡片 ---------- */
+  .index-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(272px, 1fr));
+    gap: var(--rhythm-3);
+  }
+  .index-card {
+    display: flex;
+    flex-direction: column;
+    padding: var(--rhythm-4);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    transition: border-color var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
+  }
+  .index-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .index-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
+  .index-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .index-name { font-size: var(--font-lg); font-weight: 680; letter-spacing: -0.01em; }
+  .index-code { font-family: var(--font-mono); font-size: var(--font-xs); color: var(--text-faint); }
+  .index-value {
+    font-family: var(--font-mono);
+    font-size: var(--font-4xl);
+    font-weight: 700;
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+    margin-top: var(--space-3);
+  }
+  .index-current { font-family: var(--font-mono); font-size: var(--font-sm); color: var(--text-muted); margin-top: 1px; }
+  .index-temp { margin-top: var(--rhythm-3); }
+  .index-facts {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-top: auto;
+    padding-top: var(--rhythm-3);
+    border-top: 1px solid var(--border-subtle);
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+  }
+  .index-facts b {
+    display: block;
+    color: var(--text-sub);
+    font-family: var(--font-mono);
+    font-size: var(--font-base);
+    font-weight: 650;
+    margin-top: 2px;
+  }
 
-    /* ---------- 详情 ---------- */
-    .detail-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-    .detail-name { font-size: 18px; font-weight: 700; }
-    .detail-facts { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); }
-    .detail-facts b { color: var(--text-sub); font-weight: 650; font-family: var(--mono); }
-    #index-chart { width: 100%; height: 380px; }
+  /* ---------- 详情 ---------- */
+  .detail-head { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+  .detail-name { font-size: var(--font-xl); font-weight: 700; letter-spacing: -0.015em; }
+  .detail-facts { display: flex; gap: var(--rhythm-5); flex-wrap: wrap; font-size: var(--font-sm); color: var(--text-muted); }
+  .detail-facts b { color: var(--text-sub); font-weight: 650; font-family: var(--font-mono); }
+  #index-chart { width: 100%; height: 400px; }
 
-    @media (max-width: 860px) {
-      #index-chart { height: 300px; }
-    }
-  
+  @media (max-width: 860px) {
+    #index-chart { height: 300px; }
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-    <div class="page-head">
-      <div class="page-title">指数估值</div>
-      <div class="page-desc">
-        指数估值 = 成分股估值的<span class="term" data-tip="剔除 PE/PB ≤ 0 的亏损成分后取中位数，避免个别极端值拉高整体。">中位数</span>（剔除亏损样本），
-        再套用与个股一致的<span class="term" data-tip="分位 = 当前估值在该指数自身历史有效样本中低于当前值的占比，越低越便宜。">分位口径</span>。
-        点击卡片查看该指数的历史走势与分位参考线。
-      </div>
+<div class="page-head">
+  <div class="page-head-main">
+    <div class="page-title">指数估值</div>
+    <div class="page-desc">
+      指数估值 = 成分股估值的<span class="term" data-tip="剔除 PE/PB ≤ 0 的亏损成分后取中位数，避免个别极端值拉高整体。">中位数</span>（剔除亏损样本），
+      再套用与个股一致的<span class="term" data-tip="分位 = 当前估值在该指数自身历史有效样本中低于当前值的占比，越低越便宜。">分位口径</span>。
+      点任一卡片查看该指数的历史走势与分位参考线。
     </div>
+  </div>
+  <div class="page-head-actions">
+    <button class="btn btn-primary btn-sm" id="btn-reload" type="button">刷新</button>
+  </div>
+</div>
 
-    <div class="meta-strip" style="margin-bottom:12px">
-      <span>七档评级：</span>
+<!-- 筛选条 -->
+<section class="card card-pad">
+  <div class="index-filter">
+    <div class="field">
+      <label class="field-label">估值指标</label>
+      <div class="tabs" id="indicator-tabs"></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="meta-strip">
+      <span class="text-muted">七档评级</span>
       <span id="index-legend"></span>
     </div>
+  </div>
+</section>
 
-    <section class="card card-pad">
-      <div class="toolbar">
-        <div class="field">
-          <label class="field-label">估值指标</label>
-          <div class="tabs" id="indicator-tabs"></div>
-        </div>
-        <div class="toolbar-spacer" style="flex:1"></div>
-        <button class="btn btn-primary" id="btn-reload">刷新</button>
-      </div>
-    </section>
+<div class="message section" id="message"></div>
 
-    <div class="message" id="message" style="margin-top:14px"></div>
+<!-- 指数卡片 -->
+<section class="index-grid section" id="index-grid"></section>
 
-    <section class="index-grid section" id="index-grid"></section>
+<!-- 详情 -->
+<section class="card section hidden" id="detail-card">
+  <div class="card-head">
+    <div class="detail-head">
+      <span class="detail-name" id="detail-name">-</span>
+      <span class="index-code" id="detail-code">-</span>
+      <div class="detail-facts" id="detail-facts"></div>
+    </div>
+    <div class="card-hint">阴影为 25%~75% 分位带，虚线为 10% / 90% 分位参考线</div>
+  </div>
+  <div class="card-pad"><div id="index-chart"></div></div>
+</section>
 
-    <!-- 详情 -->
-    <section class="card section hidden" id="detail-card">
-      <div class="card-head">
-        <div class="detail-head">
-          <span class="detail-name" id="detail-name">-</span>
-          <span class="index-code" id="detail-code">-</span>
-          <div class="detail-facts" id="detail-facts"></div>
-        </div>
-        <div class="card-hint" id="detail-hint">阴影为 25%~75% 分位带，虚线为 10% / 90% 分位参考线</div>
-      </div>
-      <div class="card-pad"><div id="index-chart"></div></div>
-    </section>
-
-    <section class="card section" id="empty-detail">
-      <div class="empty-state">
-        <div class="empty-state-title">点击上方任意指数卡片</div>
-        查看该指数的估值走势、分位参考线与档位结论。
-      </div>
-    </section>
-  
+<section class="card section" id="empty-detail">
+  <div class="empty-state">
+    <div class="empty-state-title">点击上方任意指数卡片</div>
+    <div class="empty-state-desc">查看该指数的估值走势、分位参考线与档位结论。</div>
+  </div>
+</section>
 {% endblock %}
 
 {% block page_scripts %}

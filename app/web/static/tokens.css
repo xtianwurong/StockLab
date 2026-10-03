@@ -22,6 +22,14 @@
 html[data-theme="light"] {
   color-scheme: light;
 
+  /* ---------- 涨跌语义色（A 股口径：红涨绿跌） ---------- */
+  /* 与七档估值色方向相反，必须分属两套语义、不得混用 */
+  --rise: #dc2626;   /* 涨 */
+  --rise-soft: #fef2f2;
+  --fall: #16a34a;   /* 跌 */
+  --fall-soft: #f0fdf4;
+  --flat: #94a3b8;   /* 平 */
+
   /* ---------- 品牌色阶 ---------- */
   --brand-50: #eff6ff;
   --brand-100: #dbeafe;
@@ -189,7 +197,9 @@ html[data-theme="light"] {
   --control-sm: 30px;
   --control-md: 38px;
   --control-lg: 44px;
-  --topbar-height: 56px;
+  /* 历史别名：v2 外壳的真实顶栏高是 60px，这里跟随 --topbar-h，
+     避免页面内 sticky 偏移仍按旧的 56px 算，导致卡片顶部被顶栏压住 4px */
+  --topbar-height: var(--topbar-h);
 }
 
 /* ==========================================================================
@@ -197,6 +207,14 @@ html[data-theme="light"] {
    ========================================================================== */
 html[data-theme="dark"] {
   color-scheme: dark;
+  color-scheme: dark;
+
+  /* ---------- 涨跌语义色（暗底下提亮，保证对比度） ---------- */
+  --rise: #f87171;
+  --rise-soft: #3b0d0d;
+  --fall: #4ade80;
+  --fall-soft: #052e16;
+  --flat: #64748b;
 
   /* ---------- 品牌色阶（暗底提亮） ---------- */
   --brand-50: #172554;
@@ -307,6 +325,14 @@ html[data-theme="dark"] {
 @media (prefers-color-scheme: dark) {
   html:not([data-theme="light"]) {
     color-scheme: dark;
+  color-scheme: dark;
+
+  /* ---------- 涨跌语义色（暗底下提亮，保证对比度） ---------- */
+  --rise: #f87171;
+  --rise-soft: #3b0d0d;
+  --fall: #4ade80;
+  --fall-soft: #052e16;
+  --flat: #64748b;
 
     --brand-50: #172554;
     --brand-100: #1e3a8a;
@@ -484,4 +510,26 @@ html.theme-switching *::after {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--gray-400);
   background-clip: content-box;
+}
+
+/* ==========================================================================
+   5. 应用外壳版式（v2：侧边栏 + 顶栏 + 内容区）
+   ========================================================================== */
+:root {
+  --sidebar-w: 232px;
+  --sidebar-w-collapsed: 64px;
+  --topbar-h: 60px;
+  --content-max: 1680px;
+  --page-x: 28px;
+
+  /* 垂直韵律：区块间距统一走这几档，避免各页各写各的 */
+  --rhythm-1: 4px;
+  --rhythm-2: 8px;
+  --rhythm-3: 12px;
+  --rhythm-4: 16px;
+  --rhythm-5: 20px;
+  --rhythm-6: 24px;
+  --rhythm-8: 32px;
+  --rhythm-10: 40px;
+  --rhythm-12: 48px;
 }

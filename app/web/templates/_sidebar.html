@@ -1,0 +1,81 @@
+{#
+  左侧常驻导航 (app/web/templates/_sidebar.html)
+
+  分三组：分析 / 估值 / 工具。
+  新增页面时：在对应组的 NAV_ITEMS 里加一项，并把页面里的 active_page 传进来，
+  侧边栏本身无需改动。
+
+  active_page 取值：analysis / market / indices / industries / screener / compare / portfolio
+#}
+{% set NAV_ANALYSIS = [
+  ("analysis", "个股分析", "M12 5v14M5 12h14"),
+  ("market",   "全市场",   "M3 21h18M6 20v-8M11 20V5M16 20v-6")
+] %}
+{% set NAV_VALUATION = [
+  ("indices",    "指数估值", "M3 17l6-6 4 4 8-8M15 7h6v6"),
+  ("industries", "行业估值", "M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5")
+] %}
+{% set NAV_TOOLS = [
+  ("screener",  "选股器",   "M3 5h18l-7 8v6l-4 2v-8L3 5z"),
+  ("compare",   "多股对比", "M3 4h7v16H3zM14 8h7v12h-7z"),
+  ("portfolio", "组合监控", "M12 3l2.6 5.6 6 .8-4.4 4.2 1.1 6.1L12 16.8 6.7 19.7l1.1-6.1L3.4 9.4l6-.8L12 3z")
+] %}
+
+<aside class="sidebar">
+  <a class="sidebar-brand" href="/">
+    <span class="brand-mark">S</span>
+    <span class="brand-text">
+      <span class="brand-name">StockLab</span>
+      <span class="brand-sub">RESEARCH DESK</span>
+    </span>
+  </a>
+
+  <nav class="sidebar-nav" aria-label="主导航">
+    <div class="nav-group">
+      <div class="nav-group-label">分析</div>
+      {% for key, label, path in NAV_ANALYSIS %}
+      <a class="nav-item{{ ' active' if active_page == key else '' }}" href="{{ path }}"
+         {{ 'aria-current="page"' if active_page == key else '' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="{{ path }}"></path>
+        </svg>
+        <span class="nav-item-label">{{ label }}</span>
+      </a>
+      {% endfor %}
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">估值</div>
+      {% for key, label, path in NAV_VALUATION %}
+      <a class="nav-item{{ ' active' if active_page == key else '' }}" href="{{ path }}"
+         {{ 'aria-current="page"' if active_page == key else '' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="{{ path }}"></path>
+        </svg>
+        <span class="nav-item-label">{{ label }}</span>
+      </a>
+      {% endfor %}
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">工具</div>
+      {% for key, label, path in NAV_TOOLS %}
+      <a class="nav-item{{ ' active' if active_page == key else '' }}" href="{{ path }}"
+         {{ 'aria-current="page"' if active_page == key else '' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="{{ path }}"></path>
+        </svg>
+        <span class="nav-item-label">{{ label }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <div class="sidebar-foot">
+    <div><b>数据截止</b> <span id="data-as-of">-</span></div>
+    <div><b>服务</b> <span class="status-dot" id="status-dot"></span><span id="status-text">检测中</span></div>
+  </div>
+</aside>

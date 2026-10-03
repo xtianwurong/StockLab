@@ -694,7 +694,7 @@ def run_screener_tests():
                        "funnel-list", "scatter-chart", "industry-list", "btn-run"):
         assert 'id="%s"' % element_id in page, "选股器页面缺少 %s" % element_id
     assert "/static/screener.js" in page, "选股器页面未引入脚本"
-    assert 'class="nav-link active"' in page, "选股器页面导航未高亮"
+    assert 'class="nav-item active"' in page, "选股器页面导航未高亮"
     print("  -> 页面要素与导航高亮齐备")
 
 
@@ -811,7 +811,7 @@ def run_compare_tests():
     for element_id in ("cmp-input", "chip-row", "cmp-chart", "radar-chart", "cmp-body"):
         assert 'id="%s"' % element_id in page, "对比页缺少 %s" % element_id
     assert "/static/compare.js" in page
-    assert 'class="nav-link active"' in page, "对比页导航未高亮"
+    assert 'class="nav-item active"' in page, "对比页导航未高亮"
     print("  -> 页面要素与导航高亮齐备")
 
 
@@ -894,7 +894,7 @@ def run_portfolio_tests():
                        "watch-grid", "watch-table-card", "watch-head"):
         assert 'id="%s"' % element_id in page, "组合监控页缺少 %s" % element_id
     assert "/static/portfolio.js" in page
-    assert 'class="nav-link active"' in page, "组合监控页导航未高亮"
+    assert 'class="nav-item active"' in page, "组合监控页导航未高亮"
     # 自选列表纯客户端存储：存储逻辑必须在 portfolio.js 里。
 # 内联脚本只有布局的防闪烁主题脚本（读 sl-theme），不得出现自选列表的存储键。
     inline_scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", page, re.S)

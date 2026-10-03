@@ -1,426 +1,344 @@
 {% extends "_layout.html" %}
 {% set active_page = "analysis" %}
 
-{% block main_class %}container container-narrow{% endblock %}
-{% block page_title %}个股估值分位分析{% endblock %}
+{% block page_title %}个股分析{% endblock %}
 
 {% block page_css %}
 <style>
-    /* ---------- 查询区 ---------- */
-    .query-row {
-      display: grid;
-      grid-template-columns: minmax(260px, 2.2fr) minmax(130px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) auto;
-      gap: 12px;
-      align-items: end;
-    }
-    .query-extra {
-      display: flex;
-      gap: 14px;
-      align-items: end;
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px dashed var(--border-color);
-    }
-    .query-extra .field { width: 150px; }
-    .query-extra .hint { font-size: 12px; color: var(--text-faint); padding-bottom: 10px; }
+  /* ---------- 标的条 ---------- */
+  .quote-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--rhythm-5);
+    flex-wrap: wrap;
+    padding: var(--rhythm-4);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+  .quote-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .quote-name {
+    font-size: var(--font-2xl);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+  }
+  .quote-code { font-family: var(--font-mono); font-size: var(--font-sm); color: var(--text-faint); }
+  .quote-facts { display: flex; gap: var(--rhythm-5); flex-wrap: wrap; font-size: var(--font-sm); }
+  .quote-facts b { font-family: var(--font-mono); font-weight: 620; color: var(--text-sub); }
+  .quote-fact { display: flex; flex-direction: column; gap: 1px; }
+  .quote-fact-k { font-size: var(--font-xs); color: var(--text-faint); }
+  .quote-fact-v { font-family: var(--font-mono); font-weight: 620; font-size: var(--font-base); }
 
-    /* ---------- 联想下拉 ---------- */
-    .field-code { position: relative; }
-    .suggest {
-      position: absolute;
-      top: calc(100% + 5px);
-      left: 0;
-      right: 0;
-      max-height: 320px;
-      overflow-y: auto;
-      background: var(--bg-card);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--radius-sm);
-      box-shadow: var(--shadow-md);
-      z-index: 40;
-      display: none;
-    }
-    .suggest.open { display: block; }
-    .suggest-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 12px;
-      cursor: pointer;
-      border-bottom: 1px solid var(--bg-hover);
-      font-size: 13.5px;
-    }
-    .suggest-item:last-child { border-bottom: none; }
-    .suggest-item:hover, .suggest-item.active { background: var(--accent-soft); }
-    .suggest-code { font-family: var(--mono); color: var(--text-sub); min-width: 84px; }
-    .suggest-name { color: var(--text-main); font-weight: 550; }
-    .suggest-industry { margin-left: auto; font-size: 11.5px; color: var(--text-faint); }
-    .suggest-empty { padding: 12px; font-size: 13px; color: var(--text-muted); }
+  /* ---------- 查询面板 ---------- */
+  .query-panel { display: grid; grid-template-columns: minmax(280px, 2fr) repeat(3, minmax(132px, 1fr)) auto; gap: var(--space-3); align-items: end; }
+  .query-panel .btn { height: 36px; }
+  .query-more {
+    display: flex; gap: var(--space-4); align-items: flex-end; flex-wrap: wrap;
+    margin-top: var(--rhythm-3); padding-top: var(--rhythm-3);
+    border-top: 1px dashed var(--border-color);
+  }
+  .query-more .field { width: 168px; }
 
-    /* ---------- 结果头 ---------- */
-    .result-head {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      flex-wrap: wrap;
-      padding: 14px 18px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow-sm);
-    }
-    .sec-name { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
-    .sec-code { font-family: var(--mono); font-size: 13px; color: var(--text-muted); }
-    .sec-facts { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); }
-    .sec-facts b { color: var(--text-sub); font-weight: 600; }
-    .head-spacer { flex: 1; }
+  /* ---------- 主指标卡 ---------- */
+  .hero-card { display: flex; flex-direction: column; height: 100%; }
+  .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+  .hero-label { font-size: var(--font-sm); color: var(--text-muted); }
+  .hero-value {
+    font-size: 52px; font-weight: 700; line-height: 1.02;
+    letter-spacing: -0.035em; font-family: var(--font-mono); margin-top: var(--space-2);
+  }
+  .hero-row { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+  .hero-current { font-family: var(--font-mono); font-size: var(--font-base); color: var(--text-sub); }
+  .hero-temp { margin-top: var(--rhythm-3); }
+  .hero-facts {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3);
+    margin-top: auto; padding-top: var(--rhythm-3); border-top: 1px solid var(--border-subtle);
+  }
+  /* 这两个类由 app.js 动态生成（类名不带 hero- 前缀） */
+  .fact-k { font-size: var(--font-xs); color: var(--text-faint); }
+  .fact-v {
+    font-family: var(--font-mono);
+    font-size: var(--font-lg);
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    margin-top: 1px;
+  }
 
-    /* ---------- 主指标区 ---------- */
-    .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(280px, 1fr) minmax(420px, 2fr);
-      gap: 16px;
-    }
-    .hero-value {
-      font-size: 46px;
-      font-weight: 700;
-      line-height: 1.05;
-      letter-spacing: -0.03em;
-      font-family: var(--mono);
-    }
-    .hero-label { font-size: 13px; color: var(--text-muted); }
-    .hero-row { display: flex; align-items: baseline; gap: 10px; }
-    .hero-current { font-size: 13.5px; color: var(--text-sub); font-family: var(--mono); }
-    .hero-facts {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-top: 14px;
-      padding-top: 13px;
-      border-top: 1px solid var(--border-color);
-    }
-    .fact-k { font-size: 11.5px; color: var(--text-faint); }
-    .fact-v { font-size: 15px; font-weight: 650; font-family: var(--mono); }
+  /* ---------- 多窗口 ---------- */
+  .windows { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
+  .win-cell {
+    padding: var(--space-3);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+  }
+  .win-cell.is-primary { border-color: var(--border-brand); background: var(--accent-soft); }
+  .win-label { font-size: var(--font-xs); color: var(--text-muted); }
+  .win-value { font-family: var(--font-mono); font-size: var(--font-2xl); font-weight: 700; line-height: 1.15; margin-top: 2px; }
+  .win-rows { font-size: var(--font-xs); color: var(--text-faint); margin-top: 3px; font-family: var(--font-mono); }
 
-    .windows { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-    .win-cell {
-      padding: 11px 12px;
-      background: var(--bg-subtle);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-    }
-    .win-label { font-size: 12px; color: var(--text-muted); margin-bottom: 5px; }
-    .win-value { font-size: 20px; font-weight: 700; font-family: var(--mono); line-height: 1.2; }
-    .win-badge { margin-top: 6px; }
-    .win-rows { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
 
-    /* ---------- 全市场横向位置 ---------- */
-    .mc-grid {
-      display: grid;
-      grid-template-columns: minmax(200px, 240px) minmax(260px, 1fr);
-      gap: var(--space-4);
-      align-items: center;
-    }
-    .mc-rank-box {
-      padding: var(--space-3);
-      border-radius: var(--radius-sm);
-      background: var(--bg-subtle);
-    }
-    .mc-rank-label { font-size: var(--font-sm); color: var(--text-muted); }
-    .mc-rank-value {
-      font-size: 30px;
-      font-weight: 700;
-      font-family: var(--font-mono);
-      line-height: 1.15;
-      margin-top: 2px;
-    }
-    .mc-rank-sub { font-size: var(--font-xs); color: var(--text-faint); margin-top: 3px; }
+  /* ---------- 指标速览（紧凑五联卡） ---------- */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+    gap: var(--space-2);
+  }
+  .metric-card {
+    padding: var(--rhythm-3);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
+  }
+  .metric-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+  .metric-card.primary { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
+  .metric-card.na { opacity: 0.6; cursor: default; }
+  .metric-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .metric-name { font-size: var(--font-sm); font-weight: 620; color: var(--text-sub); }
+  .metric-percentile {
+    font-family: var(--font-mono);
+    font-size: var(--font-2xl);
+    font-weight: 700;
+    line-height: 1.15;
+    margin-top: var(--space-2);
+    letter-spacing: -0.02em;
+  }
+  .metric-current { font-size: var(--font-xs); color: var(--text-muted); font-family: var(--font-mono); margin-top: 1px; }
+  .metric-temp { margin-top: var(--space-2); }
+  .win-badge { margin-top: var(--space-1); }
 
-    .mc-dist-title { font-size: var(--font-sm); color: var(--text-muted); margin-bottom: var(--space-2); }
-    .mc-bars {
-      display: flex;
-      align-items: flex-end;
-      gap: 2px;
-      height: 96px;
-      padding-bottom: 2px;
-      border-bottom: 1px solid var(--border-color);
-    }
-    .mc-bar {
-      position: relative;
-      flex: 1;
-      min-width: 0;
-      border-radius: 3px 3px 0 0;
-      background: var(--bg-inset);
-      transition: height var(--dur-slow) var(--ease-out);
-    }
-    .mc-bar.is-self {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-    .mc-bar-count {
-      position: absolute;
-      top: -15px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 10px;
-      font-family: var(--font-mono);
-      color: var(--text-faint);
-      white-space: nowrap;
-    }
-    .mc-axis {
-      display: flex;
-      justify-content: space-between;
-      font-size: 10.5px;
-      color: var(--text-faint);
-      margin-top: 4px;
-    }
+  /* ---------- 图表 ---------- */
+  #trend-chart { width: 100%; height: 460px; }
 
-    .mc-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--space-2);
-      margin-top: var(--space-4);
-      padding-top: var(--space-3);
-      border-top: 1px solid var(--border-subtle);
-    }
-    .mc-chip {
-      display: inline-flex;
-      align-items: baseline;
-      gap: var(--space-1);
-      padding: var(--space-1) var(--space-2);
-      border-radius: var(--radius-xs);
-      background: var(--bg-subtle);
-      font-size: var(--font-sm);
-      white-space: nowrap;
-    }
-    .mc-chip-k { color: var(--text-muted); }
-    .mc-chip-v { font-family: var(--font-mono); font-weight: 650; }
+  /* ---------- 全市场横向位置 ---------- */
+  .mc-grid { display: grid; grid-template-columns: minmax(196px, 230px) minmax(0, 1fr); gap: var(--rhythm-4); align-items: center; }
+  .mc-rank-box { padding: var(--rhythm-3); border-radius: var(--radius-sm); background: var(--bg-subtle); }
+  .mc-rank-label { font-size: var(--font-xs); color: var(--text-muted); }
+  .mc-rank-value { font-size: 27px; font-weight: 700; font-family: var(--font-mono); line-height: 1.12; margin-top: 2px; letter-spacing: -0.02em; }
+  .mc-rank-sub { font-size: var(--font-xs); color: var(--text-faint); margin-top: 3px; }
+  .mc-dist-title { font-size: var(--font-xs); color: var(--text-muted); margin-bottom: var(--space-2); }
+  .mc-bars { display: flex; align-items: flex-end; gap: 2px; height: 92px; padding-bottom: 2px; border-bottom: 1px solid var(--border-color); }
+  .mc-bar { position: relative; flex: 1; min-width: 0; border-radius: 3px 3px 0 0; background: var(--bg-inset); }
+  .mc-bar.is-self { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .mc-bar-count { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 10px; font-family: var(--font-mono); color: var(--text-faint); white-space: nowrap; }
+  .mc-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-faint); margin-top: 3px; }
+  .mc-list { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--rhythm-4); padding-top: var(--rhythm-3); border-top: 1px solid var(--border-subtle); }
+  .mc-chip { display: inline-flex; align-items: baseline; gap: var(--space-1); padding: 3px var(--space-2); border-radius: var(--radius-xs); background: var(--bg-subtle); font-size: var(--font-xs); white-space: nowrap; }
+  .mc-chip-k { color: var(--text-muted); }
+  .mc-chip-v { font-family: var(--font-mono); font-weight: 650; }
 
-    /* ---------- 指标卡 ---------- */
-    .metric-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
-      gap: 12px;
-    }
-    .metric-card {
-      padding: 13px 14px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow-sm);
-      cursor: pointer;
-      transition: border-color 0.12s, box-shadow 0.12s;
-    }
-    .metric-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
-    .metric-card.primary { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.13); }
-    .metric-card.na { opacity: 0.62; cursor: default; }
-    .metric-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .metric-name { font-size: 13px; font-weight: 650; color: var(--text-sub); }
-    .metric-percentile { font-size: 27px; font-weight: 700; font-family: var(--mono); line-height: 1.15; margin: 7px 0 2px; }
-    .metric-current { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
-    .metric-temp { margin-top: 11px; }
-
-    /* ---------- 图表 ---------- */
-    #trend-chart { width: 100%; height: 400px; }
-    .chart-toolbar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    @media (max-width: 980px) {
-      .query-row { grid-template-columns: 1fr 1fr; }
-      .hero-grid { grid-template-columns: 1fr; }
-      .windows { grid-template-columns: repeat(2, 1fr); }
-      #trend-chart { height: 320px; }
-    }
-  
+  @media (max-width: 1100px) {
+    .query-panel { grid-template-columns: 1fr 1fr; }
+    .mc-grid { grid-template-columns: 1fr; }
+    #trend-chart { height: 340px; }
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-    <div class="page-head">
-      <div class="page-title">个股估值分位</div>
-      <div class="page-desc">
-        当前估值在该股自身历史中所处的百分位——
-        <span class="term" data-tip="分位 = 历史有效样本中严格小于当前值的条数占比。亏损期（PE/PB ≤ 0）剔除，故样本数少于交易日数。">分位越低越便宜</span>，
-        结果保留 7 档评级与多窗口对照。
+<div class="page-head">
+  <div class="page-head-main">
+    <div class="page-title">个股分析</div>
+    <div class="page-desc">
+      两只尺子量一只票：<b>自身历史分位</b>（相对它自己）与<b>全市场名次</b>（相对别的股票）。
+      分位越低越便宜；名次越靠前越便宜。两者口径不同，不能互相替代。
+    </div>
+  </div>
+</div>
+
+<!-- 查询面板 -->
+<section class="card card-pad">
+  <div class="query-panel">
+    <div class="field field-code">
+      <label class="field-label" for="code-input">证券</label>
+      <input class="input" id="code-input" type="text" autocomplete="off"
+             placeholder="代码或中文名，如 600519.SH / 贵州茅台" list="none">
+      <div class="suggest" id="suggest-list"></div>
+    </div>
+    <div class="field">
+      <label class="field-label" for="period-select">取数区间</label>
+      <select class="select" id="period-select">
+        <option value="全部">全部历史</option>
+        <option value="近五年">近五年</option>
+        <option value="近十年">近十年</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="field-label" for="start-date">起</label>
+      <input class="input" id="start-date" type="date">
+    </div>
+    <div class="field">
+      <label class="field-label" for="end-date">止</label>
+      <input class="input" id="end-date" type="date">
+    </div>
+    <button class="btn btn-primary" id="btn-analyze">分析</button>
+  </div>
+
+  <div class="query-more">
+    <div class="field">
+      <label class="field-label" for="input-pe">当前 PE-TTM</label>
+      <input class="input" id="input-pe" type="text" inputmode="decimal" placeholder="留空取最新一日">
+    </div>
+    <div class="field">
+      <label class="field-label" for="input-pb">当前 PB</label>
+      <input class="input" id="input-pb" type="text" inputmode="decimal" placeholder="留空取最新一日">
+    </div>
+    <div class="field-hint" style="flex:1;min-width:200px">
+      仅当你想用实时行情覆盖历史序列的当前值时才填；留空即用序列最新交易日。
+    </div>
+  </div>
+</section>
+
+<div class="message" id="message" style="margin-top:var(--rhythm-3)"></div>
+
+<!-- 空态 -->
+<div id="empty-state" class="card section">
+  <div class="empty-state">
+    <div class="empty-state-title">输入代码或名称开始</div>
+    <div class="empty-state-desc">
+      支持代码（600519.SH）与中文名（贵州茅台）。结果会保留在地址栏，可直接刷新或分享。
+    </div>
+  </div>
+</div>
+
+<div id="result-area" class="stack hidden">
+  <!-- 标的条 -->
+  <div class="quote-bar">
+    <div class="quote-id">
+      <span class="quote-name" id="sec-name">-</span>
+      <span class="quote-code" id="sec-code">-</span>
+    </div>
+    <div class="quote-facts" id="sec-facts"></div>
+    <div class="spacer"></div>
+    <div class="quote-facts">
+      <div class="quote-fact">
+        <span class="quote-fact-k">区间</span>
+        <span class="quote-fact-v" id="meta-interval">-</span>
+      </div>
+      <div class="quote-fact">
+        <span class="quote-fact-k">样本</span>
+        <span class="quote-fact-v" id="meta-rows">-</span>
+      </div>
+      <div class="quote-fact">
+        <span class="quote-fact-k">取数</span>
+        <span class="quote-fact-v" id="meta-priority">-</span>
       </div>
     </div>
+  </div>
 
-    <!-- 查询区 -->
-    <section class="card card-pad">
-      <div class="query-row">
-        <div class="field field-code">
-          <label class="field-label" for="code-input">证券代码或名称</label>
-          <input class="input" id="code-input" type="text" autocomplete="off"
-                 placeholder="如 600519.SH 或 贵州茅台" list="none">
-          <div class="suggest" id="suggest-list"></div>
+  <!-- 结论区：左主指标 + 多窗口，右全市场名次 -->
+  <div class="split-side">
+    <div class="stack">
+      <section class="card card-pad hero-card" id="hero-card">
+        <div class="hero-top">
+          <div>
+            <div class="hero-label">主指标 · <span id="hero-name">-</span> 历史分位</div>
+            <div class="hero-row">
+              <span class="hero-value" id="hero-value">-</span>
+              <span id="hero-badge"></span>
+            </div>
+            <div class="hero-current" id="hero-current">-</div>
+          </div>
         </div>
-        <div class="field">
-          <label class="field-label" for="period-select">取数区间</label>
-          <select class="select" id="period-select">
-            <option value="全部">全部历史</option>
-            <option value="近五年">近五年</option>
-            <option value="近十年">近十年</option>
-          </select>
+        <div class="hero-temp" id="hero-temp"></div>
+        <div class="hero-facts" id="hero-facts"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">多窗口分位</div>
+            <div class="card-hint">同一指标换回溯窗口：窗口间差异反映估值是在变贵还是变便宜</div>
+          </div>
         </div>
-        <div class="field">
-          <label class="field-label" for="start-date">起始日期</label>
-          <input class="input" id="start-date" type="date">
+        <div class="card-pad"><div class="windows" id="windows"></div></div>
+      </section>
+    </div>
+
+    <section class="card" id="market-context-card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">全市场横向位置</div>
+          <div class="card-hint" id="mc-hint">-</div>
         </div>
-        <div class="field">
-          <label class="field-label" for="end-date">结束日期</label>
-          <input class="input" id="end-date" type="date">
-        </div>
-        <button class="btn btn-primary" id="btn-analyze">开始分析</button>
       </div>
-
-      <div class="query-extra">
-        <div class="field">
-          <label class="field-label" for="input-pe">当前 PE-TTM（可选）</label>
-          <input class="input" id="input-pe" type="text" inputmode="decimal" placeholder="留空取历史最新一日">
+      <div class="card-pad">
+        <div class="mc-grid">
+          <div class="mc-rank-box">
+            <div class="mc-rank-label" id="mc-rank-label">-</div>
+            <div class="mc-rank-value" id="mc-rank-value">-</div>
+            <div class="mc-rank-sub" id="mc-rank-sub">-</div>
+          </div>
+          <div>
+            <div class="mc-dist-title" id="mc-dist-title">-</div>
+            <div class="mc-bars" id="mc-bars"></div>
+            <div class="mc-axis"><span>0% 最便宜</span><span>100% 最贵</span></div>
+          </div>
         </div>
-        <div class="field">
-          <label class="field-label" for="input-pb">当前 PB（可选）</label>
-          <input class="input" id="input-pb" type="text" inputmode="decimal" placeholder="留空取历史最新一日">
-        </div>
-        <div class="hint">留空即用估值历史序列的最新交易日数值；仅在你想用实时行情覆盖时才需要填。</div>
+        <div class="mc-list" id="mc-list"></div>
       </div>
     </section>
+  </div>
 
-    <!-- 消息条 -->
-    <div class="message" id="message" style="margin-top:14px"></div>
-
-    <!-- 结果区 -->
-    <div id="result-area" class="hidden">
-      <!-- 标的信息 -->
-      <div class="result-head" style="margin-bottom:16px">
-        <div>
-          <span class="sec-name" id="sec-name">-</span>
-          <span class="sec-code" id="sec-code">-</span>
-        </div>
-        <div class="sec-facts" id="sec-facts"></div>
-        <div class="head-spacer"></div>
-        <div class="sec-facts">
-          <span>区间 <b id="meta-interval">-</b></span>
-          <span>样本 <b id="meta-rows">-</b></span>
-          <span>取数 <b id="meta-priority">-</b></span>
-        </div>
-      </div>
-
-      <!-- 主指标 + 多窗口 -->
-      <div class="hero-grid">
-        <section class="card card-pad" id="hero-card">
-          <div class="hero-label">主指标 <span id="hero-name">-</span> 历史分位</div>
-          <div class="hero-row">
-            <div class="hero-value" id="hero-value">-</div>
-            <div id="hero-badge"></div>
-          </div>
-          <div class="hero-current" id="hero-current">当前值 -</div>
-          <div style="margin-top:14px" id="hero-temp"></div>
-          <div class="hero-facts" id="hero-facts"></div>
-        </section>
-
-        <section class="card card-pad">
-          <div class="section-head">
-            <div class="section-title">多窗口分位对比</div>
-            <div class="section-desc">同一指标在不同回溯窗口下的分位，窗口差异反映趋势</div>
-          </div>
-          <div class="windows" id="windows"></div>
-        </section>
-      </div>
-
-      <!-- 指标卡 -->
-      <section class="section">
-        <div class="section-head">
-          <div class="tabs" id="indicator-tabs"></div>
-          <div class="section-desc">点卡片或标签切换主指标（参考线与分位带跟随）</div>
-        </div>
-        <div class="metric-grid" id="metric-grid"></div>
-        <div class="meta-strip" style="margin-top:12px">
-          <span class="section-desc">七档评级图例：</span>
-          <span id="metric-legend"></span>
-        </div>
-      </section>
-
-      <!-- 全市场横向位置 -->
-      <section class="card section" id="market-context-card">
-        <div class="card-head">
-          <div>
-            <div class="card-title">全市场横向位置</div>
-            <div class="card-hint" id="mc-hint">-</div>
-          </div>
-        </div>
-        <div class="card-pad">
-          <div class="mc-grid">
-            <div class="mc-rank-box">
-              <div class="mc-rank-label" id="mc-rank-label">-</div>
-              <div class="mc-rank-value" id="mc-rank-value">-</div>
-              <div class="mc-rank-sub" id="mc-rank-sub">-</div>
-            </div>
-            <div class="mc-dist">
-              <div class="mc-dist-title" id="mc-dist-title">-</div>
-              <div class="mc-bars" id="mc-bars"></div>
-              <div class="mc-axis">
-                <span>最便宜 0%</span>
-                <span>最贵 100%</span>
-              </div>
-            </div>
-          </div>
-          <div class="mc-list" id="mc-list"></div>
-        </div>
-      </section>
-
-      <!-- 走势图 -->
-      <section class="card section">
-        <div class="card-head">
-          <div>
-            <div class="card-title">历史估值走势</div>
-            <div class="card-hint">实线为估值序列，<span class="term" data-tip="阴影带的上下边界分别是该窗口内序列的 25% 与 75% 分位值，覆盖中间一半的历史样本。">25%~75% 分位带</span>，虚线为 10% / 90% 分位参考线</div>
-          </div>
-          <div class="chart-toolbar">
-            <button class="btn btn-sm btn-ghost" id="btn-reset-zoom">重置缩放</button>
-          </div>
-        </div>
-        <div class="card-pad"><div id="trend-chart"></div></div>
-      </section>
-
-      <!-- 明细表 -->
-      <section class="card section">
-        <div class="card-head">
-          <div class="card-title">指标明细</div>
-          <div class="card-hint">五项估值指标横向对照，点上方卡片切换主指标</div>
-        </div>
-        <div class="table-wrap">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>指标</th>
-                <th class="ta-r">当前值</th>
-                <th class="ta-r">分位</th>
-                <th class="ta-c">评级</th>
-                <th class="ta-r">中位数</th>
-                <th class="ta-r">最小值</th>
-                <th class="ta-r">最大值</th>
-                <th class="ta-r">样本数</th>
-              </tr>
-            </thead>
-            <tbody id="detail-body"></tbody>
-          </table>
-        </div>
-      </section>
+  <!-- 指标切换条：紧凑五联卡，点击切换主指标 -->
+  <section class="section">
+    <div class="section-head">
+      <div class="section-title">指标速览</div>
+      <div class="section-desc">点任一指标即切换主指标：结论卡、走势图参考线与全市场名次同步跟随</div>
     </div>
+    <div class="metric-grid" id="metric-grid"></div>
+  </section>
 
-    <!-- 空态 -->
-    <div id="empty-state" class="card section">
-      <div class="empty-state">
-        <div class="empty-state-title">输入代码或名称开始分析</div>
-        支持代码（600519.SH）与中文名（贵州茅台）；结果会保留在地址栏，可直接刷新或分享。
+  <!-- 走势图 -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">估值走势</div>
+        <div class="card-hint">
+          实线为估值序列，阴影为
+          <span class="term" data-tip="阴影带上下边界分别是该窗口内序列的 25% 与 75% 分位值，覆盖中间一半的历史样本。">25%~75% 分位带</span>，
+          虚线为 10% / 90% 分位参考线
+        </div>
       </div>
+      <button class="btn btn-sm btn-ghost" id="btn-reset-zoom" type="button">重置缩放</button>
     </div>
-  
+    <div class="card-pad"><div id="trend-chart"></div></div>
+  </section>
+
+  <!-- 指标明细 -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">指标明细</div>
+        <div class="card-hint">五项估值指标横向对照，含中位数与极值用于判断偏离程度</div>
+      </div>
+      <div class="meta-strip"><span>七档图例</span><span id="metric-legend"></span></div>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th class="ta-r">当前值</th>
+            <th class="ta-r">分位</th>
+            <th class="ta-c">评级</th>
+            <th class="ta-r">中位数</th>
+            <th class="ta-r">最小</th>
+            <th class="ta-r">最大</th>
+            <th class="ta-r">样本</th>
+          </tr>
+        </thead>
+        <tbody id="detail-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
 {% endblock %}
 
 {% block page_scripts %}

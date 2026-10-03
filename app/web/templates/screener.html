@@ -1,7 +1,6 @@
 {% extends "_layout.html" %}
 {% set active_page = "screener" %}
 
-{% block main_class %}container{% endblock %}
 {% block page_title %}选股器{% endblock %}
 
 {% block page_css %}
@@ -9,20 +8,21 @@
   /* ---------- 布局 ---------- */
   .screen-grid {
     display: grid;
-    grid-template-columns: minmax(320px, 400px) minmax(420px, 1fr);
-    gap: var(--space-4);
+    grid-template-columns: minmax(324px, 380px) minmax(0, 1fr);
+    gap: var(--rhythm-4);
     align-items: start;
   }
-  .panel { position: sticky; top: calc(var(--topbar-height) + var(--space-4)); }
+  .panel { position: sticky; top: calc(var(--topbar-h) + var(--rhythm-4)); }
 
   /* ---------- 规则卡 ---------- */
   .rule-card {
-    padding: var(--space-3);
+    padding: var(--rhythm-3);
     border: 1px solid var(--border-color);
     border-left: 3px solid var(--accent);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
     background: var(--bg-subtle);
-    transition: border-color var(--dur-fast) var(--ease-out);
+    transition: border-color var(--dur-fast) var(--ease-out),
+                background-color var(--dur-fast) var(--ease-out);
   }
   .rule-card + .rule-card { margin-top: var(--space-2); }
   .rule-card:focus-within { border-color: var(--accent); background: var(--bg-card); }
@@ -32,8 +32,7 @@
     gap: var(--space-2);
     align-items: center;
   }
-  .rule-card .input,
-  .rule-card .select { height: var(--control-sm); font-size: var(--font-base); }
+  .rule-card .input, .rule-card .select { height: var(--control-sm); font-size: var(--font-base); }
   .rule-del { color: var(--text-faint); }
   .rule-del:hover { color: var(--danger-500); }
 
@@ -41,8 +40,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    margin: var(--space-2) 0;
-    padding: var(--space-2) var(--space-3);
+    margin: var(--rhythm-3) 0 0;
+    padding: var(--space-2) var(--rhythm-3);
     border-radius: var(--radius-sm);
     background: var(--accent-soft);
     color: var(--text-brand);
@@ -51,15 +50,12 @@
   }
 
   /* ---------- 因子选择 ---------- */
-  .factor-picker {
-    position: relative;
-    z-index: var(--z-dropdown);
-  }
+  .factor-picker { position: relative; z-index: var(--z-dropdown); }
   .factor-option {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-2) var(--rhythm-3);
     border-bottom: 1px solid var(--border-subtle);
     cursor: pointer;
     transition: background-color var(--dur-fast) var(--ease-out);
@@ -77,12 +73,7 @@
   }
 
   /* ---------- 覆盖率条 ---------- */
-  .cov {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    flex: none;
-  }
+  .cov { display: flex; align-items: center; gap: var(--space-1); flex: none; }
   .cov-track {
     width: 42px;
     height: 5px;
@@ -109,14 +100,19 @@
   .funnel { display: flex; flex-direction: column; gap: var(--space-2); }
   .funnel-item {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 76px 52px;
+    grid-template-columns: minmax(0, 1fr) 84px 56px;
     gap: var(--space-2);
     align-items: center;
     font-size: var(--font-base);
   }
   .funnel-label { font-family: var(--font-mono); font-size: var(--font-base); color: var(--text-sub); }
   .funnel-bar { height: 8px; border-radius: var(--radius-full); background: var(--bg-inset); overflow: hidden; }
-  .funnel-fill { height: 100%; border-radius: var(--radius-full); background: var(--accent); transition: width var(--dur-slow) var(--ease-out); }
+  .funnel-fill {
+    height: 100%;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    transition: width var(--dur-slow) var(--ease-out);
+  }
   .funnel-num { font-family: var(--font-mono); font-size: var(--font-sm); text-align: right; color: var(--text-muted); }
 
   /* ---------- 结果 ---------- */
@@ -130,7 +126,7 @@
     display: inline-flex;
     align-items: baseline;
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-3);
+    padding: var(--space-1) var(--rhythm-3);
     border-radius: var(--radius-full);
     background: var(--accent-soft);
     color: var(--text-brand);
@@ -148,7 +144,7 @@
     font-family: var(--font-mono);
     font-size: var(--font-base);
     color: var(--text-sub);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--rhythm-2) var(--rhythm-3);
     border-radius: var(--radius-sm);
     background: var(--bg-inset);
     word-break: break-all;
@@ -156,7 +152,13 @@
 
   /* ---------- 行业分布 ---------- */
   .ind-list { display: flex; flex-direction: column; gap: var(--space-2); }
-  .ind-row { display: grid; grid-template-columns: minmax(0,1fr) 60px 52px; gap: var(--space-2); align-items: center; font-size: var(--font-base); }
+  .ind-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 64px 56px;
+    gap: var(--space-2);
+    align-items: center;
+    font-size: var(--font-base);
+  }
   .ind-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-sub); }
 
   #scatter-chart { width: 100%; height: 300px; }
@@ -172,21 +174,23 @@
 
 {% block content %}
 <div class="page-head">
-  <div class="page-title">选股器</div>
-  <div class="page-desc">
-    按<span class="term" data-tip="条件在指定研究时点（as-of）上求值，只使用该时点之前已可见的数据，避免未来函数。">研究时点</span>的多因子条件筛选全市场。
-    每条规则独立判定后按 AND 组合，缺失值一律判不通过并在「未通过原因」里写明。
+  <div class="page-head-main">
+    <div class="page-title">选股器</div>
+    <div class="page-desc">
+      按<span class="term" data-tip="条件在指定研究时点（as-of）上求值，只使用该时点之前已可见的数据，避免未来函数。">研究时点</span>的多因子条件筛选全市场。
+      每条规则独立判定后按 AND 组合，缺失值一律判不通过并在「未通过原因」里写明。
+    </div>
   </div>
 </div>
 
-<!-- 查询区 -->
+<!-- 研究时点 -->
 <section class="card card-pad">
   <div class="result-toolbar">
-    <div class="field" style="width: 168px">
+    <div class="field" style="width:176px">
       <label class="field-label" for="as-of-select">研究时点</label>
       <select class="select" id="as-of-select"></select>
     </div>
-    <label class="switch" style="margin-top: 18px">
+    <label class="switch" style="margin-top:20px">
       <input type="checkbox" id="chk-positive" checked>
       <span class="switch-track"></span>
       <span>剔除亏损股</span>
@@ -194,14 +198,14 @@
     <div class="spacer"></div>
     <span class="text-sm text-faint" id="meta-universe"></span>
   </div>
-  <div class="field-hint" style="margin-top: var(--space-2)">
+  <div class="field-hint" style="margin-top:var(--space-2)">
     亏损股指 PE-TTM ≤ 0（不分位口径）。不勾选时它们可能被「PE 小于某值」这类条件误纳。
   </div>
 </section>
 
-<div class="message" id="message" style="margin-top: var(--space-3)"></div>
+<div class="message section" id="message"></div>
 
-<div class="screen-grid" style="margin-top: var(--space-4)">
+<div class="screen-grid section">
   <!-- 左：规则编辑器 -->
   <div class="panel">
     <section class="card">
@@ -221,17 +225,17 @@
           <div class="field-hint" id="preset-note"></div>
         </div>
 
-        <hr class="divider" style="margin: var(--space-3) 0">
+        <hr class="divider" style="margin:var(--rhythm-3) 0">
 
         <div id="rule-list"></div>
         <div class="logic-hint">
           <span>全部条件同时满足（AND）</span>
         </div>
 
-        <button class="btn btn-primary btn-block" id="btn-run" type="button" style="margin-top: var(--space-3)">
+        <button class="btn btn-primary btn-block" id="btn-run" type="button" style="margin-top:var(--rhythm-3)">
           开始筛选
         </button>
-        <div class="row row-tight" style="margin-top: var(--space-2)">
+        <div class="row row-tight" style="margin-top:var(--space-2)">
           <button class="btn btn-sm btn-ghost" id="btn-share" type="button">复制分享链接</button>
           <button class="btn btn-sm btn-ghost" id="btn-export" type="button">导出 CSV</button>
           <button class="btn btn-sm btn-ghost" id="btn-clear" type="button">清空</button>
@@ -259,12 +263,12 @@
           <span class="pass-chip">通过 <b id="stat-passed">-</b> / <span id="stat-total">-</span></span>
           <span class="text-sm text-faint" id="stat-elapsed"></span>
           <div class="spacer"></div>
-          <div class="field" style="width: 168px">
+          <div class="field" style="width:176px">
             <label class="field-label" for="sort-select">排序</label>
             <select class="select select-sm" id="sort-select"></select>
           </div>
         </div>
-        <div class="cond-text" id="cond-text" style="margin-top: var(--space-3)"></div>
+        <div class="cond-text" id="cond-text" style="margin-top:var(--rhythm-3)"></div>
       </section>
 
       <!-- 规则漏斗 -->

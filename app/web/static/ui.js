@@ -909,6 +909,164 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 应用外壳：侧边栏折叠 + 顶栏全局证券搜索
+  // ---------------------------------------------------------------------------
+
+  var SHELL_KEY = "sl-shell-collapsed";
+
+  /**
+   * 应用折叠态（写 <html> 上的 class，与首屏脚本读同一个键）
+   *
+   * @param {boolean} collapsed 是否折叠
+   * @returns {void}
+   */
+  function setShellCollapsed(collapsed) {
+    if (collapsed) {
+      document.documentElement.classList.add("shell-collapsed");
+    } else {
+      document.documentElement.classList.remove("shell-collapsed");
+    }
+    try {
+      window.localStorage.setItem(SHELL_KEY, collapsed ? "1" : "0");
+    } catch (error) {
+      // 存储不可用时折叠只在本次会话生效
+    }
+    // 折叠会改变可用宽度，通知图表重排
+    window.setTimeout(function () {
+      if (window.SL && SL.charts) {
+        SL.charts.redrawAll();
+      }
+    }, 320);
+  }
+
+  /**
+   * 是否处于折叠态
+   *
+   * @returns {boolean} 折叠态
+   */
+  function isShellCollapsed() {
+    return document.documentElement.classList.contains("shell-collapsed");
+  }
+
+  /**
+   * 绑定侧边栏折叠按钮与快捷键
+   *
+   * @returns {void}
+   */
+  function initShell() {
+    var button = document.getElementById("btn-collapse");
+    if (button) {
+      button.addEventListener("click", function () {
+        setShellCollapsed(!isShellCollapsed());
+      });
+    }
+    shortcut("[", function () {
+      setShellCollapsed(!isShellCollapsed());
+    }, "折叠/展开导航");
+  }
+
+  /**
+   * 顶栏全局证券搜索：联想 + 回车直达个股页
+   *
+   * 【为何放在顶栏】
+   *   「查某只股票」是跨页面最高频的动作，每个页面各放一个输入框会重复三份
+   *   样式与交互；收到顶栏后，任何页面按 / 都能立刻跳转。
+   *
+   * @returns {void}
+   */
+  function initGlobalSearch() {
+    var input = document.getElementById("global-search");
+    var suggest = document.getElementById("global-suggest");
+    if (!input || !suggest) {
+      return;
+    }
+    var timer = null;
+
+    /**
+     * 拉取联想并渲染
+     *
+     * @param {string} query 关键字
+     * @returns {void}
+     */
+    var render = function (query) {
+      if (!query) {
+        suggest.className = "suggest";
+        suggest.textContent = "";
+        return;
+      }
+      SL.fetchJson("/api/securities?q=" + encodeURIComponent(query), 8000)
+        .then(function (data) {
+          var items = data.items || [];
+          suggest.textContent = "";
+          if (!items.length) {
+            suggest.appendChild(el("div", "suggest-empty", "没有匹配的证券"));
+            suggest.className = "suggest open";
+            return;
+          }
+          items.forEach(function (item) {
+            var row = el("div", "suggest-item");
+            row.appendChild(el("span", "suggest-code", item.code));
+            row.appendChild(el("span", "suggest-name", item.name));
+            if (item.market) {
+              row.appendChild(el("span", "suggest-market", item.market));
+            }
+            row.addEventListener("click", function () {
+              window.location.href = "/?code=" + encodeURIComponent(item.code);
+            });
+            suggest.appendChild(row);
+          });
+          suggest.className = "suggest open";
+        })
+        .catch(function () {
+          suggest.className = "suggest";
+        });
+    };
+
+    input.addEventListener("input", function () {
+      var value = input.value.trim();
+      if (timer) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(function () {
+        render(value);
+      }, 220);
+    });
+
+    input.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        input.value = "";
+        suggest.className = "suggest";
+        return;
+      }
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      var value = input.value.trim();
+      if (!value) {
+        return;
+      }
+      // 形如代码直接跳；中文名交给联想（可能多命中，不擅自替用户选一只）
+      if (/^[0-9]{6}(\.(SH|SZ|BJ))?$/i.test(value)) {
+        window.location.href = "/?code=" + encodeURIComponent(value.toUpperCase());
+      } else {
+        render(value);
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!suggest.contains(event.target) && event.target !== input) {
+        suggest.className = "suggest";
+      }
+    });
+
+    shortcut("/", function () {
+      input.focus();
+      input.select();
+    }, "聚焦全局搜索");
+  }
+
+  // ---------------------------------------------------------------------------
   // 导出
   // ---------------------------------------------------------------------------
 
@@ -940,8 +1098,23 @@
     replaceQuery: replaceQuery,
     shortcut: shortcut,
     listShortcuts: listShortcuts,
-    setLoading: setLoading
+    setLoading: setLoading,
+    setShellCollapsed: setShellCollapsed,
+    isShellCollapsed: isShellCollapsed,
+    initShell: initShell,
+    initGlobalSearch: initGlobalSearch
   };
 
   window.SL = SL;
+
+  // 外壳与顶栏属于布局层能力，所有页面自动装配
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () {
+      initShell();
+      initGlobalSearch();
+    });
+  } else {
+    initShell();
+    initGlobalSearch();
+  }
 })();

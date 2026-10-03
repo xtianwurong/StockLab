@@ -2,7 +2,6 @@
 {% extends "_layout.html" %}
 {% set active_page = "compare" %}
 
-{% block main_class %}container{% endblock %}
 {% block page_title %}多股对比{% endblock %}
 
 {% block page_css %}
@@ -20,25 +19,22 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
-    margin-top: var(--space-3);
+    margin-top: var(--rhythm-3);
+    padding-top: var(--rhythm-3);
+    border-top: 1px dashed var(--border-color);
   }
   .stock-chip {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
     height: 30px;
-    padding: 0 var(--space-2) 0 var(--space-3);
+    padding: 0 var(--space-2) 0 var(--rhythm-3);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-full);
     background: var(--bg-subtle);
     font-size: var(--font-base);
   }
-  .chip-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    flex: none;
-  }
+  .chip-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   .chip-name { font-weight: 600; }
   .chip-code { font-family: var(--font-mono); font-size: var(--font-xs); color: var(--text-faint); }
   .chip-btn {
@@ -60,11 +56,13 @@
   /* ---------- 指标对比卡 ---------- */
   .cmp-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: var(--space-3);
+    grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+    gap: var(--space-2);
   }
   .cmp-card {
-    padding: var(--space-3) var(--space-4);
+    display: flex;
+    flex-direction: column;
+    padding: var(--rhythm-3) var(--rhythm-4);
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius);
@@ -77,7 +75,7 @@
     gap: var(--space-2);
     margin-bottom: var(--space-3);
   }
-  .cmp-name { display: flex; align-items: center; gap: var(--space-2); font-weight: 650; }
+  .cmp-name { display: flex; align-items: center; gap: var(--space-2); font-weight: 650; min-width: 0; }
   .cmp-rank {
     display: inline-flex;
     align-items: center;
@@ -92,48 +90,54 @@
     font-size: var(--font-xs);
     font-weight: 700;
   }
-  .cmp-value { font-size: 30px; font-weight: 700; font-family: var(--font-mono); line-height: 1.1; }
+  .cmp-value {
+    font-family: var(--font-mono);
+    font-size: var(--font-3xl);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
   .cmp-label { font-size: var(--font-sm); color: var(--text-muted); }
   .cmp-facts {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: var(--space-2);
-    margin-top: var(--space-3);
-    padding-top: var(--space-2);
+    margin-top: auto;
+    padding-top: var(--rhythm-3);
     border-top: 1px solid var(--border-subtle);
   }
   .cmp-fk { font-size: var(--font-xs); color: var(--text-faint); }
   .cmp-fv { font-family: var(--font-mono); font-size: var(--font-base); font-weight: 600; }
 
   /* ---------- 图表 ---------- */
-  #cmp-chart { width: 100%; height: 380px; }
-  #radar-chart { width: 100%; height: 320px; }
+  #cmp-chart { width: 100%; height: 400px; }
+  #radar-chart { width: 100%; height: 400px; }
 
   /* ---------- 表格 ---------- */
   .cell-v { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
   .cell-p { font-size: var(--font-xs); color: var(--text-faint); font-family: var(--font-mono); }
   .name-cell { display: flex; align-items: center; gap: var(--space-2); }
-  .col-indicator {
-    text-align: right;
-    cursor: pointer;
-    user-select: none;
-  }
-  .col-indicator.active { color: var(--accent); }
+  .col-indicator { text-align: right; cursor: pointer; user-select: none; }
+  .col-indicator:hover { color: var(--text-main); }
+  .col-indicator.active { color: var(--accent); font-weight: 650; }
 
   @media (max-width: 900px) {
     .pick-row { grid-template-columns: 1fr; }
-    #cmp-chart { height: 300px; }
+    #cmp-chart, #radar-chart { height: 300px; }
   }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="page-head">
-  <div class="page-title">多股对比</div>
-  <div class="page-desc">
-    2~10 只标的同屏对照：各指标当前值与
-    <span class="term" data-tip="分位口径与个股页、指数页完全一致：剔除 PE/PB ≤ 0 的亏损期样本，再算当前值在剩余样本中的百分位。">历史分位</span>，
-    以及叠加在同一张图上的估值走势。点表格里的指标名可切换主图指标。
+  <div class="page-head-main">
+    <div class="page-title">多股对比</div>
+    <div class="page-desc">
+      2~10 只标的同屏对照：各指标当前值与
+      <span class="term" data-tip="分位口径与个股页、指数页完全一致：剔除 PE/PB ≤ 0 的亏损期样本，再算当前值在剩余样本中的百分位。">历史分位</span>，
+      以及叠加在同一张图上的估值走势。点表格里的指标名可切换主图指标。
+    </div>
   </div>
 </div>
 
@@ -154,17 +158,17 @@
         <option value="近十年">近十年</option>
       </select>
     </div>
-    <button class="btn btn-primary" id="btn-cmp">开始对比</button>
+    <button class="btn btn-primary" id="btn-cmp" type="button">开始对比</button>
   </div>
   <div class="chip-row" id="chip-row"></div>
-  <div class="field-hint" style="margin-top: var(--space-2)">
+  <div class="field-hint" style="margin-top:var(--space-2)">
     最少 2 只、最多 10 只；走势与分位都只使用本地已有的历史估值数据。
   </div>
 </section>
 
-<div class="message" id="message" style="margin-top: var(--space-3)"></div>
+<div class="message section" id="message"></div>
 
-<div id="result-area" class="stack" style="margin-top: var(--space-4)">
+<div id="result-area" class="stack section">
   <div id="result-empty" class="card">
     <div class="empty-state">
       <div class="empty-state-icon">⇄</div>
@@ -185,28 +189,29 @@
       <div class="cmp-grid" id="cmp-cards"></div>
     </section>
 
-    <!-- 走势图 -->
-    <section class="card section">
-      <div class="card-head">
-        <div>
-          <div class="card-title">估值走势对比</div>
-          <div class="card-hint">各标的交易日不完全重合，缺失日断线显示（不做前向填充）</div>
+    <!-- 走势图 + 雷达并排：一个是时间维度、一个是横向维度，放一起才好对照 -->
+    <div class="split-main section">
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">估值走势对比</div>
+            <div class="card-hint">各标的交易日不完全重合，缺失日断线显示（不做前向填充）</div>
+          </div>
+          <div class="tabs" id="cmp-indicator-tabs"></div>
         </div>
-        <div class="tabs" id="cmp-indicator-tabs"></div>
-      </div>
-      <div class="card-body"><div id="cmp-chart"></div></div>
-    </section>
+        <div class="card-body"><div id="cmp-chart"></div></div>
+      </section>
 
-    <!-- 分位雷达 -->
-    <section class="card section">
-      <div class="card-head">
-        <div>
-          <div class="card-title">分位雷达</div>
-          <div class="card-hint">各标的在五项指标上的历史分位；越靠外越贵</div>
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">分位雷达</div>
+            <div class="card-hint">五项指标的历史分位；越靠外越贵</div>
+          </div>
         </div>
-      </div>
-      <div class="card-body"><div id="radar-chart"></div></div>
-    </section>
+        <div class="card-body"><div id="radar-chart"></div></div>
+      </section>
+    </div>
 
     <!-- 明细表 -->
     <section class="card section">

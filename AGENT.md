@@ -250,9 +250,9 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
 - `app/dashboard`：把数据渲染成网页。
-- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，四个页面共用一套数据层：
-  - **个股分析 `/`**：输入代码或中文名 → 分位徽章 + 0-100 温度条 + 多窗口分位对比 + 双 y 轴走势图（10/50/90 分位参考线与 25%~75% 分位带）+ 指标明细表。
-  - **全市场 Dashboard `/market`**：5 指标切换、市场/搜索/评级过滤、七档评级分布（可点击钻取）与分位直方图、可排序分页排行表（点行跳个股页）。
+- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，七个页面共用一套数据层与一套应用外壳：
+  - **个股分析 `/`**：输入代码或中文名 → 投资仪表盘三屏：**结论区**（标的条 → 主指标大数 + 温度条 + 极值样本 → 多窗口分位；右侧并列**全市场横向位置**名次与分布直方图）→ **指标速览**（五张可点指标卡，取代原来重复的胶囊标签页）→ **走势图**（10/50/90 分位参考线与 25%~75% 分位带）→ **指标明细表**。
+  - **全市场 Dashboard `/market`**：概览 → 分布 → 明细三段。筛选条（5 指标 / 市场 / 搜索 / 排序）→ 四格概览条 → 分位直方图与七档评级分布并排（点档位即钻取）→ 可排序分页排行表（点行跳个股页）。
   - **指数估值 `/indices`**：6 大宽基指数卡片（成分中位数口径）+ 点击展开走势图。
   - **行业估值 `/industries`**：国证行业分类 1~4 级横截面，PE 三种口径 + 规模数据，条形图 + 明细表（板块洼地判断）。
   - `server.py`：`create_app()` 装配层——**路由一律用 `app.add_url_rule()` 注册表写法，不用 `@app.route` 装饰器**（遵守本文件禁用装饰器的规定）。
@@ -261,10 +261,20 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   - `market_api.py`：全市场与指数接口层——参数校验 → store 聚合 → 过滤/排序/分页，不经门面锁；`/api/market/ranking` 支持 `level` 七档评级过滤（summary 仍按过滤前口径统计）与 `codes` **精确 ts_code 集合过滤**（与 `q` 的「代码或名称子串匹配」语义不同、不可互替），组合监控页据此一次拉回自选清单，**不新建接口**；`/api/industries` 行业横截面。
   - 组合监控（`/portfolio`，自选股 + 分位阈值告警）：**自选列表存浏览器 localStorage、不落服务端**——告警是「打开页面看一眼」的辅助，不是需要后台常驻的任务，落库反而要处理多用户与过期。全市场名次由分位升序位次**现算**（分位本身就是「严格低于当前值的样本占比」，两者同源，另查排名只是多扫一次全表）。数据仍走既有 `/api/market/ranking`，PE / PB 各请求一次后按 `ts_code` 合并。
   - `screener_api.py`：选股器接口（`/api/screener/meta` 因子覆盖率+算子+模板就绪度、`/api/screener/run` 执行）。**只做编排**：筛选委托 `stocklab.screener.ScreenPipeline`、取数委托 `stocklab.research.frame.build_factor_frame`；因子帧按 as-of 缓存；数据库连接向 `store.facade_database()` **借用门面那一个**（DuckDB 同文件只允许一个写连接，另建会抛 `Could not set lock`）。默认注入 `pe_ttm > 0` 剔除亏损股——否则「PE<15」会把 PE 为负的亏损股全放进来，与估值分位页「亏损期剔除」口径相矛盾。
-  - `static/`：**三段式设计系统**：`tokens.css`（唯一取值来源：亮/暗双主题色板 + 间距/圆角/阴影/字号/动效/层级，保留全部历史变量名）、`components.css`（按钮/表单/卡片/表格/徽章/模态/抽屉/Toast/下拉/骨架屏等组件）、`base.css`（页面骨架与历史类名，颜色一律引用变量）。JS 分层：`common.js`（请求/格式化/评级/图表 option，导出 `window.SL`）、`charts.js`（`SL.charts`：调色板 + 图表登记簿 + 主题切换重绘 + 可复用 option 片段）、`ui.js`（`SL.ui`：Toast/模态/抽屉/下拉/Tooltip/防抖节流/剪贴板/CSV 导出/URL 参数/快捷键）、`theme.js`（`SL.theme`：亮暗切换 + localStorage + `sl:themechange` 广播 + 快捷键 T），另加各页脚本（`app.js` / `market.js` / `indices.js` / `industries.js` / `screener.js` / `compare.js` / `portfolio.js`）；`templates/`：七个页面模板统一 `extends "_layout.html"`（只覆盖 `page_title` / `page_css` / `content` / `page_scripts` 与 `main_class` / `active_page`）+ `_topbar.html`（导航数据驱动）/ `_footer.html` 共享 partial。
+  - `static/`：**三段式设计系统**，`tokens.css` → `components.css` → `base.css` 逐层只依赖上层变量，不写字面色值。
+    - `tokens.css`（唯一取值来源）：亮/暗/跟随系统三套色板 + 间距/圆角/阴影/字号/动效/层级 + 8px 垂直韵律 `--rhythm-*`，保留全部历史变量名（`--mono`、`--topbar-height` 等改为 `var(--font-mono)` / `var(--topbar-h)` 别名）。**涨跌语义色单列一组**（`--rise/--fall/--flat`，A 股口径红涨绿跌），与七档估值色（绿=便宜→红=贵）方向相反，两套变量分属不同语义、不得混用。
+    - `components.css`（组件唯一定义处）：按钮 / 表单 / 卡片 / 表格 / 徽章 / 标签页 / 消息条 / 名词解释 / 提示气泡 / 浮层（模态框 · 抽屉）/ Toast / 骨架屏 / 空态 / 分隔线 / 七档评级与温度条 / 概览指标条 / 联想下拉 / 数字排版 / 工具类 / 主题切换按钮。
+    - `base.css`（外壳与版式）：左侧常驻导航 + 顶部工具条 + 独立滚动内容区、页面韵律（`.page-head` / `.section` / `.split-*` / `.grid-auto`）、布局工具（`.stack` / `.row` / `.spacer`）、页脚、动效降级、打印样式。
+    - **两文件不得重复定义同一个类**：重构前有 47 条规则在两边各写一份、靠 `<link>` 顺序决定谁生效，导致「改了样式没反应」，已归一（`verify_css` 口径：顶层选择器全等才算重复，`@media` 内同名不算）。
+    - **组件只收有真实调用方的**：删掉了「只有样式、全站找不到任何 JS 会生成它」的下拉菜单 / 时间线 / 进度条 / 键盘按键 / 单选复选框 / 滑块 / 输入框前后缀 / 表格条纹与固定列 / 筹码药丸 / 按钮 xs·lg·outline·success·danger·warning·group 等变体；反过来模态框与抽屉虽无页面调用，但 `SL.modal` / `SL.drawer` / `SL.confirm` 有完整实现并挂在 `window.SL` 上，属可用对外能力，样式必须留着。
+    - **JS 分层**：`common.js`（请求/格式化/评级/图表 option，导出 `window.SL`）、`charts.js`（`SL.charts`：调色板 + 图表登记簿 + 主题切换重绘 + 可复用 option 片段）、`ui.js`（`SL.ui`：Toast/模态/抽屉/Tooltip/防抖节流/剪贴板/CSV 导出/URL 参数/快捷键 + **外壳装配** `initShell` / `initGlobalSearch`，在 DOM ready 时自动装配，全站无需各页调用）、`theme.js`（`SL.theme`：亮暗切换 + localStorage + `sl:themechange` 广播 + 快捷键 T），另加各页脚本（`app.js` / `market.js` / `indices.js` / `industries.js` / `screener.js` / `compare.js` / `portfolio.js`）；`templates/`：七个页面模板统一 `extends "_layout.html"`（**只覆盖 `page_title` / `page_css` / `content` / `page_scripts` 与 `active_page`**）+ `_sidebar.html`（**导航数据驱动，分「分析 / 估值 / 工具」三组，加页面只加一行**）+ `_topbar.html`（全局证券搜索 / 折叠 / 主题切换，**只放跨页面都常用的东西**，页面级筛选一律留在页面内部）+ `_footer.html`（口径说明 / 免责声明）。
+  - **外壳常驻的意义**：七个页面切换时「我在哪、能去哪、当前数据多新」始终可见，不靠回忆；旧结构是顶栏平铺 7 个 `01~07` 序号链接，序号本身是噪音且切换后不保留任何上下文。
+  - **页面私有样式仍写在各自模板的 `<style>` 里**（加载在 `base.css` 之后，可覆盖差异）；重构时必须保住各页 JS 依赖的全部 `id` 与类名（`tests/test_web_api.py` 有页面要素断言，另可用「模板 id ⊇ JS `getElementById`」自查）。
   - `compare_api.py`：多股对比接口（`/api/compare?codes=`，2~10 只 × 5 指标）。历史序列走 `store.load_valuation_histories`（一次 IN 查询，避免逐只走门面的取数优先级），分位走**与个股页同一个 `ValuationPercentileAnalyzer`**。两点硬约束：① 序列按各标的交易日**并集对齐**，缺失点填 `None` 让图上断线，**不做前向填充**（否则停牌日会被画成「价格没变」）；② 走势图分类色板**刻意避开绿/黄/红这一段语义轴**，与七档评级色零重叠——那套颜色读者已理解为「低估→高估」，拿来区分标的会误读成优劣。
-  - **暗色主题链路**：`tokens.css` 是唯一定义处，`html[data-theme]` 切换；首屏防闪烁靠 `_layout.html` 里的内联脚本在 CSS 首绘前写 `data-theme`；ECharts 颜色一律经 `SL.charts.palette()` 读 CSS 变量，各页 `renderChart` 传 rebuild 回调，主题切换时由登记簿统一重绘（容器已移除则自动注销）。
+  - **暗色主题链路**：`tokens.css` 是唯一定义处，`html[data-theme]` 切换；首屏防闪烁靠 `_layout.html` 里的内联脚本在 CSS 首绘前写 `data-theme` 与 `html.shell-collapsed`（侧边栏折叠态同样要在 CSS 前落定，否则折叠会闪一下）；ECharts 颜色一律经 `SL.charts.palette()` 读 CSS 变量，各页 `renderChart` 传 rebuild 回调，主题切换时由登记簿统一重绘（容器已移除则自动注销）；侧边栏折叠会改变可用宽度，`setShellCollapsed` 延迟 320ms 调 `SL.charts.redrawAll()` 让图表重排。
   - **依赖方向 `app.web → stocklab.facade / stocklab.analytics / stocklab.screener / stocklab.factor / stocklab.research`（`store.py` 另直接用 `duckdb` 做只读聚合；`screener_api.py` 直接调 `ScreenPipeline` / `build_factor_frame`，但只做参数解析与 JSON 组装，判定与取数逻辑一律留在 `stocklab/` 内），与 `app.dashboard` 平行，**不修改 `stocklab/` 核心库任何文件**。**
+  - **快捷键**：`T` 切主题（亮 / 暗 / 跟随系统）、`[` 折叠或展开侧边栏、`/` 聚焦顶栏全局证券搜索、`R` 重跑（选股器 / 多股对比 / 组合监控）。全部由 `SL.ui.shortcut()` 统一登记，输入态自动让位（输入框里打字不触发）。
+    **同一按键在全站只能有一个含义**：`SL.ui.shortcut` 按键位覆盖、后注册者胜出，所以页面脚本不得再注册已被外壳占用的键（选股器原本用 `/` 聚焦规则编辑，与顶栏全局搜索撞车，已删除——同键两义比少一个快捷键更糟）。
   - **七档评级仅存在于 Web 展示层**（`store.percentile_level` 与 `static/common.js` 的 `LEVEL7`，两侧口径由 `tests/test_web_api.py` 双向校验）；`stocklab.analytics` 内部仍是三档结论。
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
@@ -407,8 +417,10 @@ StockLab/
 │   │   ├── compare_api.py              #     多股对比接口：2~10 只 × 5 指标分位 + 按交易日对齐的叠加走势
 │   │   ├── market_api.py               #     全市场/指数/行业接口：过滤排序分页（ranking 支持 codes 精确过滤）→ store 聚合 → JSON
 │   │   ├── templates/
-│   │   │   ├── _topbar.html           #     共享顶栏（导航 / 状态 / 数据截止）
-│   │   │   ├── _footer.html           #     共享页脚（口径说明 / 免责声明）
+│   │   │   ├── _layout.html           #     应用外壳骨架 + 资源加载顺序 + 首屏防闪烁脚本
+│   │   │   ├── _sidebar.html          #     左侧常驻导航（三组，NAV_* 列表数据驱动）
+│   │   │   ├── _topbar.html           #     顶部工具条（全局证券搜索 / 折叠 / 主题切换）
+│   │   │   ├── _footer.html           #     共享页脚（分位与七档口径 / 数据来源 / 免责声明）
 │   │   │   ├── analysis.html          #     个股分析页（温度条 / 多窗口 / 明细表 / 七档图例）
 │   │   │   ├── market.html            #     全市场 Dashboard（统计卡 / 分布图 / 排行表 / 分页 / 评级钻取）
 │   │   │   ├── indices.html           #     指数估值页（指数卡片 + 走势详情）
@@ -419,11 +431,11 @@ StockLab/
 │   │   └── static/
 │   │       ├── echarts.min.js         #     ECharts 5.5 vendored（本地托管，离线可用）
 │   │       ├── tokens.css             #     设计令牌（唯一取值来源）：亮/暗双主题 + 间距/圆角/阴影/字号/动效/层级
-│   │       ├── components.css         #     组件库：按钮 / 表单 / 卡片 / 表格 / 徽章 / 模态 / 抽屉 / Toast / 骨架屏
-│   │       ├── base.css               #     页面骨架与历史类名（顶栏 / 容器 / 温度条 / 图例 / 页脚），颜色只引用变量
+│   │       ├── components.css         #     组件唯一定义处：按钮 / 表单 / 卡片 / 表格 / 徽章 / 标签页 / 消息条 / 浮层 / Toast / 骨架屏 / 温度条 / 概览条 / 联想下拉
+│   │       ├── base.css               #     应用外壳与版式：侧边栏 / 顶栏 / 内容区 / 页面韵律 / 布局工具 / 页脚 / 打印
 │   │       ├── common.js              #     SL：请求（支持 POST）/ 格式化 / 七档配色 / 图例 / 健康检查 / ECharts option
 │   │       ├── charts.js              #     SL.charts：调色板 + 图表登记簿 + 主题重绘 + 可复用 option 片段
-│   │       ├── ui.js                  #     SL.ui：Toast / 模态 / 抽屉 / 下拉 / Tooltip / 防抖 / CSV 导出 / 快捷键
+│   │       ├── ui.js                  #     SL.ui：Toast / 模态 / 抽屉 / Tooltip / 防抖 / CSV 导出 / 快捷键 + 外壳折叠与全局搜索
 │   │       ├── theme.js               #     SL.theme：亮暗切换 + 持久化 + sl:themechange 广播 + 快捷键 T
 │   │       ├── screener.js            #     选股页：规则编辑 / 执行 / 漏斗 / 散点 / 导出分享
 │   │       ├── compare.js             #     对比页：标的联想挑选 / 指标卡 / 叠加走势 / 雷达 / 明细表
@@ -442,7 +454,7 @@ StockLab/
 │       └── analyze_valuation_percentile.py # 命令行入口：个股历史估值分位计算
 ├── tests/                              # ── 自检脚本（纯 assert，**无 pytest**，统一用 `./venv/bin/python tests/test_xxx.py` 运行）──
 │   ├── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
-│   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样 / 选股器 / 多股对比 / 组合监控）
+│   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样 / 页面要素与导航高亮 / 选股器 / 多股对比 / 组合监控 / 横向位置）
 │   ├── test_migrations.py              #     迁移自检（新库 / 幂等 / 老库升级 / 失败不记版本 / 序号重复）
 │   ├── test_data_contract.py           #     数据契约自检（缺列拒绝 / 乱序写入不错位 / 契约与 DDL 一致）
 │   ├── test_factor_engine.py           #     因子引擎自检（登记契约 / 六分类 / 数学手算核对 / 预处理与非法配置）
@@ -502,7 +514,7 @@ StockLab/
 | | `stocklab.analytics.markdown_reporter` | 全市场分布：归档级 Markdown（表格 + 自动结论） |
 | **仪表板** | `app.dashboard.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
 | | `app.dashboard.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
-| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器），页面 4 + 接口 7 + favicon |
+| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器），页面 7 + 接口 10 + favicon = 18 条 |
 | | `app.web.store` | **进程级数据访问单例**：门面锁 / 聚合连接锁、全市场窗口函数 SQL、指数成分中位数序列、七档评级、进程内缓存 |
 | | `app.web.api` | 个股接口：`/api/percentile` 分位 + 多窗口、`/api/securities` 联想（排序 + 大小写不敏感）、代码与中文名解析 |
 | | `app.web.market_api` | 全市场接口：`/api/market/ranking`（过滤/排序/分页 + 七档分布与直方图）、`/api/indices`、`/api/index/detail` |
@@ -516,7 +528,7 @@ StockLab/
 ## 运行方式
 
 ```bash
-# 启动本地 Web 分析服务（浏览器打开 http://127.0.0.1:8000 点击分析）
+# 启动本地 Web 分析服务（浏览器打开 http://127.0.0.1:8000 点击分析；七个页面）
 ./venv/bin/python app/scripts/serve_web.py
 
 # 指定端口与取数优先级
@@ -622,7 +634,7 @@ StockLab/
 | **历史估值分位(单股)** | Facade → ValuationHistoryRepo → Analyzer → Reporter | 本地序列 → CDF分位 → 控制台/MD |
 | **全市场PE分布快照** | Facade → DailyValuationRepo → DistributionAnalyzer → MarkdownReporter | 单日横截面 → 中位数/分桶/极值 → 归档MD |
 | **板块10年走势网页** | `python app/scripts/generate_sector_trend.py` | Facade → TencentClient(并发月线) → PageGenerator → dashboard.html |
-| **浏览器点开分析** | `python app/scripts/serve_web.py` → `/` `/market` `/indices` `/industries` | store(单例锁) → facade/analyzer → JSON → ECharts |
+| **浏览器点开分析** | `python app/scripts/serve_web.py` → `/` `/market` `/indices` `/industries` `/screener` `/compare` `/portfolio` | store(单例锁) → facade/analyzer → JSON → ECharts |
 | **全市场分位排行** | `GET /api/market/ranking?indicator=pe_ttm` | store 窗口函数 SQL → 七档评级 → 过滤/排序/分页 |
 | **行业估值横截面** | `GET /api/industries?level=1` | store 行业表 → 层级过滤 → PE 三口径 + 规模 |
 | **指数估值** | `GET /api/indices`、`GET /api/index/detail?code=000300` | index_memberships 成分中位数序列 → analyzer 分位 |
