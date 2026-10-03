@@ -189,6 +189,28 @@ class ScreenPipeline:
                 names.append(name)
         return names
 
+    def input_columns(self):
+        """
+        预处理步骤直接引用的**帧列**（分组列、市值列等非因子列）
+
+        Returns:
+            list: 去重后的列名；取数方据此把它们并进因子输入帧
+        """
+        columns = []
+        for step in self._preprocess:
+            for key in ("by", "column"):
+                value = step.get(key)
+                if value and value not in columns:
+                    columns.append(value)
+            targets = step.get("columns")
+            if isinstance(targets, str) and targets != "*" and targets not in columns:
+                columns.append(targets)
+            elif isinstance(targets, (list, tuple)):
+                for target in targets:
+                    if target not in columns:
+                        columns.append(target)
+        return columns
+
     def run(self, frame):
         """
         在因子输入帧上执行筛选

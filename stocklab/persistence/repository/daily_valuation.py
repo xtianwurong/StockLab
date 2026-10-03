@@ -109,6 +109,33 @@ class DailyValuationRepository(BaseRepository):
         ).fetchdf()
         return result
 
+    def cross_section_as_of(self, as_of_date):
+        """
+        查询 as-of 时点全市场最新可见的估值快照横截面
+
+        【口径】
+           每只证券取 trade_date <= as_of 的最近一条（含股息率 dv_ttm、总市值 total_mv）。
+           本地没有可得快照时返回空表——调用方必须按「无数据」处理，禁止回填假值。
+
+        Args:
+            as_of_date (str 或 datetime.date): 历史时点
+
+        Returns:
+            pd.DataFrame: 每个证券一行
+        """
+        conn = self._db.get_connection()
+        return conn.execute(
+            f"""
+            SELECT * FROM {self._TABLE_NAME}
+            WHERE trade_date <= ?
+            QUALIFY row_number() OVER (
+                PARTITION BY ts_code
+                ORDER BY trade_date DESC
+            ) = 1
+            """,
+            [as_of_date],
+        ).fetchdf()
+
     def count(self):
         """
         查询估值记录总数

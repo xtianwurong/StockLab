@@ -6,12 +6,14 @@ StockLab - 数据库迁移测试 (tests/test_migrations.py)
 
 【功能用途】
   验证 SchemaMigrator（stocklab.persistence.migrations）的行为：
-    1. 新库首次初始化：按序应用 001/002/003，版本表记录完整，结构齐全
+    1. 新库首次初始化：按序应用迁移目录里的全部 NNN_*.sql，版本表记录完整，结构齐全
     2. 幂等：重复初始化不再执行任何迁移（0 条）
-    3. 老库升级（已有 001 基线 + 版本行）：只补 002/003，
+    3. 老库升级（已有 001 基线 + 版本行）：只补 001 之后的迁移，
        list_status 按 L/D/P 映射成 status 后丢弃原列
     4. 有结构但没有版本表的老库：先引导版本表，再按序补跑（001 幂等跳过）
     5. 迁移失败不记录版本（可修复后重跑）；序号重复直接拒绝
+
+   迁移总数与序号一律从迁移目录推导：新增 NNN_*.sql 时本测试无需手改数字。
 
 【运行方式】
   python tests/test_migrations.py
@@ -57,6 +59,15 @@ def _versions(db_path):
     return sorted(row[0] for row in rows)
 
 
+def _expected_versions():
+    """迁移目录里全部 NNN_*.sql 的序号（新增迁移时测试自动跟着变）"""
+    versions = []
+    for name in os.listdir(MIGRATIONS_DIR):
+        if name[:3].isdigit() and name[3:4] == "_" and name.endswith(".sql"):
+            versions.append(int(name[:3]))
+    return sorted(versions)
+
+
 def _table_exists(db_path, schema, table):
     """判断表是否存在"""
     conn = duckdb.connect(db_path, read_only=True)
@@ -72,7 +83,7 @@ def _table_exists(db_path, schema, table):
 
 
 def run_fresh_database_test():
-    """测试新库首次初始化：3 个迁移全部应用，且结构齐全"""
+    """测试新库首次初始化：迁移目录里的迁移全部应用，且结构齐全"""
     print("\n" + "=" * 65)
     print("【阶段一：测试新库首次初始化】")
     print("=" * 65)
@@ -80,25 +91,31 @@ def run_fresh_database_test():
     temp_dir = tempfile.mkdtemp(prefix="sl_mig_new_")
     db_path = os.path.join(temp_dir, "fresh.duckdb")
     try:
+        expected = _expected_versions()
         applied = SchemaMigrator(db_path).apply()
-        assert applied == 3, applied
-        assert _versions(db_path) == [1, 2, 3], _versions(db_path)
+        assert applied == len(expected), applied
+        assert _versions(db_path) == expected, _versions(db_path)
 
         # 生命周期字段：只有语义化的 status，list_status 已被 003 取代
         columns = _columns(db_path, "reference", "securities")
         assert "status" in columns and "list_status" not in columns, columns
 
-        # Point-in-Time 基本面四张表 + 生命周期事件表
+        # Point-in-Time 基本面四张表 + 生命周期事件表 + 研究快照两张表
         for schema, table in [
             ("fundamental", "income_statements"),
             ("fundamental", "balance_sheets"),
             ("fundamental", "cashflow_statements"),
             ("fundamental", "financial_indicators"),
             ("reference", "security_events"),
+            ("research", "snapshots"),
+            ("research", "snapshot_results"),
         ]:
             assert _table_exists(db_path, schema, table), "%s.%s 缺失" % (schema, table)
 
-        print("  -> 首次初始化应用 3 个迁移，版本 [1, 2, 3]，结构齐全")
+        print(
+            "  -> 首次初始化应用 %d 个迁移，版本 %s，结构齐全"
+            % (len(expected), expected)
+        )
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -116,7 +133,7 @@ def run_idempotency_test():
         for _ in range(2):
             applied = SchemaMigrator(db_path).apply()
             assert applied == 0, applied
-        assert _versions(db_path) == [1, 2, 3], _versions(db_path)
+        assert _versions(db_path) == _expected_versions(), _versions(db_path)
         print("  -> 连续重复初始化均应用 0 个迁移，版本行不重复")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -153,7 +170,7 @@ def _build_legacy_database(db_path, with_version_row):
 
 
 def run_legacy_upgrade_test():
-    """测试老库（已有基线与版本行）只补跑 002/003，且 list_status 正确迁移"""
+    """测试老库（已有基线与版本行）只补 001 之后的迁移，且 list_status 正确迁移"""
     print("\n" + "=" * 65)
     print("【阶段三：测试老库升级（已有 001 版本行）】")
     print("=" * 65)
@@ -164,9 +181,10 @@ def run_legacy_upgrade_test():
         _build_legacy_database(db_path, with_version_row=True)
         assert _versions(db_path) == [1]
 
+        expected = _expected_versions()
         applied = SchemaMigrator(db_path).apply()
-        assert applied == 2, applied
-        assert _versions(db_path) == [1, 2, 3], _versions(db_path)
+        assert applied == len(expected) - 1, applied
+        assert _versions(db_path) == expected, _versions(db_path)
 
         conn = duckdb.connect(db_path, read_only=True)
         try:
@@ -190,7 +208,10 @@ def run_legacy_upgrade_test():
             conn.close()
         assert "list_status" not in columns and "status" in columns, columns
 
-        print("  -> 只补跑 2 个迁移；L/D/P → LISTED/DELISTED/PAUSED，原列已丢弃")
+        print(
+            "  -> 只补跑 %d 个迁移；L/D/P → LISTED/DELISTED/PAUSED，原列已丢弃"
+            % (len(expected) - 1)
+        )
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -207,10 +228,11 @@ def run_structured_without_version_test():
         _build_legacy_database(db_path, with_version_row=False)
         assert _table_exists(db_path, "reference", "securities")
 
+        expected = _expected_versions()
         applied = SchemaMigrator(db_path).apply()
         # 001 全部 IF NOT EXISTS → 结构已在时跳过执行但同样记录版本
-        assert applied == 3, applied
-        assert _versions(db_path) == [1, 2, 3], _versions(db_path)
+        assert applied == len(expected), applied
+        assert _versions(db_path) == expected, _versions(db_path)
 
         # 已存在的表不能被重建（否则老数据会丢）
         conn = duckdb.connect(db_path, read_only=True)
@@ -219,7 +241,9 @@ def run_structured_without_version_test():
         finally:
             conn.close()
         assert count == 3, count
-        print("  -> 版本表被引导，3 个迁移补跑，老数据完好")
+        print(
+            "  -> 版本表被引导，%d 个迁移补跑，老数据完好" % len(expected)
+        )
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -279,11 +303,11 @@ def run_initialize_database_delegation_test():
     try:
         path = initialize_database(db_path)
         assert path == db_path, path
-        assert _versions(db_path) == [1, 2, 3]
+        assert _versions(db_path) == _expected_versions()
 
         # 再次调用不重复应用
         initialize_database(db_path)
-        assert _versions(db_path) == [1, 2, 3]
+        assert _versions(db_path) == _expected_versions()
         print("  -> initialize_database 与迁移器共用同一套版本记录")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

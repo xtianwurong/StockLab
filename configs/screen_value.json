@@ -1,0 +1,17 @@
+{
+  "rules": [
+    {"factor": "pe_ttm", "operator": "lt", "value": 20},
+    {"factor": "roe", "operator": "gt", "value": 0.12},
+    {
+      "logic": "or",
+      "rules": [
+        {"factor": "dividend_yield", "operator": "gt", "value": 0.03},
+        {"factor": "momentum_12m", "operator": "gt", "value": 0.2}
+      ]
+    }
+  ],
+  "preprocess": [
+    {"method": "winsorize", "columns": ["pe_ttm"], "lower": 0.02, "upper": 0.02}
+  ],
+  "factors": ["pb", "fcf_yield"]
+}

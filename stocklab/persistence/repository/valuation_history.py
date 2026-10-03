@@ -89,6 +89,33 @@ class ValuationHistoryRepository(BaseRepository):
 
         return conn.execute(sql, params).fetchdf()
 
+    def cross_section_as_of(self, as_of_date):
+        """
+        查询 as-of 时点全市场最新可见的历史估值横截面（因子取数入口）
+
+        【口径】
+           每只证券取 trade_date <= as_of 的最近一条记录；停牌/久未更新的证券
+           允许停留在更早的日期（这是它们当时真实的可得信息，不做任何补齐）。
+
+        Args:
+            as_of_date (str 或 datetime.date): 历史时点
+
+        Returns:
+            pd.DataFrame: 每个证券一行，含各自使用的 trade_date
+        """
+        conn = self._db.get_connection()
+        return conn.execute(
+            f"""
+            SELECT * FROM {self._TABLE_NAME}
+            WHERE trade_date <= ?
+            QUALIFY row_number() OVER (
+                PARTITION BY ts_code
+                ORDER BY trade_date DESC
+            ) = 1
+            """,
+            [as_of_date],
+        ).fetchdf()
+
     def find_latest_date(self, ts_code):
         """
         查询某只证券最新一个有估值记录的交易日

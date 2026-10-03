@@ -14,6 +14,7 @@ StockLab - 日 K 行情 Repository (stocklab.persistence.repository.daily_price)
    - NULL 语义保留：不将 NULL / NaN 强制转换为 0
 """
 
+import datetime
 import logging
 
 import pandas as pd
@@ -107,6 +108,40 @@ class DailyPriceRepository(BaseRepository):
             [trade_date],
         ).fetchdf()
         return result
+
+    def find_window(self, as_of_date, lookback_days=400):
+        """
+        查询回看窗口内的全市场日 K 收盘序列（动量/波动率/最大回撤的原始输入）
+
+        【分层说明】
+           本方法只取**原始收盘价**，区间收益率、波动率、最大回撤等派生量由
+           stocklab.research.frame 计算——Repository 不做指标计算。
+
+        Args:
+            as_of_date (str 或 datetime.date): 截止时点（含当日）
+            lookback_days (int): 向前回看的自然日数，默认 400 天（覆盖 12M 动量与长假缺口）
+
+        Returns:
+            pd.DataFrame: ts_code / trade_date / close 三列，按代码与日期升序；
+                          本地无日线数据时为空表
+        """
+        if isinstance(as_of_date, str):
+            as_of = datetime.date.fromisoformat(as_of_date[:10])
+        else:
+            as_of = as_of_date
+        start_date = as_of - datetime.timedelta(days=lookback_days)
+
+        conn = self._db.get_connection()
+        return conn.execute(
+            f"""
+            SELECT ts_code, trade_date, close
+            FROM {self._TABLE_NAME}
+            WHERE trade_date <= ?
+              AND trade_date >= ?
+            ORDER BY ts_code, trade_date
+            """,
+            [as_of, start_date],
+        ).fetchdf()
 
     def get_max_trade_date(self):
         """

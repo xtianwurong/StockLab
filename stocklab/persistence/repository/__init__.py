@@ -21,6 +21,7 @@ from .fundamental import (
 )
 from .index_membership import IndexMembershipRepository
 from .industry_valuation import IndustryValuationRepository
+from .research_snapshot import ResearchSnapshotRepository, SnapshotResultRepository
 from .security import SecurityRepository
 from .security_event import SecurityEventRepository
 from .valuation_history import ValuationHistoryRepository
@@ -34,6 +35,8 @@ __all__ = [
     "ValuationHistoryRepository",
     "IndexMembershipRepository",
     "IndustryValuationRepository",
+    "ResearchSnapshotRepository",
+    "SnapshotResultRepository",
     "IncomeStatementRepository",
     "BalanceSheetRepository",
     "CashflowStatementRepository",

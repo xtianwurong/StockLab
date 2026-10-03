@@ -11,6 +11,7 @@ StockLab 领域契约包 (stocklab.domain)
    - market_data     行情：daily_prices
    - valuation       估值：daily_valuations / valuation_history / industry_valuations
    - fundamental     基本面（Point-in-Time）：三表 + 财务指标
+   - research        研究快照：snapshots / snapshot_results
 
 【使用约定】
    - Repository 写入前一律 align_columns(frame, 契约, 表名)，INSERT 显式列出列名；
@@ -32,6 +33,7 @@ from .fundamental import (
     INCOME_STATEMENT_COLUMNS,
 )
 from .market_data import DAILY_PRICE_COLUMNS
+from .research import SNAPSHOT_COLUMNS, SNAPSHOT_RESULT_COLUMNS
 from .security import (
     INDEX_MEMBERSHIP_COLUMNS,
     SECURITY_COLUMNS,
@@ -64,4 +66,6 @@ __all__ = [
     "BALANCE_SHEET_COLUMNS",
     "CASHFLOW_STATEMENT_COLUMNS",
     "FINANCIAL_INDICATOR_COLUMNS",
+    "SNAPSHOT_COLUMNS",
+    "SNAPSHOT_RESULT_COLUMNS",
 ]
