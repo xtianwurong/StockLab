@@ -1,54 +1,18 @@
 /*
- * StockLab 共享样式 (app/web/static/base.css)
+ * StockLab 共享布局样式 (app/web/static/base.css)
  *
- * 职责：三个页面（个股分析 / 全市场 / 指数估值）共用的设计系统。
+ * 职责：四个页面（个股分析 / 全市场 / 指数估值 / 行业估值）共用的**结构与布局**：
+ *       顶栏导航、容器、区块标题、卡片外壳、数据表、温度条、空态、分页、图例。
  *       页面各自的特有样式写在各自模板的 <style> 里，只覆盖差异。
  *
- * 设计基调：亮色报表风 —— 白卡片、细分隔线、低饱和背景，数字优先。
+ * 分工（务必先读）：
+ *   tokens.css      设计令牌（颜色 / 间距 / 圆角 / 阴影 / 字号 / 动效 / 层级）+ 全局重置
+ *   components.css  可复用组件（按钮 / 表单 / 徽章 / 模态 / Toast / 抽屉 / 下拉 …）
+ *   base.css（本文件）页面骨架与历史类名；颜色一律引用变量，不写字面值
+ *
+ * 设计基调：报表风 —— 白卡片、细分隔线、低饱和背景，数字优先；
+ *           亮/暗双主题由 tokens.css 提供，本文件不做任何主题判断。
  */
-
-:root {
-  --bg-page: #f4f6f9;
-  --bg-card: #ffffff;
-  --bg-subtle: #f8fafc;
-  --bg-hover: #f1f5f9;
-  --text-main: #0f172a;
-  --text-sub: #334155;
-  --text-muted: #64748b;
-  --text-faint: #94a3b8;
-  --border-color: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --accent: #2563eb;
-  --accent-soft: #eff6ff;
-  --accent-hover: #1d4ed8;
-
-  /* 七档评级色：低 -> 高（绿 -> 黄 -> 红） */
-  --level-1: #15803d;
-  --level-2: #16a34a;
-  --level-3: #65a30d;
-  --level-4: #ca8a04;
-  --level-5: #ea580c;
-  --level-6: #dc2626;
-  --level-7: #991b1b;
-  --level-na: #94a3b8;
-
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
-  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.07);
-  --shadow-lg: 0 10px 28px rgba(15, 23, 42, 0.10);
-  --radius: 10px;
-  --radius-sm: 7px;
-  --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, Arial, sans-serif;
-  background-color: var(--bg-page);
-  color: var(--text-main);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -197,7 +161,7 @@ a:hover { text-decoration: underline; }
   max-width: 300px;
   padding: 8px 10px;
   border-radius: 7px;
-  background: #1e293b;
+  background: var(--gray-800);
   color: #f1f5f9;
   font-size: 12px;
   font-weight: 400;
@@ -339,7 +303,7 @@ a:hover { text-decoration: underline; }
   height: 15px;
   border-radius: 2px;
   background: var(--text-main);
-  box-shadow: 0 0 0 2px #fff;
+  box-shadow: 0 0 0 2px var(--bg-card);
   transform: translate(-50%, -50%);
 }
 .tempbar-na .tempbar-track { background: var(--border-color); }

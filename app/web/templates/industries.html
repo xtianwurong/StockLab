@@ -1,13 +1,11 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StockLab - 行业估值</title>
-  <link rel="icon" href="/favicon.ico" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/base.css">
-  <script src="/static/echarts.min.js"></script>
-  <style>
+{% extends "_layout.html" %}
+{% set active_page = "industries" %}
+
+{% block main_class %}container{% endblock %}
+{% block page_title %}行业估值{% endblock %}
+
+{% block page_css %}
+<style>
     /* ---------- 层级切换 ---------- */
     .level-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
     .level-tab {
@@ -39,13 +37,11 @@
     .industry-table th:nth-child(1) { min-width: 130px; }
     .industry-table td.num { text-align: right; font-family: var(--mono); }
     .industry-table td .sub { display: block; font-size: 11px; color: var(--text-faint); }
-  </style>
-</head>
-<body>
-  {% set active_page = "industries" %}
-  {% include "_topbar.html" %}
+  
+</style>
+{% endblock %}
 
-  <main class="container">
+{% block content %}
     <div class="page-head">
       <div class="page-title">行业估值</div>
       <div class="page-desc">
@@ -109,11 +105,9 @@
         </table>
       </div>
     </section>
-  </main>
+  
+{% endblock %}
 
-  {% include "_footer.html" %}
-
-  <script src="/static/common.js"></script>
-  <script src="/static/industries.js"></script>
-</body>
-</html>
+{% block page_scripts %}
+<script src="/static/industries.js"></script>
+{% endblock %}

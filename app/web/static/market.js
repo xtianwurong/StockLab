@@ -243,44 +243,48 @@
       categories.push((i * 10) + "-" + ((i + 1) * 10) + "%");
     }
 
-    var colors = histogram.map(function (_, index) {
-      var level = SL.levelOf(index * 10 + 5);
-      return level ? level.color : "#94a3b8";
-    });
-
-    distChart = SL.renderChart(distDom, {
-      animation: false,
-      grid: { left: 44, right: 12, top: 18, bottom: 30 },
-      xAxis: {
-        type: "category",
-        data: categories,
-        axisLabel: { color: "#64748b", fontSize: 10.5, interval: 1 },
-        axisLine: { lineStyle: { color: "#cbd5e1" } },
-        axisTick: { show: false }
-      },
-      yAxis: {
-        type: "value",
-        axisLabel: { color: "#64748b", fontSize: 10.5 },
-        splitLine: { lineStyle: { color: "#eef2f7" } }
-      },
-      tooltip: {
-        trigger: "axis",
-        backgroundColor: "#fff",
-        borderColor: "#e2e8f0",
-        textStyle: { color: "#0f172a", fontSize: 12 },
-        formatter: function (params) {
-          var item = params[0];
-          return item.axisValue + "<br><b>" + SL.formatInt(item.value) + " 只</b>";
-        }
-      },
-      series: [{
-        type: "bar",
-        data: histogram.map(function (value, index) {
-          return { value: value, itemStyle: { color: colors[index], borderRadius: [3, 3, 0, 0] } };
-        }),
-        barWidth: "72%"
-      }]
-    });
+    // 重建函数：主题切换时由 charts.js 回调，重新读取当前主题配色
+    var rebuild = function () {
+      var palette = SL.palette();
+      var colors = histogram.map(function (_, index) {
+        var level = SL.levelOf(index * 10 + 5);
+        return level ? SL.cssColor(level.color) : palette.textFaint;
+      });
+      return {
+        animation: false,
+        grid: { left: 44, right: 12, top: 18, bottom: 30 },
+        xAxis: {
+          type: "category",
+          data: categories,
+          axisLabel: { color: palette.axisLabel, fontSize: 10.5, interval: 1 },
+          axisLine: { lineStyle: { color: palette.axis } },
+          axisTick: { show: false }
+        },
+        yAxis: {
+          type: "value",
+          axisLabel: { color: palette.axisLabel, fontSize: 10.5 },
+          splitLine: { lineStyle: { color: palette.split } }
+        },
+        tooltip: {
+          trigger: "axis",
+          backgroundColor: palette.tooltipBg,
+          borderColor: palette.tooltipBorder,
+          textStyle: { color: palette.tooltipText, fontSize: 12 },
+          formatter: function (params) {
+            var item = params[0];
+            return item.axisValue + "<br><b>" + SL.formatInt(item.value) + " 只</b>";
+          }
+        },
+        series: [{
+          type: "bar",
+          data: histogram.map(function (value, index) {
+            return { value: value, itemStyle: { color: colors[index], borderRadius: [3, 3, 0, 0] } };
+          }),
+          barWidth: "72%"
+        }]
+      };
+    };
+    distChart = SL.renderChart(distDom, rebuild(), rebuild);
 
     // 七档评级分布（可点击过滤；当前档高亮）
     levelList.textContent = "";

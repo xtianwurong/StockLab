@@ -242,11 +242,15 @@
       meta[item.indicator] = item.label;
     });
 
-    detailChart = SL.renderChart(chartDom, SL.buildTrendOption({
-      history: data.history,
-      indicatorMeta: meta,
-      primary: state.indicator
-    }));
+    // 重建函数：主题切换时由 charts.js 回调，用当前主题重新取色
+    var rebuild = function () {
+      return SL.buildTrendOption({
+        history: data.history,
+        indicatorMeta: meta,
+        primary: state.indicator
+      });
+    };
+    detailChart = SL.renderChart(chartDom, rebuild(), rebuild);
 
     // 滚动到详情区，避免大屏下点了卡片却看不到变化
     if (detailCard.scrollIntoView) {

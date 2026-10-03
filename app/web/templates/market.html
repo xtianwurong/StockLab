@@ -1,13 +1,11 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StockLab - 全市场估值分位</title>
-  <link rel="icon" href="/favicon.ico" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/base.css">
-  <script src="/static/echarts.min.js"></script>
-  <style>
+{% extends "_layout.html" %}
+{% set active_page = "market" %}
+
+{% block main_class %}container{% endblock %}
+{% block page_title %}全市场估值分位{% endblock %}
+
+{% block page_css %}
+<style>
     /* ---------- 工具条 ---------- */
     .toolbar {
       display: flex;
@@ -91,13 +89,11 @@
       .dist-grid { grid-template-columns: 1fr; }
       .toolbar .field, .toolbar .field-wide { width: 100%; }
     }
-  </style>
-</head>
-<body>
-  {% set active_page = "market" %}
-  {% include "_topbar.html" %}
+  
+</style>
+{% endblock %}
 
-  <main class="container">
+{% block content %}
     <div class="page-head">
       <div class="page-title">全市场估值分位</div>
       <div class="page-desc">
@@ -208,11 +204,9 @@
         </div>
       </div>
     </section>
-  </main>
+  
+{% endblock %}
 
-  {% include "_footer.html" %}
-
-  <script src="/static/common.js"></script>
-  <script src="/static/market.js"></script>
-</body>
-</html>
+{% block page_scripts %}
+<script src="/static/market.js"></script>
+{% endblock %}

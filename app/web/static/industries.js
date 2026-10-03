@@ -123,7 +123,9 @@
       values.push(item.pe_median === null ? null : item.pe_median);
     });
 
-    var option = {
+    var buildOption = function () {
+      var p = SL.palette();
+      return {
       grid: { left: 8, right: 40, top: 10, bottom: 8, containLabel: true },
       tooltip: {
         trigger: "axis",
@@ -144,15 +146,15 @@
       xAxis: {
         type: "value",
         name: "PE",
-        nameTextStyle: { color: "#64748b", fontSize: 11 },
-        axisLabel: { color: "#64748b" },
-        splitLine: { lineStyle: { color: "#eef2f7" } }
+        nameTextStyle: { color: p.axisLabel, fontSize: 11 },
+        axisLabel: { color: p.axisLabel },
+        splitLine: { lineStyle: { color: p.split } }
       },
       yAxis: {
         type: "category",
         data: names,
-        axisLabel: { color: "#334155", fontSize: 11 },
-        axisLine: { lineStyle: { color: "#e2e8f0" } }
+        axisLabel: { color: p.textSub, fontSize: 11 },
+        axisLine: { lineStyle: { color: p.axis } }
       },
       series: [{
         type: "bar",
@@ -160,7 +162,7 @@
           return {
             value: value,
             itemStyle: {
-              color: value === null ? "#cbd5e1" : "#2563eb",
+              color: value === null ? p.axis : p.accent,
               borderRadius: [0, 4, 4, 0]
             }
           };
@@ -169,19 +171,17 @@
         label: {
           show: true,
           position: "right",
-          color: "#64748b",
+          color: p.axisLabel,
           fontSize: 10.5,
           formatter: function (param) {
             return param.value === null ? "-" : param.value.toFixed(1);
           }
         }
       }]
+      };
     };
 
-    if (!chart) {
-      chart = echarts.init(chartDom);
-    }
-    chart.setOption(option, true);
+    chart = SL.renderChart(chartDom, buildOption(), buildOption);
   }
 
   /**

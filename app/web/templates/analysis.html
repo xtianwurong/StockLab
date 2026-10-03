@@ -1,13 +1,11 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StockLab - 个股估值分位分析</title>
-  <link rel="icon" href="/favicon.ico" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/base.css">
-  <script src="/static/echarts.min.js"></script>
-  <style>
+{% extends "_layout.html" %}
+{% set active_page = "analysis" %}
+
+{% block main_class %}container container-narrow{% endblock %}
+{% block page_title %}个股估值分位分析{% endblock %}
+
+{% block page_css %}
+<style>
     /* ---------- 查询区 ---------- */
     .query-row {
       display: grid;
@@ -155,13 +153,11 @@
       .windows { grid-template-columns: repeat(2, 1fr); }
       #trend-chart { height: 320px; }
     }
-  </style>
-</head>
-<body>
-  {% set active_page = "analysis" %}
-  {% include "_topbar.html" %}
+  
+</style>
+{% endblock %}
 
-  <main class="container container-narrow">
+{% block content %}
     <div class="page-head">
       <div class="page-title">个股估值分位</div>
       <div class="page-desc">
@@ -314,11 +310,9 @@
         支持代码（600519.SH）与中文名（贵州茅台）；结果会保留在地址栏，可直接刷新或分享。
       </div>
     </div>
-  </main>
+  
+{% endblock %}
 
-  {% include "_footer.html" %}
-
-  <script src="/static/common.js"></script>
-  <script src="/static/app.js"></script>
-</body>
-</html>
+{% block page_scripts %}
+<script src="/static/app.js"></script>
+{% endblock %}

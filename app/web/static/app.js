@@ -609,12 +609,15 @@
     if (!lastPayload || !lastPayload.history) {
       return;
     }
-    var option = SL.buildTrendOption({
-      history: lastPayload.history,
-      indicatorMeta: buildMeta(lastPayload),
-      primary: primaryIndicator
-    });
-    trendChart = SL.renderChart(chartDom, option);
+    // 重建函数：主题切换时由 charts.js 回调，用当前主题重新取色
+    var rebuild = function () {
+      return SL.buildTrendOption({
+        history: lastPayload.history,
+        indicatorMeta: buildMeta(lastPayload),
+        primary: primaryIndicator
+      });
+    };
+    trendChart = SL.renderChart(chartDom, rebuild(), rebuild);
   }
 
   // ---------- 页面初始化 ----------

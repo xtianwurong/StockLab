@@ -15,17 +15,19 @@
 
   // ---------- 常量 ----------
   // 七档评级：与 app/web/store.py 的 percentile_level() 必须保持一致
+  // color 写成 var(--level-N)：由 tokens.css 决定亮/暗两套具体色值，
+  // 徽章与图例渲染时经 cssColor() 解析为当前主题的颜色（见 charts.js）。
   var LEVEL7 = [
-    { name: "极度低估", max: 10, color: "#15803d" },
-    { name: "低估", max: 20, color: "#16a34a" },
-    { name: "正常偏低", max: 40, color: "#65a30d" },
-    { name: "正常", max: 60, color: "#ca8a04" },
-    { name: "正常偏高", max: 80, color: "#ea580c" },
-    { name: "高估", max: 90, color: "#dc2626" },
-    { name: "极度高估", max: 100, color: "#991b1b" }
+    { name: "极度低估", max: 10, color: "var(--level-1)" },
+    { name: "低估", max: 20, color: "var(--level-2)" },
+    { name: "正常偏低", max: 40, color: "var(--level-3)" },
+    { name: "正常", max: 60, color: "var(--level-4)" },
+    { name: "正常偏高", max: 80, color: "var(--level-5)" },
+    { name: "高估", max: 90, color: "var(--level-6)" },
+    { name: "极度高估", max: 100, color: "var(--level-7)" }
   ];
 
-  var LEVEL_COLOR_NA = "#94a3b8";
+  var LEVEL_COLOR_NA = "var(--level-na)";
 
   // PE 类指标走左轴，其余（PB/PS/PCF）走右轴：量纲差异大，混轴会互相压扁
   var PE_INDICATORS = ["pe_ttm", "pe_static"];
@@ -161,7 +163,7 @@
   function levelBadge(percentile, levelName) {
     var level = levelOf(percentile);
     var name = level ? level.name : (levelName || "不可用");
-    var color = level ? level.color : LEVEL_COLOR_NA;
+    var color = level ? cssColor(level.color) : cssColor(LEVEL_COLOR_NA, "#94a3b8");
     return (
       '<span class="badge" style="background:' + hexA(color, 0.12) +
       ";color:" + color + '"><span class="badge-dot"></span>' + name + "</span>"
@@ -184,6 +186,44 @@
     var g = parseInt(value.substring(2, 4), 16);
     var b = parseInt(value.substring(4, 6), 16);
     return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+  }
+
+  /**
+   * 解析主题色：接受 var(--level-1) 这类变量引用与 #hex 字面量
+   *
+   * 【为何需要】评级色搬进了 tokens.css（亮暗两套），徽章要叠加透明度，
+   *   必须先拿到当前主题下的具体颜色；charts.js 提供实现，此处做降级兜底。
+   *
+   * @param {string} color 颜色文本
+   * @param {string} [fallback] 解析失败时的兜底
+   * @returns {string} 具体颜色
+   */
+  function cssColor(color, fallback) {
+    if (window.SL && window.SL.charts && window.SL.charts.cssColor) {
+      return window.SL.charts.cssColor(color, fallback);
+    }
+    return color || fallback || "";
+  }
+
+  /**
+   * 当前主题的图表调色板（charts.js 提供；缺省时给出亮色兜底值）
+   *
+   * 【为何图表颜色要读变量】暗色主题下 ECharts 的轴线/文字若仍用写死的浅色，
+   *   会在深色卡片上几乎不可见；统一从 tokens.css 取值才能自动跟随主题。
+   *
+   * @returns {object} 颜色集合
+   */
+  function palette() {
+    if (window.SL && window.SL.charts && window.SL.charts.palette) {
+      return window.SL.charts.palette();
+    }
+    return {
+      textMain: "#0f172a", textSub: "#475569", textMuted: "#64748b", textFaint: "#94a3b8",
+      axis: "#cbd5e1", axisLabel: "#64748b", split: "#eef2f7", accent: "#2563eb",
+      tooltipBg: "#ffffff", tooltipText: "#0f172a", tooltipBorder: "#e2e8f0",
+      band: "rgba(100,116,139,0.09)", zoomFiller: "rgba(37,99,235,0.12)",
+      gridBg: "#f8fafc", border: "#e2e8f0", danger: "#dc2626", success: "#16a34a"
+    };
   }
 
   /**
@@ -265,7 +305,7 @@
       var item = LEVEL7[i];
       html +=
         '<span class="legend-item"><span class="legend-swatch" style="background:' +
-        item.color + '"></span>' + item.name +
+        cssColor(item.color) + '"></span>' + item.name +
         '<span class="legend-range">' + low + "~" + item.max + "%</span></span>";
       low = item.max;
     }
@@ -333,6 +373,7 @@
     var history = args.history;
     var meta = args.indicatorMeta || {};
     var primary = args.primary;
+    var color = palette();
 
     var dates = history.dates;
     var seriesList = [];
@@ -352,22 +393,22 @@
       rightIndex = 1;
       yAxis.push(
         { type: "value", name: "PE 类", scale: true, position: "left",
-          axisLabel: { color: "#64748b", fontSize: 11 },
-          axisLine: { lineStyle: { color: "#cbd5e1" } },
-          splitLine: { lineStyle: { color: "#eef2f7" } },
-          nameTextStyle: { color: "#94a3b8", fontSize: 11 } },
+          axisLabel: { color: color.axisLabel, fontSize: 11 },
+          axisLine: { lineStyle: { color: color.axis } },
+          splitLine: { lineStyle: { color: color.split } },
+          nameTextStyle: { color: color.textFaint, fontSize: 11 } },
         { type: "value", name: "PB / PS / PCF", scale: true, position: "right",
-          axisLabel: { color: "#64748b", fontSize: 11 },
-          axisLine: { lineStyle: { color: "#cbd5e1" } },
+          axisLabel: { color: color.axisLabel, fontSize: 11 },
+          axisLine: { lineStyle: { color: color.axis } },
           splitLine: { show: false },
-          nameTextStyle: { color: "#94a3b8", fontSize: 11 } }
+          nameTextStyle: { color: color.textFaint, fontSize: 11 } }
       );
     } else {
       yAxis.push(
         { type: "value", scale: true,
-          axisLabel: { color: "#64748b", fontSize: 11 },
-          axisLine: { lineStyle: { color: "#cbd5e1" } },
-          splitLine: { lineStyle: { color: "#eef2f7" } } }
+          axisLabel: { color: color.axisLabel, fontSize: 11 },
+          axisLine: { lineStyle: { color: color.axis } },
+          splitLine: { lineStyle: { color: color.split } } }
       );
     }
 
@@ -411,17 +452,17 @@
         icon: "roundRect",
         itemWidth: 13,
         itemHeight: 4,
-        textStyle: { color: "#475569", fontSize: 12 },
+        textStyle: { color: color.textSub, fontSize: 12 },
         selectedMode: true
       },
       tooltip: {
         trigger: "axis",
-        axisPointer: { type: "line", lineStyle: { color: "#cbd5e1" } },
-        backgroundColor: "#ffffff",
-        borderColor: "#e2e8f0",
+        axisPointer: { type: "line", lineStyle: { color: color.axis } },
+        backgroundColor: color.tooltipBg,
+        borderColor: color.tooltipBorder,
         borderWidth: 1,
         padding: 9,
-        textStyle: { color: "#0f172a", fontSize: 12.5 },
+        textStyle: { color: color.tooltipText, fontSize: 12.5 },
         extraCssText: "box-shadow:0 4px 14px rgba(15,23,42,.10);border-radius:8px;",
         formatter: function (params) {
           if (!params.length) {
@@ -438,8 +479,8 @@
             }
             html +=
               '<div style="display:flex;justify-content:space-between;gap:16px">' +
-              '<span style="color:#64748b">' + item.marker + item.seriesName + "</span>" +
-              '<span style="font-weight:600;font-family:var(--mono)">' + value + "</span>" +
+              '<span style="color:' + color.textMuted + '">' + item.marker + item.seriesName + "</span>" +
+              '<span style="font-weight:600;font-family:var(--font-mono)">' + value + "</span>" +
               "</div>";
           }
           return html;
@@ -450,9 +491,9 @@
         type: "category",
         data: dates,
         boundaryGap: false,
-        axisLine: { lineStyle: { color: "#cbd5e1" } },
+        axisLine: { lineStyle: { color: color.axis } },
         axisTick: { show: false },
-        axisLabel: { color: "#64748b", fontSize: 11, hideOverlap: true }
+        axisLabel: { color: color.axisLabel, fontSize: 11, hideOverlap: true }
       },
       yAxis: yAxis,
       dataZoom: [
@@ -463,15 +504,15 @@
           end: 100,
           height: 16,
           bottom: 8,
-          borderColor: "#e2e8f0",
-          backgroundColor: "#f8fafc",
-          fillerColor: "rgba(37,99,235,0.12)",
-          handleStyle: { color: "#2563eb", borderColor: "#2563eb" },
-          moveHandleStyle: { color: "#93c5fd" },
-          textStyle: { color: "#94a3b8", fontSize: 10 },
+          borderColor: color.border,
+          backgroundColor: color.gridBg,
+          fillerColor: color.zoomFiller,
+          handleStyle: { color: color.accent, borderColor: color.accent },
+          moveHandleStyle: { color: color.accent },
+          textStyle: { color: color.textFaint, fontSize: 10 },
           dataBackground: {
-            lineStyle: { color: "#cbd5e1" },
-            areaStyle: { color: "#e2e8f0" }
+            lineStyle: { color: color.axis },
+            areaStyle: { color: color.border }
           }
         }
       ],
@@ -500,24 +541,25 @@
       return {};
     }
 
+    var color = palette();
     var markLineData = [
       { yAxis: p90, name: "90% 分位",
-        label: { formatter: "高估线 90%", position: "insideEndTop", color: "#dc2626", fontSize: 10.5 },
-        lineStyle: { color: "#dc2626", type: "dashed", width: 1 } },
+        label: { formatter: "高估线 90%", position: "insideEndTop", color: color.danger, fontSize: 10.5 },
+        lineStyle: { color: color.danger, type: "dashed", width: 1 } },
       { yAxis: p50, name: "中位数",
-        label: { formatter: "中位数", position: "insideEndTop", color: "#475569", fontSize: 10.5 },
-        lineStyle: { color: "#94a3b8", type: "solid", width: 1 } },
+        label: { formatter: "中位数", position: "insideEndTop", color: color.textMuted, fontSize: 10.5 },
+        lineStyle: { color: color.textFaint, type: "solid", width: 1 } },
       { yAxis: p10, name: "10% 分位",
-        label: { formatter: "低估线 10%", position: "insideEndBottom", color: "#16a34a", fontSize: 10.5 },
-        lineStyle: { color: "#16a34a", type: "dashed", width: 1 } }
+        label: { formatter: "低估线 10%", position: "insideEndBottom", color: color.success, fontSize: 10.5 },
+        lineStyle: { color: color.success, type: "dashed", width: 1 } }
     ];
     if (current !== null) {
       markLineData.push({
         yAxis: current,
         name: "当前值",
         label: { formatter: "当前 " + formatNumber(current, 2), position: "insideStartTop",
-          color: "#2563eb", fontSize: 11, fontWeight: 600 },
-        lineStyle: { color: "#2563eb", type: "solid", width: 1.6 }
+          color: color.accent, fontSize: 11, fontWeight: 600 },
+        lineStyle: { color: color.accent, type: "solid", width: 1.6 }
       });
     }
 
@@ -525,7 +567,7 @@
       markLine: { silent: true, symbol: "none", data: markLineData, z: 6 },
       markArea: {
         silent: true,
-        itemStyle: { color: "rgba(100,116,139,0.09)" },
+        itemStyle: { color: color.band },
         data: [[{ yAxis: p25 }, { yAxis: p75 }]]
       }
     };
@@ -536,9 +578,14 @@
    *
    * @param {HTMLElement} dom 图表容器
    * @param {object} option ECharts option
+   * @param {Function} [rebuild] 返回新 option 的重建函数；主题切换时由
+   *                          charts.js 回调，用于让图表配色跟随亮/暗主题。
    * @returns {object} ECharts 实例
    */
-  function renderChart(dom, option) {
+  function renderChart(dom, option, rebuild) {
+    if (window.SL && window.SL.charts && window.SL.charts.render) {
+      return window.SL.charts.render(dom, option, rebuild);
+    }
     var chart = echarts.getInstanceByDom(dom);
     if (!chart) {
       chart = echarts.init(dom, null, { renderer: "canvas" });
@@ -601,6 +648,8 @@
     hexA: hexA,
     levelLegend: levelLegend,
     checkHealth: checkHealth,
+    cssColor: cssColor,
+    palette: palette,
     LEVEL7: LEVEL7
   };
 })();

@@ -1,22 +1,33 @@
-{# 共享顶栏：调用前先 set active_page = "analysis" | "market" | "indices" | "industries" #}
+{#
+  共享顶栏：品牌 + 主导航 + 服务状态 + 主题切换
+  调用方（_layout.html）通过 {% set active_page %} 指定高亮项：
+    analysis | market | indices | industries
+  新增页面时：在 NAV_ITEMS 里加一项，并把 active_page 传进来即可，
+  顶栏本身无需改动。
+#}
+{% set NAV_ITEMS = [
+  ("analysis",  "01", "个股分析", "/"),
+  ("market",    "02", "全市场",   "/market"),
+  ("indices",   "03", "指数估值", "/indices"),
+  ("industries","04", "行业估值", "/industries")
+] %}
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark">S</span>StockLab</a>
-  <nav class="nav">
-    <a class="nav-link{{ ' active' if active_page == 'analysis' else '' }}" href="/">
-      <span class="nav-idx">01</span>个股分析
+  <nav class="nav" aria-label="主导航">
+    {% for key, idx, label, href in NAV_ITEMS %}
+    <a class="nav-link{{ ' active' if active_page == key else '' }}"
+       href="{{ href }}"{{ ' aria-current="page"' if active_page == key else '' }}>
+      <span class="nav-idx">{{ idx }}</span>{{ label }}
     </a>
-    <a class="nav-link{{ ' active' if active_page == 'market' else '' }}" href="/market">
-      <span class="nav-idx">02</span>全市场
-    </a>
-    <a class="nav-link{{ ' active' if active_page == 'indices' else '' }}" href="/indices">
-      <span class="nav-idx">03</span>指数估值
-    </a>
-    <a class="nav-link{{ ' active' if active_page == 'industries' else '' }}" href="/industries">
-      <span class="nav-idx">04</span>行业估值
-    </a>
+    {% endfor %}
   </nav>
   <div class="topbar-right">
     <span id="data-as-of" class="hidden"></span>
     <span><span class="status-dot" id="status-dot"></span><span id="status-text">检测中</span></span>
+    <button class="theme-toggle" type="button" data-theme-toggle
+            aria-label="切换主题" title="切换主题（快捷键 T）">
+      <span class="icon-sun" aria-hidden="true">☀</span>
+      <span class="icon-moon" aria-hidden="true">☾</span>
+    </button>
   </div>
 </header>
