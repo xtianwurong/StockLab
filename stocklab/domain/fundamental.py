@@ -13,6 +13,9 @@ StockLab - 基本面领域契约 (stocklab.domain.fundamental)
 
 【Point-in-Time 核心字段】
    四张表一律以 FUNDAMENTAL_PIT_COLUMNS 开头，缺一不可：
+     - ts_code          证券标识（V2 文档 §3.2 写作 symbol，本项目统一用带交易所后缀的
+                        ts_code；6 位 symbol 由 reference.securities 按 ts_code 取得，
+                        故不在四张表里冗余存两份代码）
      - report_period    报告期（会计期间，如 2024-03-31）
      - announce_date    公告日期（数据对外披露的时间）
      - available_date   可见日期（研究视角首次可见的时间，默认等于 announce_date）

@@ -194,6 +194,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
   - `facade` 可依赖两者，但 **`datasource` 与 `persistence` 绝不可反向 import `facade`**，否则形成循环依赖。
+- **与 V2 需求文档的命名对照**：V2 §4.2 所称 `AkShareAdapter` / `BaoStockAdapter` / `TencentAdapter` 即本项目的 `datasource/_sources/{akshare,baostock,tencent}_source`（三个数据源通道实现）；`domain/corporate_action.py` 对应**尚未接入的公司行为（分红/送转）数据**，等 Phase 2 因子层真正需要时再建，不预置空文件。
 - 顶层入口脚本只做「参数解析 + 调用库」，不含业务逻辑；自检脚本放在 tests/ 下。
 
 ---
