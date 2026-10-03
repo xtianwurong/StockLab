@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockLab - 历史估值分位分析</title>
+  <script src="/static/echarts.min.js"></script>
+  <style>
+    :root {
+      --bg-page: #f4f6f9;
+      --bg-card: #ffffff;
+      --bg-hover: #f1f5f9;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --border-color: #e2e8f0;
+      --accent-blue: #2563eb;
+      --accent-blue-soft: #eff6ff;
+      --level-low: #16a34a;
+      --level-mid: #ca8a04;
+      --level-high: #dc2626;
+      --level-none: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, Arial, sans-serif;
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      line-height: 1.5;
+    }
+    .container { max-width: 1080px; margin: 0 auto; padding: 18px 16px 40px; }
+
+    /* ---------- 顶栏 ---------- */
+    .top-bar {
+      display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+      padding: 4px 0 16px;
+    }
+    .top-bar h1 { font-size: 20px; font-weight: 700; }
+    .top-bar .subtitle { font-size: 13px; color: var(--text-muted); }
+
+    /* ---------- 查询区 ---------- */
+    .query-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .query-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 12px; color: var(--text-muted); }
+    .field input, .field select {
+      height: 34px; padding: 0 10px;
+      border: 1px solid var(--border-color); border-radius: 6px;
+      font-size: 14px; color: var(--text-main); background: #fff;
+      outline: none;
+    }
+    .field input:focus, .field select:focus { border-color: var(--accent-blue); }
+    .field-code { position: relative; flex: 1 1 240px; min-width: 240px; }
+    .field-code input { width: 100%; font-family: "SF Mono", Menlo, Consolas, monospace; }
+
+    /* 证券联想下拉 */
+    .suggest-list {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+      background: #fff; border: 1px solid var(--border-color); border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, .12);
+      max-height: 260px; overflow-y: auto; display: none;
+    }
+    .suggest-list.open { display: block; }
+    .suggest-item {
+      padding: 7px 12px; font-size: 13px; cursor: pointer;
+      display: flex; justify-content: space-between; gap: 8px;
+    }
+    .suggest-item:hover, .suggest-item.active { background: var(--accent-blue-soft); }
+    .suggest-item .code { font-family: "SF Mono", Menlo, Consolas, monospace; color: var(--accent-blue); }
+    .suggest-item .name { color: var(--text-main); }
+    .suggest-empty { padding: 8px 12px; font-size: 13px; color: var(--text-muted); }
+
+    .btn-analyze {
+      height: 34px; padding: 0 22px;
+      background: var(--accent-blue); color: #fff;
+      border: none; border-radius: 6px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .btn-analyze:hover { background: #1d4ed8; }
+    .btn-analyze:disabled { background: #93c5fd; cursor: not-allowed; }
+
+    .hint-line { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+    .hint-line .mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+
+    /* ---------- 状态提示 ---------- */
+    .message {
+      display: none; padding: 10px 14px; border-radius: 8px;
+      font-size: 13px; margin-bottom: 14px;
+    }
+    .message.error { display: block; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .message.info { display: block; background: var(--accent-blue-soft); color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+    /* ---------- 结果区 ---------- */
+    .result-meta {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 12px; color: var(--text-muted); margin: 4px 0 10px;
+    }
+    .result-meta .tag {
+      background: #fff; border: 1px solid var(--border-color);
+      border-radius: 999px; padding: 2px 10px;
+    }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 10px; padding: 12px 14px;
+    }
+    .card .ind { font-size: 12px; color: var(--text-muted); }
+    .card .pct { font-size: 28px; font-weight: 700; margin: 2px 0; }
+    .card .pct.none { color: var(--level-none); font-size: 20px; }
+    .card .detail { font-size: 12px; color: var(--text-muted); }
+    .card .level {
+      display: inline-block; margin-top: 6px;
+      font-size: 12px; font-weight: 600;
+      padding: 1px 8px; border-radius: 999px;
+    }
+    .level-low { background: #f0fdf4; color: var(--level-low); border: 1px solid #bbf7d0; }
+    .level-mid { background: #fefce8; color: var(--level-mid); border: 1px solid #fef08a; }
+    .level-high { background: #fef2f2; color: var(--level-high); border: 1px solid #fecaca; }
+    .level-none { background: #f1f5f9; color: var(--level-none); border: 1px solid var(--border-color); }
+
+    .panel {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 10px; padding: 14px 16px; margin-bottom: 14px;
+    }
+    .panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+    #chart { width: 100%; height: 340px; }
+
+    /* ---------- 明细表 ---------- */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
+    th { background: var(--bg-hover); color: var(--text-muted); font-weight: 600; }
+    th:first-child, td:first-child { text-align: left; }
+    tbody tr:hover { background: var(--accent-blue-soft); }
+    td.mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+
+    .footnote { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="top-bar">
+      <h1>StockLab 历史估值分位</h1>
+      <span class="subtitle">分位 = 区间内低于当前值的样本占比；亏损期（PE ≤ 0）不计入</span>
+    </div>
+
+    <div class="query-card">
+      <div class="query-row">
+        <div class="field field-code">
+          <label for="code-input">证券代码或名称</label>
+          <input id="code-input" type="text" placeholder="如 600519.SH 或 贵州茅台"
+                 autocomplete="off" spellcheck="false">
+          <div id="suggest-list" class="suggest-list"></div>
+        </div>
+        <div class="field">
+          <label for="period-select">历史区间</label>
+          <select id="period-select">
+            <option value="全部" selected>全部历史</option>
+            <option value="近十年">近十年</option>
+            <option value="近五年">近五年</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="start-date">计算起始</label>
+          <input id="start-date" type="date">
+        </div>
+        <div class="field">
+          <label for="end-date">计算截止</label>
+          <input id="end-date" type="date">
+        </div>
+        <button id="btn-analyze" class="btn-analyze">开始分析</button>
+      </div>
+      <div class="hint-line">
+        留空计算起止 = 使用全部样本；历史区间仅影响<b>首次取数</b>（本地已有数据时始终用全量）。
+        示例代码：<span class="mono">600519.SH</span> <span class="mono">000001.SZ</span> <span class="mono">601318.SH</span>
+      </div>
+    </div>
+
+    <div id="message" class="message"></div>
+
+    <div id="result-area" class="hidden">
+      <div class="result-meta">
+        <span class="tag" id="meta-interval">-</span>
+        <span class="tag" id="meta-rows">-</span>
+        <span class="tag" id="meta-priority">-</span>
+      </div>
+
+      <div class="cards" id="cards"></div>
+
+      <div class="panel">
+        <h2>历史估值走势（分位计算区间）</h2>
+        <div id="chart"></div>
+        <div class="footnote">
+          横线为当前值，阴影区间为历史中位数所在位置；PE ≤ 0 的亏损期在序列中显示为断点。
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>分位明细</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>指标</th>
+                <th>当前值</th>
+                <th>历史分位</th>
+                <th>样本数</th>
+                <th>区间中位数</th>
+                <th>最小值</th>
+                <th>最大值</th>
+                <th>档位</th>
+              </tr>
+            </thead>
+            <tbody id="detail-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -31,11 +31,12 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           用户入口层 (Scripts)                              │
+│                           用户入口层 (Scripts + Web)                         │
 │  ┌─────────────────┐  ┌─────────────────────────────────────────────────┐  │
-│  │ sync_market_data│  │ generate_sector_trend.py / test_data_interfaces │  │
-│  │ (数据同步 CLI)  │  │ (可视化生成 / 自测入口)                           │  │
+│  │ sync_market_data│  │ generate_sector_trend.py / analyze_*.py         │  │
+│  │ (数据同步 CLI)  │  │ serve_web.py (本地分析服务) / test 自检入口     │  │
 │  └─────────────────┘  └─────────────────────────────────────────────────┘  │
+│                     app.web：Flask 路由 + JSON 接口 + 浏览器端点击分析      │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -106,6 +107,10 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
          ├──►  app.dashboard  ──►  stocklab.facade  ──►  stocklab.datasource
          │                                  （只对外取数）
          │
+         ├──►  app.web  ──┬──►  stocklab.facade      ──►  stocklab.datasource
+         │   （HTTP 接口）  │                              stocklab.persistence
+         │                 └──►  stocklab.analytics       （纯统计变换）
+         │
          ├──►  stocklab.facade  ──┬──►  stocklab.datasource
          │        （统一取数入口）  └──►  stocklab.persistence
          │
@@ -127,6 +132,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 | `stocklab.facade` | `common` `datasource` `persistence` | `pandas` | `logging` |
 | `stocklab.analytics` | 无（层内互引 `analytics`） | `pandas` | `logging` `os` `unicodedata` |
 | `app.dashboard` | `common` `facade`（层内互引 `dashboard`） | 无 | `datetime` `json` `logging` `os` |
+| `app.web` | `facade` `analytics`（层内互引 `web`） | `flask` | `logging` `os` `threading` |
 
 > `stocklab.persistence` **不依赖 `common`**：持久化层无配置语义，解析 `config.ini` 对它没有意义。
 
@@ -144,6 +150,11 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
 - `app/dashboard`：把数据渲染成网页。
+- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，实现「输入代码 → 点击分析 → 图表与分位结论」。
+  - `server.py`：`create_app()` 装配层——**路由一律用 `app.add_url_rule()` 注册表写法，不用 `@app.route` 装饰器**（遵守本文件禁用装饰器的规定）。
+  - `api.py`：接口层——只做「参数解析 → facade 取数 → analyzer 计算 → 组装 JSON」；所有 facade 调用经**全局 `threading.Lock` 串行**（DuckDB 连接非线程安全），纯内存统计放在锁外。
+  - `static/`：本地托管 ECharts（vendored，离线可用）与前端交互脚本；`templates/`：分析页模板。
+  - **依赖方向 `app.web → stocklab.facade / stocklab.analytics`，与 `app.dashboard` 平行，不修改 `stocklab/` 核心库任何文件。**
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
   - `facade` 可依赖两者，但 **`datasource` 与 `persistence` 绝不可反向 import `facade`**，否则形成循环依赖。
@@ -214,9 +225,19 @@ StockLab/
 │   │   ├── page_generator.py          #     SectorWebPageGenerator 模板填充 → HTML
 │   │   └── templates/
 │   │       └── dashboard.html         #    网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
+│   ├── web/                            #   本地 Web 分析服务（Flask，浏览器端点击分析）
+│   │   ├── __init__.py                #     导出 create_app
+│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器）
+│   │   ├── api.py                     #     接口层：参数解析 → facade → analyzer → JSON（全局锁串行取数）
+│   │   ├── templates/
+│   │   │   └── analysis.html          #     分析页模板（亮色报表风）
+│   │   └── static/
+│   │       ├── echarts.min.js         #     ECharts 5.5 vendored（本地托管，离线可用）
+│   │       └── app.js                 #     前端交互：联想 / 分析请求 / 卡片表格 / 走势图
 │   └── scripts/                       #   CLI 入口
 │       ├── generate_sector_trend.py   #     命令行入口：生成板块走势网页
 │       ├── sync_market_data.py        #     命令行入口：全市场数据同步到本地 DuckDB（五个阶段）
+│       ├── serve_web.py               #     命令行入口：启动本地 Web 分析服务（仅监听 127.0.0.1）
 │       ├── analyze_pe_distribution.py #     命令行入口：全市场市盈率分布统计
 │       └── analyze_valuation_percentile.py # 命令行入口：个股历史估值分位计算
 ├── tests/                              # ── 自检脚本 ──
@@ -251,14 +272,23 @@ StockLab/
 | | `stocklab.analytics.markdown_reporter` | 全市场分布：归档级 Markdown（表格 + 自动结论） |
 | **仪表板** | `app.dashboard.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
 | | `app.dashboard.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
+| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器） |
+| | `app.web.api` | 接口层：`/api/percentile` 分位分析、`/api/securities` 证券联想、`/api/health`；facade 调用全局锁串行 |
 | **脚本** | `app/scripts/sync_market_data.py` | 5 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分 |
 | | `app/scripts/generate_sector_trend.py` | 可视化生成 CLI：月数/输出路径/配置文件可配 |
+| | `app/scripts/serve_web.py` | 本地分析服务 CLI：端口/优先级/数据库路径可配，仅监听 127.0.0.1 |
 
 ---
 
 ## 运行方式
 
 ```bash
+# 启动本地 Web 分析服务（浏览器打开 http://127.0.0.1:8000 点击分析）
+./venv/bin/python app/scripts/serve_web.py
+
+# 指定端口与取数优先级
+./venv/bin/python app/scripts/serve_web.py --port 8321 --priority remote_first
+
 # 生成板块走势网页（默认读取 config.ini）
 ./venv/bin/python app/scripts/generate_sector_trend.py
 
@@ -346,8 +376,10 @@ pip install -r requirements.txt
 | pandas | 3.0.6 | 数据清洗与时序对齐 |
 | requests | 2.34.2 | 腾讯直连 HTTP（实时行情、公司名称、板块 K 线） |
 | duckdb | 1.4.3 | 本地分析型数据仓库（全市场 A 股数据持久化） |
+| Flask | 3.1.3 | 本地 Web 分析服务（`app/web` 专用；含 Werkzeug/Jinja2 等 6 个传递依赖，均锁定实测版本） |
 
 > `numpy` 与 `matplotlib` **不在 requirements.txt 中**，是 akshare / pandas 带入的传递依赖（实测环境：numpy 2.5.3、matplotlib 3.11.2）。全库无 `import numpy` / `import matplotlib`，绘图一律由前端 ECharts 在浏览器内完成。
+> ECharts 5.5 已 vendored 于 `app/web/static/echarts.min.js`（约 1MB），**本地托管、离线可用**，页面不依赖外部 CDN。
 
 ---
 
@@ -404,6 +436,11 @@ pip install -r requirements.txt
     HTTP 200 但数据为空。`MarketService.fetch_company_profile()` 已实现，
     在接口开放的环境可直接用于补齐 `securities.industry` / `list_date`；
     接口不可用时以 `reference.index_memberships` 的指数成分作为同业分组的替代维度。
+14. **Web 分析服务（`serve_web.py`）的并发约束**：
+    - 服务只监听 `127.0.0.1`，单用户本地工具，**不设鉴权、不对外暴露**；若将来要开放到局域网，必须先补鉴权。
+    - `app.web.api` 内有**全局 `threading.Lock`**：所有 facade 调用（取数 + 可能的回写）串行执行，纯内存统计在锁外并行。实测 8 并发请求全部成功（0.12s）。新增接口时**务必沿用这把锁**，不要绕过它直连 facade。
+    - **DuckDB 同文件跨进程单写者**：Web 服务运行期间不要同时跑 `sync_market_data.py`，否则后启动的一方会拿锁失败（报 `Could not set lock`）。先停同步、或先停服务再同步。
+    - 未知代码或远端回退时接口耗时可达数秒（实测 5.7s），属正常现象，前端已带 loading 态。
 
 ---
 
