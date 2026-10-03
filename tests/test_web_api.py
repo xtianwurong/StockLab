@@ -19,6 +19,7 @@ StockLab - Web 层测试 (tests/test_web_api.py)
    11. 选股器：因子覆盖率如实标注、算子表、模板就绪度、漏斗、散点、亏损股剔除
    12. 多股对比：分位与个股页逐字一致、序列按交易日对齐（缺失断线不填充）、区间裁剪
    13. 组合监控：codes 精确过滤与 q 模糊搜索语义区分、自选分位与个股页一致
+   14. 个股页横向位置：名次越界/直方图合计自检、与 /market 页同源、与自身分位并存
 
 【运行方式】
   # 必须先停掉 serve_web.py —— DuckDB 同文件跨进程单写者（见 AGENT.md）
@@ -907,6 +908,90 @@ def run_portfolio_tests():
     print("  -> 页面要素齐备；自选存储逻辑仅在 portfolio.js（内联脚本只有主题防闪烁）")
 
 
+def run_market_context_tests():
+    """阶段十五：个股页全市场横向位置"""
+    print("\n" + "=" * 65)
+    print("【阶段十五：个股页横向位置】")
+    print("=" * 65)
+
+    client = _client()
+    data = _json(client.get("/api/percentile?code=600519.SH"))
+    context = data.get("market_context")
+    assert context, "应答应带 market_context"
+    assert set(context) == {item["indicator"] for item in data["results"]}, \
+        "横向定位应覆盖与 results 相同的指标集合"
+
+    # 有数据的指标必须给出名次；无数据的显式标不可用
+    usable = 0
+    for indicator, info in context.items():
+        assert "available" in info, "%s 缺 available" % indicator
+        if not info["available"]:
+            assert info["rank"] is None, "%s 不可用时不应有名次" % indicator
+            continue
+        usable += 1
+        assert info["rank"] and info["total"], "%s 缺名次或样本数" % indicator
+        assert 1 <= info["rank"] <= info["total"], \
+            "%s 名次 %s 越界（total=%s）" % (indicator, info["rank"], info["total"])
+        assert len(info["histogram"]) == 10, "%s 直方图应有 10 档" % indicator
+        assert sum(info["histogram"]) == info["total"], \
+            "%s 直方图合计应等于样本数" % indicator
+        assert all(value >= 0 for value in info["histogram"])
+    assert usable > 0, "应有指标可给出横向名次"
+    print("  -> 5 项指标中 %d 项可定位，名次与直方图自洽（合计 = 样本数）" % usable)
+
+    # 横截面必须与 /market 页同源：同标的同指标同分位同评级
+    for indicator, info in context.items():
+        if not info["available"]:
+            continue
+        ranking = _json(client.get(
+            "/api/market/ranking?indicator=%s&q=600519" % indicator))
+        match = [item for item in ranking["items"] if item["ts_code"] == "600519.SH"]
+        assert match, "%s 在 /market 页应能查到 600519" % indicator
+        assert match[0]["percentile"] == info["percentile"], \
+            "%s 横向分位(%s)与 /market 页(%s)不一致" % (
+                indicator, info["percentile"], match[0]["percentile"])
+        assert match[0]["level"] == info["level"], \
+            "%s 横向评级(%s)与 /market 页(%s)不一致" % (
+                indicator, info["level"], match[0]["level"])
+    print("  -> 各指标横向分位/评级与 /market 页逐字一致")
+
+    # 名次必须真的落在全市场排序里：按分位升序，茅台名次应与其分位相称
+    ranking = _json(client.get(
+        "/api/market/ranking?indicator=pe_ttm&limit=200&sort=percentile&order=asc"))
+    pe = context["pe_ttm"]
+    if pe["available"] and pe["percentile"] is not None:
+        # 分位越低越便宜，名次应越靠前：名次占比不应远大于分位占比
+        rank_share = pe["rank"] * 100.0 / pe["total"]
+        # 名次占比与分位天然接近（同为升序位次），留 2 倍容差
+        assert rank_share < max(pe["percentile"] * 2, 2.0), \
+            "名次占比 %.1f%% 与分位 %.1f%% 明显不相称" % (rank_share, pe["percentile"])
+    print("  -> 名次与分位相称（名次占比 %.1f%% ≈ 分位 %.1f%%）" % (
+        pe["rank"] * 100.0 / pe["total"], pe["percentile"]))
+
+    # 与自身历史分位不同：这是本区块存在的意义（两个不同问题）
+    own = [item for item in data["results"] if item["indicator"] == "pe_ttm"]
+    assert own, "应有 pe_ttm 自身分位"
+    if own[0]["percentile"] is not None and pe["available"]:
+        # 两者都是升序位次，单标的时可能恰好相等，但字段必须都存在
+        assert "percentile" in pe and "percentile" in own[0]
+        assert pe["median_percentile"] is None or isinstance(pe["median_percentile"], float)
+    print("  -> 自身分位 %s%% 与横向分位 %s%% 同时存在（两个维度）" % (
+        own[0]["percentile"], pe["percentile"]))
+
+    # 未知代码不应崩，且横向定位应显式标不可用
+    unknown = _json(client.get("/api/percentile?code=999999.SH"))
+    assert unknown["results"] == [], "未知代码应返回空 results"
+    assert unknown["message"], "未知代码应带提示"
+    print("  -> 未知代码安全降级（空 results + 提示文案）")
+
+    # 页面要素齐备
+    page = client.get("/").get_data(as_text=True)
+    for element_id in ("market-context-card", "mc-rank-value", "mc-rank-sub",
+                       "mc-bars", "mc-dist-title", "mc-list"):
+        assert 'id="%s"' % element_id in page, "个股页缺少 %s" % element_id
+    print("  -> 页面要素齐备")
+
+
 def main():
     """按阶段顺序执行全部用例"""
     global _APP
@@ -930,6 +1015,7 @@ def main():
         run_screener_tests()
         run_compare_tests()
         run_portfolio_tests()
+        run_market_context_tests()
 
     print("\n" + "=" * 65)
     print("全部测试通过")

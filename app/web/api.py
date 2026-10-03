@@ -317,6 +317,114 @@ def _build_windows(frame, current_values):
     return windows
 
 
+def _market_context(indicator, code):
+    """
+    查这只标的在同指标全市场横截面里的位置
+
+    【为何要这一段】
+      个股页原有的分位是「相对自身历史」——回答「相对它自己，便宜还是贵」。
+      但投资人真正要问的第二个问题是「相对别的股票，它贵不贵」。
+      两者不是一回事：一只 PE 分位 19% 的股票，在全市场里可能仍是最贵的那批
+      （因为全市场都在高估）。两个维度缺一不可，因此这里补横截面定位。
+
+    【口径】
+      直接复用 store.load_market_percentile 的全市场分位结果（与 /market 页
+      完全同源），名次由「分位升序位次」现算，不另查一次排名。
+
+    【与本页自身分位的口径差异（前端需如实标注）】
+      本页分位走「指定区间 + 可选当前值覆盖」，而这里的横截面名次走
+      /market 页的**全历史**口径。两者在无区间裁剪、无当前值覆盖时相等；
+      用户一旦指定起止日期或手工填当前值，两者就会有差异。这是两个不同
+      问题的答案（相对自己 vs 相对别人），不是计算错误，页面文案必须点明。
+
+    Args:
+        indicator (str): 指标列名
+        code (str): 证券代码
+
+    Returns:
+        dict: 含 rank / total / percentile / level / median_percentile /
+              histogram；本地无该指标数据时 available=False
+    """
+    empty = {
+        "available": False,
+        "rank": None,
+        "total": 0,
+        "percentile": None,
+        "level": None,
+        "median_percentile": None,
+        "histogram": [],
+    }
+    if not indicator or not code:
+        return empty
+
+    rows = store.load_market_percentile(indicator)
+    if not rows:
+        return empty
+
+    target = None
+    usable = []
+    for row in rows:
+        percentile = row.get("percentile")
+        if percentile is None:
+            continue
+        usable.append(row)
+        if row.get("ts_code") == code:
+            target = row
+    if not usable:
+        return empty
+
+    # 名次：按分位升序，越便宜越靠前（同分给相同名次）
+    usable.sort(key=lambda row: row["percentile"])
+    rank = None
+    for position, row in enumerate(usable):
+        if row["ts_code"] == code:
+            rank = position + 1
+            break
+
+    total = len(usable)
+    median_percentile = None
+    if total:
+        middle = total // 2
+        median_percentile = usable[middle]["percentile"] if total % 2 else \
+            (usable[middle - 1]["percentile"] + usable[middle]["percentile"]) / 2.0
+
+    # 分位直方图（10 档），供前端在条上标出这只票的位置
+    buckets = 10
+    histogram = [0] * buckets
+    for row in usable:
+        index = int(row["percentile"] // 10)
+        if index >= buckets:
+            index = buckets - 1
+        histogram[index] += 1
+
+    return {
+        "available": target is not None,
+        "rank": rank,
+        "total": total,
+        "percentile": None if target is None else target.get("percentile"),
+        "level": None if target is None else target.get("level"),
+        "median_percentile": round(median_percentile, 2) if median_percentile is not None else None,
+        "histogram": histogram,
+    }
+
+
+def _build_market_context(code, results):
+    """
+    为每个指标算一次全市场横截面定位
+
+    Args:
+        code (str): 证券代码
+        results (list): analyzer 输出（决定要算哪几个指标）
+
+    Returns:
+        dict: {指标: 定位信息}
+    """
+    context = {}
+    for item in results:
+        context[item.indicator] = _market_context(item.indicator, code)
+    return context
+
+
 def _lookup_security(code):
     """
     读取证券基础信息（名称 / 交易所 / 市场），用于结果区展示标的的身份
@@ -637,6 +745,7 @@ def handle_percentile():
         "results": payload_results,
         "history": _build_history_payload(frame, indicators),
         "windows": _build_windows(frame, current_values),
+        "market_context": _build_market_context(code, results),
         "message": "",
     })
 

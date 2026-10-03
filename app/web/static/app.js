@@ -345,12 +345,120 @@
     renderMetricCards(data);
     renderIndicatorTabs(data);
     renderDetailTable(data);
+    renderMarketContext(data);
     renderTrendChart();
 
     var legendBox = document.getElementById("metric-legend");
     if (legendBox) {
       legendBox.innerHTML = SL.levelLegend();
     }
+  }
+
+  /**
+   * 渲染「全市场横向位置」区块
+   *
+   * 【回答的是另一个问题】
+   *   上方的分位回答「相对它自己，贵不贵」；这里回答「相对别的股票，贵不贵」。
+   *   全市场 PE 分位 20% 的股票仍可能是全市场最贵的一批（因为大家都在高估），
+   *   两个维度缺一不可。横截面名次复用 /market 页的全市场分位结果，
+   *   名次由分位升序位次现算，与该页口径完全一致。
+   *
+   * @param {object} data 应答
+   * @returns {void}
+   */
+  function renderMarketContext(data) {
+    var box = document.getElementById("market-context-card");
+    if (!box) {
+      return;
+    }
+    var context = data.market_context || {};
+    var primary = primaryIndicator;
+    var info = context[primary];
+    if (!info || !info.available) {
+      box.className = "card section hidden";
+      return;
+    }
+    box.className = "card section";
+
+    var meta = buildMeta(data);
+    var primaryLabel = meta[primary] || primary;
+
+    document.getElementById("mc-hint").textContent =
+      "全市场口径（全部历史）：" + SL.formatInt(info.total) +
+      " 只可比标的，名次越靠前越便宜。本页上方分位走自选区间，两者口径不同，不要直接比大小。";
+
+    document.getElementById("mc-rank-label").textContent = primaryLabel + " 全市场名次";
+    var rankValue = document.getElementById("mc-rank-value");
+    var rankSub = document.getElementById("mc-rank-sub");
+    if (info.rank) {
+      rankValue.textContent = "第 " + SL.formatInt(info.rank) + " / " + SL.formatInt(info.total);
+      // 名次换算成「比多少只更便宜」，比单看名次好读
+      var cheaper = info.rank - 1;
+      var share = info.total ? (cheaper * 100 / info.total).toFixed(1) : "-";
+      rankSub.textContent =
+        "比 " + SL.formatInt(cheaper) + " 只更便宜（占 " + share + "%）";
+    } else {
+      rankValue.textContent = "-";
+      rankSub.textContent = "该标的未进入全市场可比范围";
+    }
+    var rankLevel = SL.levelOf(info.percentile);
+    rankValue.style.color = rankLevel ? SL.cssColor(rankLevel.color) : "var(--text-main)";
+
+    // 分布直方图：10 档，柱色按档位语义，命中这只票的那档描边高亮
+    var histogram = info.histogram || [];
+    var peak = 1;
+    histogram.forEach(function (value) {
+      peak = Math.max(peak, value);
+    });
+    var selfBucket = -1;
+    if (info.percentile !== null && info.percentile !== undefined) {
+      selfBucket = Math.min(9, Math.floor(info.percentile / 10));
+    }
+
+    var barsBox = document.getElementById("mc-bars");
+    barsBox.textContent = "";
+    histogram.forEach(function (value, index) {
+      var barLevel = SL.levelOf(index * 10 + 5);
+      var bar = SL.el("div", "mc-bar" + (index === selfBucket ? " is-self" : ""));
+      bar.style.height = Math.max(3, Math.round(value * 100 / peak)) + "%";
+      if (barLevel) {
+        bar.style.background = SL.cssColor(barLevel.color);
+        bar.style.opacity = index === selfBucket ? "1" : "0.6";
+      }
+      bar.appendChild(SL.el("span", "mc-bar-count", SL.formatInt(value)));
+      bar.setAttribute(
+        "data-tip",
+        (index * 10) + "~" + ((index + 1) * 10) + "%：" + SL.formatInt(value) +
+        " 只" + (index === selfBucket ? "（含本标的）" : "")
+      );
+      barsBox.appendChild(bar);
+    });
+    SL.ui.bindTooltips(barsBox);
+
+    document.getElementById("mc-dist-title").textContent =
+      "全市场" + primaryLabel + "分位分布" +
+      (info.median_percentile === null || info.median_percentile === undefined
+        ? ""
+        : "（中位 " + info.median_percentile + "%）");
+
+    // 各指标名次一览
+    var listBox = document.getElementById("mc-list");
+    listBox.textContent = "";
+    Object.keys(context).forEach(function (indicator) {
+      var item = context[indicator];
+      var chip = SL.el("span", "mc-chip");
+      chip.appendChild(SL.el("span", "mc-chip-k", meta[indicator] || indicator));
+      var value = SL.el("span", "mc-chip-v",
+        (item && item.available && item.rank)
+          ? "第 " + SL.formatInt(item.rank) + " / " + SL.formatInt(item.total)
+          : "-");
+      var itemLevel = item ? SL.levelOf(item.percentile) : null;
+      value.style.color = itemLevel
+        ? SL.cssColor(itemLevel.color)
+        : "var(--text-faint)";
+      chip.appendChild(value);
+      listBox.appendChild(chip);
+    });
   }
 
   /**

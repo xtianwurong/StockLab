@@ -257,7 +257,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   - **行业估值 `/industries`**：国证行业分类 1~4 级横截面，PE 三种口径 + 规模数据，条形图 + 明细表（板块洼地判断）。
   - `server.py`：`create_app()` 装配层——**路由一律用 `app.add_url_rule()` 注册表写法，不用 `@app.route` 装饰器**（遵守本文件禁用装饰器的规定）。
   - `store.py`：**进程级数据访问单例**——(1) 单例门面 + 串行锁，修复「每请求重建门面反复抢写锁」；(2) 全市场窗口函数 SQL 与指数聚合，走本模块自己的单例连接 + 第二把锁，与门面锁互不嵌套；(3) 七档评级 `percentile_level()`、证券表与聚合结果的进程内缓存；(4) 行业估值横截面 `load_industry_valuation()` 与数据截止日期 `market_data_as_of()`。
-  - `api.py`：个股接口层——只做「参数解析 → 代码/名称解析 → store 取数 → analyzer 计算 → 组装 JSON」，纯内存统计放在锁外；`/api/health` 额外返回 `data_as_of` 数据截止日期。
+  - `api.py`：个股接口层——只做「参数解析 → 代码/名称解析 → store 取数 → analyzer 计算 → 组装 JSON」，纯内存统计放在锁外；`/api/health` 额外返回 `data_as_of` 数据截止日期。个股页给的是**两个维度**的答案：`results` 是「相对它自己贵不贵」（走自选区间 + 可选当前值覆盖），`market_context` 是「相对别的股票贵不贵」（复用 /market 页的全市场分位，名次由分位升序位次现算）。两者**口径不同、不可直接比大小**，页面文案必须点明——全市场都在高估时，一只自身分位 20% 的股票仍可能是全市场最贵的一批。
   - `market_api.py`：全市场与指数接口层——参数校验 → store 聚合 → 过滤/排序/分页，不经门面锁；`/api/market/ranking` 支持 `level` 七档评级过滤（summary 仍按过滤前口径统计）与 `codes` **精确 ts_code 集合过滤**（与 `q` 的「代码或名称子串匹配」语义不同、不可互替），组合监控页据此一次拉回自选清单，**不新建接口**；`/api/industries` 行业横截面。
   - 组合监控（`/portfolio`，自选股 + 分位阈值告警）：**自选列表存浏览器 localStorage、不落服务端**——告警是「打开页面看一眼」的辅助，不是需要后台常驻的任务，落库反而要处理多用户与过期。全市场名次由分位升序位次**现算**（分位本身就是「严格低于当前值的样本占比」，两者同源，另查排名只是多扫一次全表）。数据仍走既有 `/api/market/ranking`，PE / PB 各请求一次后按 `ts_code` 合并。
   - `screener_api.py`：选股器接口（`/api/screener/meta` 因子覆盖率+算子+模板就绪度、`/api/screener/run` 执行）。**只做编排**：筛选委托 `stocklab.screener.ScreenPipeline`、取数委托 `stocklab.research.frame.build_factor_frame`；因子帧按 as-of 缓存；数据库连接向 `store.facade_database()` **借用门面那一个**（DuckDB 同文件只允许一个写连接，另建会抛 `Could not set lock`）。默认注入 `pe_ttm > 0` 剔除亏损股——否则「PE<15」会把 PE 为负的亏损股全放进来，与估值分位页「亏损期剔除」口径相矛盾。
