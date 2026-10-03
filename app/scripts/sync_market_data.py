@@ -6,10 +6,11 @@ StockLab - A 股市场数据同步 CLI (app/scripts/sync_market_data.py)
 
 【功能用途】
    独立的数据同步入口，负责将全市场 A 股数据从公开数据源同步到本地 DuckDB。
-   三个阶段通过子命令分开操作，也可不带子命令一键全跑。
+   八个阶段通过子命令分开操作；不带子命令一键全跑阶段一 / 二 / 三 / 五 / 七，
+   阶段四（历史估值）、六（行业估值）、八（基本面）按需显式触发。
 
 【运行方式】
-   # 一键全跑（阶段一 -> 阶段二 -> 阶段三）
+   # 一键全跑（阶段一 -> 二 -> 三 -> 五 -> 七；四 / 六 / 八需显式子命令）
    python app/scripts/sync_market_data.py --start-date 2025-01-01 --end-date 2026-09-30
    python app/scripts/sync_market_data.py --incremental
 
@@ -31,6 +32,13 @@ StockLab - A 股市场数据同步 CLI (app/scripts/sync_market_data.py)
 
    # 阶段六：仅同步行业估值横截面（板块洼地判断依据）
    python app/scripts/sync_market_data.py industries --stat-date 2026-09-30
+
+   # 阶段七：同步证券生命周期（沪深北上市日历 + 退市日历 -> status / 事件）
+   python app/scripts/sync_market_data.py lifecycle
+
+   # 阶段八：同步 Point-in-Time 基本面（三大报表 + 财务指标，耗时较长）
+   python app/scripts/sync_market_data.py fundamentals --ts-code 600519.SH
+   python app/scripts/sync_market_data.py fundamentals --workers 8
 """
 
 import argparse
@@ -46,13 +54,22 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from stocklab.common.http_client import install_browser_user_agent
+from stocklab.datasource.fundamental_service import FundamentalService
+from stocklab.datasource.lifecycle_service import LifecycleService
 from stocklab.datasource.market_service import MarketService
+from stocklab.fundamental import build_financial_indicators
+from stocklab.normalization.exchange import build_lifecycle_events, merge_lifecycle
 from stocklab.persistence import (
+    BalanceSheetRepository,
+    CashflowStatementRepository,
     DailyPriceRepository,
     DailyValuationRepository,
     Database,
+    FinancialIndicatorRepository,
     IndexMembershipRepository,
+    IncomeStatementRepository,
     IndustryValuationRepository,
+    SecurityEventRepository,
     SecurityRepository,
     ValuationHistoryRepository,
     initialize_database,
@@ -83,20 +100,25 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=(
             "A 股市场数据同步工具 - 将全市场数据同步到本地 DuckDB\n\n"
-            "子命令（缺省 = 一键全跑前三个阶段）：\n"
+            "子命令（缺省 = 一键全跑阶段一 / 二 / 三 / 五 / 七）：\n"
             "  securities         阶段一：同步股票基础信息（约 18 次子请求，几十秒）\n"
             "  prices             阶段二：同步日 K 行情（逐只抓取，全历史约 5400 次请求）\n"
             "  valuations         阶段三：同步最新全市场估值快照（1 次请求）\n"
             "  valuation-history  阶段四：同步历史估值序列（逐只抓取，用于历史分位；耗时最长）\n"
             "  indexes             阶段五：同步主流宽基指数成分（同业分组维度；约 6 次请求，数秒）\n"
-            "  industries          阶段六：同步行业估值横截面（板块洼地判断依据；默认不参与全跑）"
+            "  industries          阶段六：同步行业估值横截面（板块洼地判断依据；默认不参与全跑）\n"
+            "  lifecycle           阶段七：同步证券生命周期（上市/退市日历 -> status 与事件）\n"
+            "  fundamentals        阶段八：同步 Point-in-Time 基本面（逐只抓取；默认不参与全跑）"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["securities", "prices", "valuations", "valuation-history", "indexes", "industries"],
+        choices=[
+            "securities", "prices", "valuations", "valuation-history",
+            "indexes", "industries", "lifecycle", "fundamentals",
+        ],
         default=None,
         help="要执行的同步阶段（不传则按顺序全跑）",
     )
@@ -122,7 +144,13 @@ def parse_args():
         "--workers",
         type=int,
         default=8,
-        help="valuation-history 阶段的取数并发线程数（默认 8；实测 12 仍稳定）",
+        help="valuation-history / fundamentals 阶段的取数并发线程数（默认 8；实测 12 仍稳定）",
+    )
+    parser.add_argument(
+        "--ts-code",
+        type=str,
+        default=None,
+        help="fundamentals 阶段限定的证券代码，逗号分隔（如 600519.SH,000001.SZ）；缺省为全市场",
     )
     parser.add_argument(
         "--start-date",
@@ -439,6 +467,158 @@ def sync_valuations(database):
     return True
 
 
+def sync_lifecycle(database):
+    """
+    阶段七：同步证券生命周期（上市/退市日历 → 主表日期与状态 + 生命周期事件）
+
+    【为什么必须单独一阶段】
+       东财名录只含当前在市证券，退市股票不在其中；历史研究若直接拿
+       「当前股票池」当样本，会把未来退市的公司从历史里抹掉 → 幸存者偏差。
+       本阶段从沪深北交易所官网取上市日历与退市日历，回填 list_date / delist_date、
+       推导 status，并写入 reference.security_events，
+       使 SecurityRepository.universe(as_of) 能还原任意历史时点的证券集合。
+
+    【失败语义】
+       任一来源抓取失败即整体不写入：日历不完整时写入「部分股票有退市日、
+       部分没有」的半成品，比不写更危险（会静默污染股票池推导）。
+
+    Args:
+        database (Database): 数据库连接管理器
+
+    Returns:
+        bool: 是否同步成功
+    """
+    _logger.info("=" * 60)
+    _logger.info("阶段七：同步证券生命周期（沪深北上市日历 + 退市日历）")
+    _logger.info("=" * 60)
+
+    service = LifecycleService()
+
+    listing = service.fetch_listing_calendar()
+    if listing.empty:
+        _logger.error("上市日历获取失败，生命周期同步中止（不写入任何数据）")
+        return False
+
+    delisting = service.fetch_delisting_calendar()
+    if delisting.empty:
+        _logger.error("退市日历获取失败，生命周期同步中止（不写入任何数据）")
+        return False
+
+    securities_repository = SecurityRepository(database)
+    merged = merge_lifecycle(securities_repository.find_all(), listing, delisting)
+    if securities_repository.upsert_lifecycle(merged) == 0:
+        _logger.error("证券主表生命周期字段写入失败")
+        return False
+
+    events = build_lifecycle_events(listing, delisting)
+    event_count = SecurityEventRepository(database).upsert(events)
+    if event_count == 0:
+        _logger.error("生命周期事件写入失败")
+        return False
+
+    _logger.info(
+        "生命周期同步完成: 证券 %d 只（上市日历 %d、退市 %d），事件 %d 条",
+        len(merged), len(listing), len(delisting), event_count,
+    )
+    return True
+
+
+def sync_fundamentals(database, ts_code_list=None, max_workers=8):
+    """
+    阶段八：同步 Point-in-Time 基本面数据（三大报表 + 财务指标）
+
+    【并发设计（与阶段四一致）】
+       单只股票约 60 次 HTTP 请求（按报告期分批），全市场约 35 万次请求，
+       数小时量级。DuckDB 连接非线程安全，因此**并发只用于取数**，
+       结果回收到主线程后由单一连接串行落库。
+
+    【写入顺序】
+       利润表 / 资产负债表 / 现金流量表 → 由前两者派生 financial_indicators。
+       派生失败不影响报表入库（指标可事后重算，报表才是原始事实）。
+
+    Args:
+        database (Database): 数据库连接管理器
+        ts_code_list (list, optional): 指定同步的证券代码；为空时同步全市场
+        max_workers (int, optional): 取数并发线程数，默认 8
+
+    Returns:
+        bool: 是否同步成功（全部失败时返回 False）
+    """
+    _logger.info("=" * 60)
+    _logger.info(
+        "阶段八：同步 Point-in-Time 基本面（并发 %d）", max_workers
+    )
+    _logger.info("=" * 60)
+
+    securities = SecurityRepository(database).find_all()
+    if securities.empty:
+        _logger.error("证券列表为空，请先执行: sync_market_data.py securities")
+        return False
+
+    if ts_code_list:
+        targets = list(ts_code_list)
+        _logger.info("限定同步 %d 只指定标的", len(targets))
+    else:
+        targets = securities["ts_code"].tolist()
+        _logger.info("全市场 %d 只，逐只抓取三大报表（耗时以小时计）", len(targets))
+
+    income_repository = IncomeStatementRepository(database)
+    balance_repository = BalanceSheetRepository(database)
+    cashflow_repository = CashflowStatementRepository(database)
+    indicator_repository = FinancialIndicatorRepository(database)
+
+    service = FundamentalService()
+
+    def fetch_one(ts_code):
+        """工作线程任务：只做取数与归一化，不触碰数据库"""
+        try:
+            return ts_code, (
+                service.fetch_income_statement(ts_code),
+                service.fetch_balance_sheet(ts_code),
+                service.fetch_cashflow_statement(ts_code),
+            )
+        except Exception as error:
+            _logger.debug("并发取数异常 [%s]: %s", ts_code, error)
+            return ts_code, (pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+
+    success_count = 0
+    failed_count = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for index, (ts_code, frames) in enumerate(executor.map(fetch_one, targets)):
+            income, balance, cashflow = frames
+
+            if income.empty:
+                failed_count += 1
+            else:
+                income_repository.upsert(income)
+                if balance.empty:
+                    _logger.warning("[%s] 资产负债表缺失，财务指标暂按 NaN 写入", ts_code)
+                else:
+                    balance_repository.upsert(balance)
+                if not cashflow.empty:
+                    cashflow_repository.upsert(cashflow)
+                indicators = build_financial_indicators(income, balance)
+                if not indicators.empty:
+                    indicator_repository.upsert(indicators)
+                success_count += 1
+
+            # 全市场耗时以小时计，无进度反馈难以判断是否卡死
+            if (index + 1) % 20 == 0:
+                _logger.info(
+                    "进度 %d/%d | 成功 %d 只 | 失败 %d 只",
+                    index + 1, len(targets), success_count, failed_count,
+                )
+
+    _logger.info(
+        "基本面同步完成: 成功 %d 只，失败 %d 只", success_count, failed_count
+    )
+    if success_count == 0:
+        _logger.error("全部 %d 只标的基本面抓取失败", len(targets))
+        return False
+    return True
+
+
 def run_prices_stage(args, database):
     """执行阶段二：确定日期范围并同步日 K 行情，返回是否成功"""
     start_date, end_date, skip = resolve_price_dates(args, database)
@@ -516,6 +696,26 @@ def main():
         if command == "industries":
             stat_date = args.stat_date if args.stat_date else datetime.now().strftime("%Y-%m-%d")
             if not sync_industry_valuation(database, stat_date, args.classification):
+                sys.exit(1)
+            return
+
+        # 阶段七：同步证券生命周期（参与一键全跑：仅 6 次请求，且是历史研究的前提）
+        if command in (None, "lifecycle"):
+            if not sync_lifecycle(database):
+                _logger.error("证券生命周期同步失败")
+                sys.exit(1)
+            if command == "lifecycle":
+                return
+
+        # 阶段八：同步基本面（默认不参与一键全跑：逐只抓取，耗时以小时计）
+        if command == "fundamentals":
+            ts_codes = None
+            if args.ts_code:
+                ts_codes = [
+                    item.strip() for item in args.ts_code.split(",") if item.strip()
+                ]
+            if not sync_fundamentals(database, ts_codes, max_workers=args.workers):
+                _logger.error("基本面同步失败")
                 sys.exit(1)
             return
 
