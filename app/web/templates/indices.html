@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockLab - 指数估值</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/base.css">
+  <script src="/static/echarts.min.js"></script>
+  <style>
+    .toolbar { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+
+    /* ---------- 指数卡片 ---------- */
+    .index-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+      gap: 14px;
+    }
+    .index-card {
+      padding: 15px 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      cursor: pointer;
+      transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+    }
+    .index-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+    .index-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.13); }
+    .index-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .index-name { font-size: 15.5px; font-weight: 680; }
+    .index-code { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); }
+    .index-value { font-size: 31px; font-weight: 700; font-family: var(--mono); line-height: 1.15; margin: 8px 0 2px; }
+    .index-current { font-size: 12.5px; color: var(--text-muted); font-family: var(--mono); }
+    .index-facts {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 11px;
+      border-top: 1px solid var(--border-color);
+      font-size: 11.5px;
+      color: var(--text-faint);
+    }
+    .index-facts b { display: block; color: var(--text-sub); font-family: var(--mono); font-size: 13px; font-weight: 650; margin-top: 2px; }
+    .index-temp { margin-top: 12px; }
+
+    /* ---------- 详情 ---------- */
+    .detail-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .detail-name { font-size: 18px; font-weight: 700; }
+    .detail-facts { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); }
+    .detail-facts b { color: var(--text-sub); font-weight: 650; font-family: var(--mono); }
+    #index-chart { width: 100%; height: 380px; }
+
+    @media (max-width: 860px) {
+      #index-chart { height: 300px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">S</span>StockLab</a>
+    <nav class="nav">
+      <a class="nav-link" href="/">个股分析</a>
+      <a class="nav-link" href="/market">全市场</a>
+      <a class="nav-link active" href="/indices">指数估值</a>
+    </nav>
+    <div class="topbar-right">
+      <span><span class="status-dot" id="status-dot"></span><span id="status-text">检测中</span></span>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="page-head">
+      <div class="page-title">指数估值</div>
+      <div class="page-desc">
+        指数估值 = 成分股估值的中位数（剔除亏损样本），再套用与个股一致的分位口径。
+        点击卡片查看该指数的历史走势与分位参考线。
+      </div>
+    </div>
+
+    <section class="card card-pad">
+      <div class="toolbar">
+        <div class="field">
+          <label class="field-label">估值指标</label>
+          <div class="tabs" id="indicator-tabs"></div>
+        </div>
+        <div class="toolbar-spacer" style="flex:1"></div>
+        <button class="btn btn-primary" id="btn-reload">刷新</button>
+      </div>
+    </section>
+
+    <div class="message" id="message" style="margin-top:14px"></div>
+
+    <section class="index-grid section" id="index-grid"></section>
+
+    <!-- 详情 -->
+    <section class="card section hidden" id="detail-card">
+      <div class="card-head">
+        <div class="detail-head">
+          <span class="detail-name" id="detail-name">-</span>
+          <span class="index-code" id="detail-code">-</span>
+          <div class="detail-facts" id="detail-facts"></div>
+        </div>
+        <div class="card-hint" id="detail-hint">阴影为 25%~75% 分位带，虚线为 10% / 90% 分位参考线</div>
+      </div>
+      <div class="card-pad"><div id="index-chart"></div></div>
+    </section>
+
+    <section class="card section" id="empty-detail">
+      <div class="empty-state">
+        <div class="empty-state-title">点击上方任意指数卡片</div>
+        查看该指数的估值走势、分位参考线与档位结论。
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/indices.js"></script>
+</body>
+</html>

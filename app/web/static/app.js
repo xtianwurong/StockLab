@@ -1,10 +1,19 @@
 /*
- * StockLab 分析页前端逻辑 (app/web/static/app.js)
+ * StockLab 个股分析页前端逻辑 (app/web/static/app.js)
  *
  * 职责：
- *   1. 证券代码/名称联想（/api/securities）
- *   2. 触发分位分析（/api/percentile）并渲染卡片、明细表
- *   3. ECharts 绘制区间内历史估值走势 + 当前值横线
+ *   1. 证券代码/名称联想（/api/securities），键盘可完整操作
+ *   2. 触发分位分析（/api/percentile）并渲染：标的信息 / 主指标 / 多窗口 /
+ *      指标卡 / 走势图 / 明细表
+ *   3. 把查询条件写回地址栏，刷新与分享均可还原结果
+ *
+ * 【本版修复的交互缺陷】
+ *   - Enter 在联想列表打开时毫无反应 -> 单一 keydown 处理，Enter 永远有明确行为
+ *   - 分析失败时旧结果残留 -> 失败即清理结果区
+ *   - 请求无超时导致按钮永久「分析中...」-> 统一走 SL.fetchJson（15s 超时）
+ *   - 联想项用 innerHTML 拼接存在注入风险 -> 全部改用 textContent 构建
+ *   - 结果区不显示标的名称 -> 新增标的信息头
+ *   - 刷新即丢失结果 -> 查询条件写入 URL，加载时自动还原
  *
  * 说明：本文件为浏览器端脚本，与 Python 侧无共享约束，保持原生 JS 直白写法。
  */
@@ -18,117 +27,124 @@
   var periodSelect = document.getElementById("period-select");
   var startDateInput = document.getElementById("start-date");
   var endDateInput = document.getElementById("end-date");
+  var inputPe = document.getElementById("input-pe");
+  var inputPb = document.getElementById("input-pb");
   var btnAnalyze = document.getElementById("btn-analyze");
   var messageBox = document.getElementById("message");
   var resultArea = document.getElementById("result-area");
-  var cardsBox = document.getElementById("cards");
+  var emptyState = document.getElementById("empty-state");
+  var metricGrid = document.getElementById("metric-grid");
+  var indicatorTabs = document.getElementById("indicator-tabs");
   var detailBody = document.getElementById("detail-body");
-  var metaInterval = document.getElementById("meta-interval");
-  var metaRows = document.getElementById("meta-rows");
-  var metaPriority = document.getElementById("meta-priority");
+  var windowsBox = document.getElementById("windows");
+  var chartDom = document.getElementById("trend-chart");
 
-  var chart = null;          // ECharts 实例
-  var suggestTimer = null;   // 联想防抖计时器
-  var suggestItems = [];     // 当前联想结果
-  var activeIndex = -1;      // 键盘选中的联想项
+  // ---------- 状态 ----------
+  var suggestItems = [];     // 联想命中项
+  var activeIndex = -1;      // 键盘高亮位置
+  var suggestTimer = null;   // 输入防抖计时器
+  var lastPayload = null;    // 最近一次成功的分析结果
+  var primaryIndicator = "pe_ttm";
+  var trendChart = null;
+  var busy = false;          // 请求进行中，防止重复提交
 
-  var LEVEL_CLASS = {
-    "相对低位": "level-low",
-    "中性": "level-mid",
-    "相对高位": "level-high"
-  };
+  // ---------- 工具 ----------
 
-  var PRIORITY_TEXT = {
-    "local_first": "本地库优先",
-    "remote_first": "远端接口优先"
-  };
-
-  // ---------- 工具函数 ----------
-
+  /**
+   * 显示消息条
+   *
+   * @param {string} text 文本
+   * @param {string} kind info | error
+   */
   function showMessage(text, kind) {
     messageBox.textContent = text;
-    messageBox.className = "message " + (kind || "info");
+    messageBox.className = "message show " + (kind || "info");
   }
 
+  /**
+   * 清空消息条
+   */
   function clearMessage() {
     messageBox.textContent = "";
     messageBox.className = "message";
   }
 
-  function formatNumber(value) {
-    if (value === null || value === undefined) {
-      return "-";
+  /**
+   * 清理结果区（分析开始前或失败时调用，避免旧结果被误读为新结果）
+   */
+  function clearResult() {
+    lastPayload = null;
+    resultArea.className = "hidden";
+    emptyState.className = "card section";
+    if (trendChart) {
+      trendChart.clear();
     }
-    if (Math.abs(value) >= 1000) {
-      return value.toFixed(0);
-    }
-    return value.toFixed(2);
   }
 
-  function formatPercent(value) {
-    if (value === null || value === undefined) {
-      return "-";
+  /**
+   * 创建带指定文本的元素
+   *
+   * @param {string} tag 标签名
+   * @param {string} className class
+   * @param {string} text 文本内容
+   * @returns {HTMLElement} 元素
+   */
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) {
+      node.className = className;
     }
-    return value.toFixed(1) + "%";
+    if (text !== undefined && text !== null) {
+      node.textContent = text;
+    }
+    return node;
   }
 
-  // ---------- 证券联想 ----------
+  // ---------- 联想 ----------
 
-  function hideSuggest() {
-    suggestList.className = "suggest-list";
-    suggestList.innerHTML = "";
-    suggestItems = [];
-    activeIndex = -1;
-  }
+  /**
+   * 渲染联想下拉（全部用 DOM 构建，杜绝 HTML 注入）
+   */
+  function renderSuggest() {
+    suggestList.textContent = "";
 
-  function renderSuggest(items) {
-    suggestItems = items;
-    activeIndex = -1;
-    if (!items.length) {
-      suggestList.innerHTML = '<div class="suggest-empty">无匹配标的</div>';
-      suggestList.className = "suggest-list open";
+    if (!suggestItems.length) {
+      suggestList.appendChild(el("div", "suggest-empty", "无匹配标的"));
+      suggestList.className = "suggest open";
       return;
     }
-    var html = "";
-    for (var i = 0; i < items.length; i++) {
-      html += '<div class="suggest-item" data-index="' + i + '">' +
-              '<span class="code">' + items[i].code + "</span>" +
-              '<span class="name">' + (items[i].name || "") + "</span></div>";
-    }
-    suggestList.innerHTML = html;
-    suggestList.className = "suggest-list open";
-  }
 
-  function fetchSuggest(query) {
-    fetch("/api/securities?q=" + encodeURIComponent(query))
-      .then(function (resp) { return resp.json(); })
-      .then(function (data) {
-        // 用户可能已继续输入，只采纳与当前输入一致的结果
-        if (query !== codeInput.value.trim()) {
-          return;
-        }
-        renderSuggest(data.items || []);
-      })
-      .catch(function () {
-        hideSuggest();
+    suggestItems.forEach(function (item, index) {
+      var row = el("div", "suggest-item" + (index === activeIndex ? " active" : ""));
+      row.appendChild(el("span", "suggest-code", item.code));
+      row.appendChild(el("span", "suggest-name", item.name || "-"));
+      row.appendChild(el("span", "suggest-industry", item.market || ""));
+      row.addEventListener("mousedown", function (event) {
+        event.preventDefault();  // 防止输入框失焦导致列表先被关闭
+        applySuggestItem(index);
       });
+      suggestList.appendChild(row);
+    });
+
+    suggestList.className = "suggest open";
+    scrollActiveIntoView();
   }
 
-  function onSuggestInput() {
-    var query = codeInput.value.trim();
-    if (suggestTimer) {
-      clearTimeout(suggestTimer);
-    }
-    if (!query) {
-      hideSuggest();
-      return;
-    }
-    // 防抖 250ms，避免每个按键都发请求
-    suggestTimer = setTimeout(function () {
-      fetchSuggest(query);
-    }, 250);
+  /**
+   * 关闭联想下拉
+   */
+  function hideSuggest() {
+    suggestList.className = "suggest";
+    suggestList.textContent = "";
+    activeIndex = -1;
+    suggestItems = [];
   }
 
+  /**
+   * 把某一条联想项回填到输入框
+   *
+   * @param {number} index 下标
+   */
   function applySuggestItem(index) {
     var item = suggestItems[index];
     if (!item) {
@@ -136,49 +152,140 @@
     }
     codeInput.value = item.code;
     hideSuggest();
-    codeInput.focus();
   }
 
-  function onSuggestKeydown(event) {
-    if (!suggestItems.length) {
+  /**
+   * 让键盘高亮项滚进可视区
+   */
+  function scrollActiveIntoView() {
+    if (activeIndex < 0) {
       return;
     }
-    if (event.key === "ArrowDown") {
-      activeIndex = (activeIndex + 1) % suggestItems.length;
-    } else if (event.key === "ArrowUp") {
-      activeIndex = (activeIndex - 1 + suggestItems.length) % suggestItems.length;
-    } else if (event.key === "Enter" && activeIndex >= 0) {
-      event.preventDefault();
-      applySuggestItem(activeIndex);
-      return;
-    } else if (event.key === "Escape") {
+    var node = suggestList.children[activeIndex];
+    if (node && node.scrollIntoView) {
+      node.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  /**
+   * 输入防抖后请求联想
+   */
+  function requestSuggest() {
+    var query = codeInput.value.trim();
+    if (!query) {
       hideSuggest();
       return;
-    } else {
+    }
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(function () {
+      SL.fetchJson("/api/securities?q=" + encodeURIComponent(query), 8000)
+        .then(function (data) {
+          if (codeInput.value.trim() !== query) {
+            return;  // 输入已变化，丢弃过期结果
+          }
+          suggestItems = data.items || [];
+          activeIndex = -1;
+          renderSuggest();
+        })
+        .catch(function () {
+          hideSuggest();
+        });
+    }, 200);
+  }
+
+  /**
+   * 输入框键盘处理（唯一的 keydown 监听，避免两个监听器互相打架）
+   *
+   * @param {KeyboardEvent} event 事件
+   */
+  function onCodeKeydown(event) {
+    var isOpen = suggestList.className.indexOf("open") !== -1;
+
+    if (event.key === "Escape") {
+      hideSuggest();
       return;
     }
-    event.preventDefault();
-    var nodes = suggestList.querySelectorAll(".suggest-item");
-    for (var i = 0; i < nodes.length; i++) {
-      nodes[i].className = "suggest-item" + (i === activeIndex ? " active" : "");
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!suggestItems.length) {
+        return;
+      }
+      event.preventDefault();
+      if (!isOpen) {
+        renderSuggest();
+      }
+      var step = event.key === "ArrowDown" ? 1 : -1;
+      activeIndex = activeIndex + step;
+      if (activeIndex < 0) {
+        activeIndex = suggestItems.length - 1;
+      }
+      if (activeIndex >= suggestItems.length) {
+        activeIndex = 0;
+      }
+      renderSuggest();
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      clearTimeout(suggestTimer);
+      hideSuggest();
+      // 有高亮项则回填其代码；没有就直接用当前输入（后端支持中文名解析）
+      if (activeIndex >= 0 && suggestItems[activeIndex]) {
+        codeInput.value = suggestItems[activeIndex].code;
+      }
+      analyze();
     }
   }
 
-  // ---------- 分析主流程 ----------
+  // ---------- 分析 ----------
 
-  function buildQueryUrl(code) {
-    var params = ["code=" + encodeURIComponent(code)];
+  /**
+   * 收集查询参数
+   *
+   * @returns {string} 查询串
+   */
+  function buildQuery() {
+    var params = [];
+    params.push("code=" + encodeURIComponent(codeInput.value.trim()));
     params.push("period=" + encodeURIComponent(periodSelect.value));
     if (startDateInput.value) {
-      params.push("start_date=" + encodeURIComponent(startDateInput.value));
+      params.push("start_date=" + startDateInput.value);
     }
     if (endDateInput.value) {
-      params.push("end_date=" + encodeURIComponent(endDateInput.value));
+      params.push("end_date=" + endDateInput.value);
     }
-    return "/api/percentile?" + params.join("&");
+    var pe = inputPe.value.trim();
+    if (pe) {
+      params.push("pe_ttm=" + encodeURIComponent(pe));
+    }
+    var pb = inputPb.value.trim();
+    if (pb) {
+      params.push("pb=" + encodeURIComponent(pb));
+    }
+    return params.join("&");
   }
 
+  /**
+   * 把查询条件写入地址栏（不新增历史记录）
+   *
+   * @param {string} query 查询串
+   */
+  function syncUrl(query) {
+    try {
+      window.history.replaceState(null, "", "?" + query);
+    } catch (err) {
+      // 某些内嵌环境禁用 pushState，忽略即可
+    }
+  }
+
+  /**
+   * 触发分析
+   */
   function analyze() {
+    if (busy) {
+      return;
+    }
     var code = codeInput.value.trim();
     if (!code) {
       showMessage("请先输入证券代码或名称", "error");
@@ -186,193 +293,381 @@
       return;
     }
 
-    hideSuggest();
     clearMessage();
+    clearResult();
+    busy = true;
     btnAnalyze.disabled = true;
     btnAnalyze.textContent = "分析中...";
 
-    fetch(buildQueryUrl(code))
-      .then(function (resp) {
-        return resp.json().then(function (data) {
-          return { ok: resp.ok, data: data };
-        });
-      })
-      .then(function (result) {
-        if (!result.ok) {
-          showMessage(result.data.error || "请求失败", "error");
+    var query = buildQuery();
+    syncUrl(query);
+
+    SL.fetchJson("/api/percentile?" + query, 20000)
+      .then(function (data) {
+        if (!data.results || !data.results.length) {
+          emptyState.className = "card section";
+          showMessage(data.message || "没有可展示的结果", "error");
           return;
         }
-        renderResult(result.data);
+        renderResult(data);
       })
       .catch(function (error) {
-        showMessage("请求失败：" + error.message, "error");
+        clearResult();
+        showMessage(error.message || "分析失败，请稍后重试", "error");
       })
       .finally(function () {
+        busy = false;
         btnAnalyze.disabled = false;
         btnAnalyze.textContent = "开始分析";
       });
   }
 
+  // ---------- 渲染 ----------
+
+  /**
+   * 渲染整块结果
+   *
+   * @param {object} data /api/percentile 应答
+   */
   function renderResult(data) {
-    if (!data.results || !data.results.length) {
-      resultArea.className = "hidden";
-      showMessage(data.message || "没有可用的分析结果", "error");
-      return;
-    }
+    lastPayload = data;
+    emptyState.className = "hidden";
+    resultArea.className = "";
 
     if (data.message) {
       showMessage(data.message, "info");
     }
 
-    metaInterval.textContent = data.interval_text || "-";
-    metaRows.textContent = "样本 " + data.sample_rows + " 个交易日";
-    metaPriority.textContent = PRIORITY_TEXT[data.priority] || data.priority;
-
-    renderCards(data.results);
-    renderTable(data.results);
-    renderChart(data.history, data.results);
-
-    resultArea.className = "";
+    renderSecurityHead(data);
+    pickPrimaryIndicator(data);
+    renderHero(data);
+    renderWindows(data);
+    renderMetricCards(data);
+    renderIndicatorTabs(data);
+    renderDetailTable(data);
+    renderTrendChart();
   }
 
-  function renderCards(results) {
-    var html = "";
-    for (var i = 0; i < results.length; i++) {
-      var item = results[i];
-      var available = item.percentile !== null;
-      var levelClass = available ? (LEVEL_CLASS[item.level] || "level-none") : "level-none";
-      var levelText = available ? item.level : "不可用";
+  /**
+   * 渲染标的信息头
+   *
+   * @param {object} data 应答
+   */
+  function renderSecurityHead(data) {
+    var security = data.security || {};
+    document.getElementById("sec-name").textContent = security.name || data.code;
+    document.getElementById("sec-code").textContent = data.code;
 
-      html += '<div class="card">' +
-              '<div class="ind">' + item.label + "</div>" +
-              '<div class="pct' + (available ? "" : " none") + '">' +
-                (available ? formatPercent(item.percentile) : "无有效样本") +
-              "</div>" +
-              '<div class="detail">当前 ' + formatNumber(item.current_value) +
-                " / 中位 " + formatNumber(item.median_value) + "</div>" +
-              '<span class="level ' + levelClass + '">' + levelText + "</span>" +
-              "</div>";
+    var facts = document.getElementById("sec-facts");
+    facts.textContent = "";
+    [
+      ["交易所", security.exchange],
+      ["市场", security.market],
+      ["代码", security.symbol]
+    ].forEach(function (pair) {
+      if (pair[1]) {
+        var span = el("span");
+        span.appendChild(document.createTextNode(pair[0] + " "));
+        span.appendChild(el("b", "", pair[1]));
+        facts.appendChild(span);
+      }
+    });
+
+    document.getElementById("meta-interval").textContent = data.interval_text || "-";
+    document.getElementById("meta-rows").textContent = SL.formatInt(data.sample_rows);
+    document.getElementById("meta-priority").textContent = data.priority || "-";
+  }
+
+  /**
+   * 选定主指标：优先保留用户已选的那个，否则取第一个分位可用的指标
+   *
+   * @param {object} data 应答
+   */
+  function pickPrimaryIndicator(data) {
+    var indicators = data.results.map(function (item) { return item.indicator; });
+    if (indicators.indexOf(primaryIndicator) !== -1) {
+      return;
     }
-    cardsBox.innerHTML = html;
+    var usable = data.results.filter(function (item) {
+      return item.percentile !== null && item.percentile !== undefined;
+    });
+    primaryIndicator = usable.length ? usable[0].indicator : (indicators[0] || "pe_ttm");
   }
 
-  function renderTable(results) {
-    var html = "";
-    for (var i = 0; i < results.length; i++) {
-      var item = results[i];
-      var levelClass = item.percentile !== null ? (LEVEL_CLASS[item.level] || "level-none") : "level-none";
-      html += "<tr>" +
-              "<td>" + item.label + "</td>" +
-              '<td class="mono">' + formatNumber(item.current_value) + "</td>" +
-              '<td class="mono">' + formatPercent(item.percentile) + "</td>" +
-              '<td class="mono">' + item.sample_count + "</td>" +
-              '<td class="mono">' + formatNumber(item.median_value) + "</td>" +
-              '<td class="mono">' + formatNumber(item.min_value) + "</td>" +
-              '<td class="mono">' + formatNumber(item.max_value) + "</td>" +
-              '<td><span class="level ' + levelClass + '">' +
-                (item.percentile !== null ? item.level : "-") + "</span></td>" +
-              "</tr>";
+  /**
+   * 找到指定指标的结果项
+   *
+   * @param {object} data 应答
+   * @param {string} indicator 指标名
+   * @returns {object|undefined} 结果项
+   */
+  function findResult(data, indicator) {
+    for (var i = 0; i < data.results.length; i++) {
+      if (data.results[i].indicator === indicator) {
+        return data.results[i];
+      }
     }
-    detailBody.innerHTML = html;
+    return undefined;
   }
 
-  // ---------- 走势图 ----------
+  /**
+   * 渲染主指标大卡
+   *
+   * @param {object} data 应答
+   */
+  function renderHero(data) {
+    var item = findResult(data, primaryIndicator) || data.results[0];
+    document.getElementById("hero-name").textContent = item.label;
+    document.getElementById("hero-value").textContent = SL.formatPercent(item.percentile);
+    document.getElementById("hero-value").style.color =
+      item.percentile === null ? "var(--text-faint)" : "var(--text-main)";
+    document.getElementById("hero-badge").innerHTML = SL.levelBadge(item.percentile, item.level7);
+    document.getElementById("hero-current").textContent =
+      "当前值 " + SL.formatNumber(item.current_value) + "　中位数 " + SL.formatNumber(item.median_value);
+    document.getElementById("hero-temp").innerHTML = SL.tempbar(item.percentile);
 
-  function renderChart(history, results) {
-    if (!history || !history.dates || !history.dates.length) {
+    var facts = document.getElementById("hero-facts");
+    facts.textContent = "";
+    [
+      ["历史最小", item.min_value],
+      ["历史最大", item.max_value],
+      ["样本天数", item.sample_count]
+    ].forEach(function (pair) {
+      var box = el("div");
+      box.appendChild(el("div", "fact-k", pair[0]));
+      box.appendChild(el("div", "fact-v",
+        pair[0] === "样本天数" ? SL.formatInt(pair[1]) : SL.formatNumber(pair[1])));
+      facts.appendChild(box);
+    });
+  }
+
+  /**
+   * 渲染多窗口分位对比
+   *
+   * @param {object} data 应答
+   */
+  function renderWindows(data) {
+    windowsBox.textContent = "";
+    var windows = data.windows || [];
+    if (!windows.length) {
+      windowsBox.appendChild(el("div", "empty-state", "无窗口数据"));
       return;
     }
 
-    if (!chart) {
-      chart = echarts.init(document.getElementById("chart"));
-      window.addEventListener("resize", function () {
-        if (chart) {
-          chart.resize();
-        }
-      });
-    }
+    windows.forEach(function (win) {
+      var percentile = win.percentiles[primaryIndicator];
+      var cell = el("div", "win-cell");
+      cell.appendChild(el("div", "win-label", win.label));
+      cell.appendChild(el("div", "win-value",
+        percentile === null || percentile === undefined ? "-" : percentile.toFixed(1) + "%"));
 
-    // 只画有数据的指标；每个指标配一条当前值横线（markLine）
-    var series = [];
-    var legends = [];
-    for (var i = 0; i < results.length; i++) {
-      var item = results[i];
-      var values = history.series[item.indicator];
-      if (!values || item.percentile === null) {
-        continue;
-      }
-      legends.push(item.label);
-      series.push({
-        name: item.label,
-        type: "line",
-        showSymbol: false,
-        connectNulls: false,
-        data: values,
-        lineStyle: { width: 1.6 },
-        markLine: {
-          silent: true,
-          symbol: "none",
-          label: {
-            formatter: "当前 " + formatNumber(item.current_value),
-            position: "insideEndTop",
-            fontSize: 11
-          },
-          data: [{ yAxis: item.current_value }]
-        }
-      });
-    }
-
-    chart.setOption({
-      animation: false,
-      color: ["#2563eb", "#16a34a", "#dc2626", "#7c3aed", "#ea580c"],
-      tooltip: {
-        trigger: "axis",
-        valueFormatter: function (value) {
-          return value === null ? "-" : formatNumber(value);
-        }
-      },
-      legend: {
-        data: legends,
-        top: 0,
-        textStyle: { color: "#475569", fontSize: 12 }
-      },
-      grid: { left: 50, right: 20, top: 34, bottom: 40 },
-      xAxis: {
-        type: "category",
-        data: history.dates,
-        axisLabel: { color: "#64748b", fontSize: 11 },
-        axisLine: { lineStyle: { color: "#cbd5e1" } }
-      },
-      yAxis: {
-        type: "value",
-        scale: true,
-        axisLabel: { color: "#64748b", fontSize: 11 },
-        splitLine: { lineStyle: { color: "#e2e8f0" } }
-      },
-      dataZoom: [
-        { type: "inside" },
-        { type: "slider", height: 16, bottom: 6 }
-      ],
-      series: series
-    }, true);
+      var badge = el("div", "win-badge");
+      badge.innerHTML = SL.levelBadge(percentile);
+      cell.appendChild(badge);
+      cell.appendChild(el("div", "win-rows", SL.formatInt(win.sample_rows) + " 个交易日"));
+      windowsBox.appendChild(cell);
+    });
   }
 
-  // ---------- 事件绑定 ----------
+  /**
+   * 渲染指标卡网格
+   *
+   * @param {object} data 应答
+   */
+  function renderMetricCards(data) {
+    metricGrid.textContent = "";
 
-  codeInput.addEventListener("input", onSuggestInput);
-  codeInput.addEventListener("keydown", onSuggestKeydown);
+    data.results.forEach(function (item) {
+      var usable = item.percentile !== null && item.percentile !== undefined;
+      var card = el("div",
+        "metric-card" + (item.indicator === primaryIndicator ? " primary" : "") +
+        (usable ? "" : " na"));
 
-  suggestList.addEventListener("mousedown", function (event) {
-    var node = event.target;
-    while (node && node !== suggestList && !node.getAttribute("data-index")) {
-      node = node.parentNode;
+      var top = el("div", "metric-top");
+      top.appendChild(el("span", "metric-name", item.label));
+      top.appendChild(SL.levelBadge(item.percentile, item.level7));
+      card.appendChild(top);
+
+      card.appendChild(el("div", "metric-percentile", SL.formatPercent(item.percentile)));
+      card.appendChild(el("div", "metric-current",
+        "当前 " + SL.formatNumber(item.current_value) + " / 中位 " + SL.formatNumber(item.median_value)));
+
+      var temp = el("div", "metric-temp");
+      temp.innerHTML = SL.tempbar(item.percentile);
+      card.appendChild(temp);
+
+      if (usable) {
+        card.addEventListener("click", function () {
+          setPrimary(item.indicator);
+        });
+      }
+      metricGrid.appendChild(card);
+    });
+  }
+
+  /**
+   * 渲染指标切换标签
+   *
+   * @param {object} data 应答
+   */
+  function renderIndicatorTabs(data) {
+    indicatorTabs.textContent = "";
+    data.results.forEach(function (item) {
+      var tab = el("button",
+        "tab" + (item.indicator === primaryIndicator ? " active" : ""), item.label);
+      tab.type = "button";
+      tab.addEventListener("click", function () {
+        setPrimary(item.indicator);
+      });
+      indicatorTabs.appendChild(tab);
+    });
+  }
+
+  /**
+   * 切换主指标并局部刷新
+   *
+   * @param {string} indicator 新的主指标
+   */
+  function setPrimary(indicator) {
+    if (primaryIndicator === indicator || !lastPayload) {
+      return;
     }
-    if (node && node.getAttribute("data-index")) {
-      applySuggestItem(parseInt(node.getAttribute("data-index"), 10));
+    primaryIndicator = indicator;
+    renderHero(lastPayload);
+    renderWindows(lastPayload);
+    renderMetricCards(lastPayload);
+    renderIndicatorTabs(lastPayload);
+    renderTrendChart();
+  }
+
+  /**
+   * 渲染明细表
+   *
+   * @param {object} data 应答
+   */
+  function renderDetailTable(data) {
+    detailBody.textContent = "";
+
+    data.results.forEach(function (item) {
+      var row = document.createElement("tr");
+
+      var nameCell = el("td");
+      nameCell.appendChild(el("b", "", item.label));
+      if (item.indicator === primaryIndicator) {
+        nameCell.appendChild(el("span", "", "  ●"));
+        nameCell.lastChild.style.color = "var(--accent)";
+        nameCell.lastChild.style.fontSize = "10px";
+      }
+      row.appendChild(nameCell);
+
+      row.appendChild(el("td", "ta-r num", SL.formatNumber(item.current_value)));
+
+      var pctCell = el("td", "ta-r num");
+      pctCell.style.fontWeight = "650";
+      pctCell.textContent = SL.formatPercent(item.percentile);
+      if (item.percentile !== null && item.percentile !== undefined) {
+        pctCell.style.color = (SL.levelOf(item.percentile) || {}).color || "inherit";
+      }
+      row.appendChild(pctCell);
+
+      var levelCell = el("td", "ta-c");
+      levelCell.innerHTML = SL.levelBadge(item.percentile, item.level7);
+      row.appendChild(levelCell);
+
+      row.appendChild(el("td", "ta-r num", SL.formatNumber(item.median_value)));
+      row.appendChild(el("td", "ta-r num", SL.formatNumber(item.min_value)));
+      row.appendChild(el("td", "ta-r num", SL.formatNumber(item.max_value)));
+      row.appendChild(el("td", "ta-r num", SL.formatInt(item.sample_count)));
+
+      detailBody.appendChild(row);
+    });
+  }
+
+  /**
+   * 组织指标中文名映射
+   *
+   * @param {object} data 应答
+   * @returns {object} 指标 -> 中文名
+   */
+  function buildMeta(data) {
+    var meta = {};
+    data.results.forEach(function (item) {
+      meta[item.indicator] = item.label;
+    });
+    return meta;
+  }
+
+  /**
+   * 渲染走势图
+   */
+  function renderTrendChart() {
+    if (!lastPayload || !lastPayload.history) {
+      return;
+    }
+    var option = SL.buildTrendOption({
+      history: lastPayload.history,
+      indicatorMeta: buildMeta(lastPayload),
+      primary: primaryIndicator
+    });
+    trendChart = SL.renderChart(chartDom, option);
+  }
+
+  // ---------- 页面初始化 ----------
+
+  /**
+   * 从地址栏恢复查询条件并（若有 code）自动分析
+   */
+  function restoreFromUrl() {
+    var params = new URLSearchParams(window.location.search);
+    var code = params.get("code");
+    if (!code) {
+      return;
+    }
+    codeInput.value = code;
+    if (params.get("period")) {
+      periodSelect.value = params.get("period");
+    }
+    if (params.get("start_date")) {
+      startDateInput.value = params.get("start_date");
+    }
+    if (params.get("end_date")) {
+      endDateInput.value = params.get("end_date");
+    }
+    if (params.get("pe_ttm")) {
+      inputPe.value = params.get("pe_ttm");
+    }
+    if (params.get("pb")) {
+      inputPb.value = params.get("pb");
+    }
+    analyze();
+  }
+
+  /**
+   * 拉取健康检查，点亮顶栏状态
+   */
+  function checkHealth() {
+    var dot = document.getElementById("status-dot");
+    var text = document.getElementById("status-text");
+    SL.fetchJson("/api/health", 6000)
+      .then(function (data) {
+        dot.className = "status-dot ok";
+        text.textContent = "服务正常 · " + data.priority;
+      })
+      .catch(function () {
+        dot.className = "status-dot bad";
+        text.textContent = "服务不可用";
+      });
+  }
+
+  // 事件绑定（普通函数引用，不用装饰器式写法）
+  codeInput.addEventListener("input", requestSuggest);
+  codeInput.addEventListener("keydown", onCodeKeydown);
+  codeInput.addEventListener("focus", function () {
+    if (suggestItems.length) {
+      renderSuggest();
     }
   });
 
-  // 点击页面其他区域时收起联想
   document.addEventListener("click", function (event) {
     if (event.target !== codeInput) {
       hideSuggest();
@@ -381,10 +676,19 @@
 
   btnAnalyze.addEventListener("click", analyze);
 
-  // 回车直接分析（联想关闭时）
-  codeInput.addEventListener("keydown", function (event) {
-    if (event.key === "Enter" && suggestList.className.indexOf("open") === -1) {
-      analyze();
+  document.getElementById("btn-reset-zoom").addEventListener("click", function () {
+    if (!trendChart) {
+      return;
+    }
+    trendChart.dispatchAction({ type: "dataZoom", start: 0, end: 100 });
+  });
+
+  window.addEventListener("resize", function () {
+    if (trendChart) {
+      trendChart.resize();
     }
   });
+
+  checkHealth();
+  restoreFromUrl();
 })();

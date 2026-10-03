@@ -1,0 +1,540 @@
+/*
+ * StockLab 前端共享工具 (app/web/static/common.js)
+ *
+ * 职责：三个页面共用的工具集 ——
+ *   1. fetchJson：带超时与统一错误处理的请求（修复「请求卡住按钮永远转圈」）
+ *   2. 数值格式化 / 七档评级与配色
+ *   3. 温度条（0-100 分位可视化）渲染
+ *   4. ECharts 走势图 option 工厂：双 y 轴 + 图例切换 + 分位参考线 + 分位带
+ *
+ * 说明：本文件为浏览器端脚本，与 Python 侧无共享约束，保持原生 JS 直白写法。
+ */
+
+(function () {
+  "use strict";
+
+  // ---------- 常量 ----------
+  // 七档评级：与 app/web/store.py 的 percentile_level() 必须保持一致
+  var LEVEL7 = [
+    { name: "极度低估", max: 10, color: "#15803d" },
+    { name: "低估", max: 20, color: "#16a34a" },
+    { name: "正常偏低", max: 40, color: "#65a30d" },
+    { name: "正常", max: 60, color: "#ca8a04" },
+    { name: "正常偏高", max: 80, color: "#ea580c" },
+    { name: "高估", max: 90, color: "#dc2626" },
+    { name: "极度高估", max: 100, color: "#991b1b" }
+  ];
+
+  var LEVEL_COLOR_NA = "#94a3b8";
+
+  // PE 类指标走左轴，其余（PB/PS/PCF）走右轴：量纲差异大，混轴会互相压扁
+  var PE_INDICATORS = ["pe_ttm", "pe_static"];
+
+  var LEVEL_NAME_COLOR = {};
+  for (var i = 0; i < LEVEL7.length; i++) {
+    LEVEL_NAME_COLOR[LEVEL7[i].name] = LEVEL7[i].color;
+  }
+
+  // ---------- 请求 ----------
+
+  /**
+   * 发起 JSON 请求（带超时、自动解析、统一错误信息）
+   *
+   * @param {string} url 请求地址
+   * @param {number} timeoutMs 超时毫秒，默认 15000
+   * @returns {Promise<object>} 解析后的 JSON
+   */
+  function fetchJson(url, timeoutMs) {
+    var controller = new AbortController();
+    var timer = setTimeout(function () {
+      controller.abort();
+    }, timeoutMs || 15000);
+
+    return fetch(url, { signal: controller.signal })
+      .then(function (response) {
+        return response.json().catch(function () {
+          return {};
+        }).then(function (data) {
+          if (!response.ok) {
+            var error = new Error(data.error || ("请求失败 (HTTP " + response.status + ")"));
+            error.status = response.status;
+            throw error;
+          }
+          return data;
+        });
+      })
+      .finally(function () {
+        clearTimeout(timer);
+      });
+  }
+
+  // ---------- 格式化 ----------
+
+  /**
+   * 数值格式化：按量级选择小数位，负数与千分位一并处理
+   *
+   * @param {number|null} value 数值
+   * @param {number} digits 指定小数位；缺省时按量级自适应
+   * @returns {string} 展示文本
+   */
+  function formatNumber(value, digits) {
+    if (value === null || value === undefined || value !== value) {
+      return "-";
+    }
+    var abs = Math.abs(value);
+    var places;
+    if (digits !== undefined && digits !== null) {
+      places = digits;
+    } else if (abs >= 1000) {
+      places = 0;
+    } else if (abs >= 100) {
+      places = 1;
+    } else if (abs >= 1) {
+      places = 2;
+    } else {
+      places = 4;
+    }
+    var text = value.toFixed(places);
+    // 去掉 12.00 这类无意义的尾零（但保留 12.00 -> 12）
+    if (places > 0 && text.indexOf(".") !== -1) {
+      text = text.replace(/0+$/, "").replace(/\.$/, "");
+    }
+    var parts = text.split(".");
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return parts.join(".");
+  }
+
+  /**
+   * 分位数格式化（百分比，一位小数）
+   *
+   * @param {number|null} percentile 0~100
+   * @returns {string} 如 19.4%
+   */
+  function formatPercent(percentile) {
+    if (percentile === null || percentile === undefined || percentile !== percentile) {
+      return "-";
+    }
+    return percentile.toFixed(1) + "%";
+  }
+
+  /**
+   * 整数格式化（带千分位）
+   *
+   * @param {number} value 数值
+   * @returns {string} 如 5,543
+   */
+  function formatInt(value) {
+    if (value === null || value === undefined || value !== value) {
+      return "-";
+    }
+    return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  // ---------- 评级 ----------
+
+  /**
+   * 把分位数映射为七档评级（与后端 store.percentile_level 同口径）
+   *
+   * @param {number|null} percentile 0~100
+   * @returns {object|null} {name, color}；不可用返回 null
+   */
+  function levelOf(percentile) {
+    if (percentile === null || percentile === undefined || percentile !== percentile) {
+      return null;
+    }
+    for (var i = 0; i < LEVEL7.length; i++) {
+      if (percentile < LEVEL7[i].max) {
+        return LEVEL7[i];
+      }
+    }
+    // 分位恰为 100 时（末档是闭区间）落到最后一档，与后端一致
+    return LEVEL7[LEVEL7.length - 1];
+  }
+
+  /**
+   * 评级徽章 HTML（值不可用时返回灰色「不可用」）
+   *
+   * @param {number|null} percentile 分位数
+   * @param {string} levelName 后端给定的档位名（可省略，内部重新推导）
+   * @returns {string} HTML 字符串
+   */
+  function levelBadge(percentile, levelName) {
+    var level = levelOf(percentile);
+    var name = level ? level.name : (levelName || "不可用");
+    var color = level ? level.color : LEVEL_COLOR_NA;
+    return (
+      '<span class="badge" style="background:' + hexA(color, 0.12) +
+      ";color:" + color + '"><span class="badge-dot"></span>' + name + "</span>"
+    );
+  }
+
+  /**
+   * 把 #rrggbb 转成带透明度的 rgba
+   *
+   * @param {string} hex 颜色
+   * @param {number} alpha 透明度 0~1
+   * @returns {string} rgba(...) 文本
+   */
+  function hexA(hex, alpha) {
+    var value = hex.replace("#", "");
+    if (value.length === 3) {
+      value = value[0] + value[0] + value[1] + value[1] + value[2] + value[2];
+    }
+    var r = parseInt(value.substring(0, 2), 16);
+    var g = parseInt(value.substring(2, 4), 16);
+    var b = parseInt(value.substring(4, 6), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+  }
+
+  /**
+   * 生成温度条 HTML（0-100 分位可视化，指针落在当前分位处）
+   *
+   * @param {number|null} percentile 分位数
+   * @returns {string} HTML 字符串
+   */
+  function tempbar(percentile) {
+    var usable = percentile !== null && percentile !== undefined && percentile === percentile;
+    var position = usable ? Math.max(0, Math.min(100, percentile)) : 50;
+    return (
+      '<div class="tempbar' + (usable ? "" : " tempbar-na") + '">' +
+      '<div class="tempbar-track">' +
+      '<div class="tempbar-thumb" style="left:' + position + '%"></div>' +
+      "</div>" +
+      '<div class="tempbar-scale"><span>低估</span><span>适中</span><span>高估</span></div>' +
+      "</div>"
+    );
+  }
+
+  // ---------- 统计量 ----------
+
+  /**
+   * 从数值数组求分位数（线性插值，供图上参考线使用）
+   *
+   * @param {Array<number>} values 数值数组（可含 null，内部剔除）
+   * @param {number} q 0~1
+   * @returns {number|null} 分位值
+   */
+  function quantile(values, q) {
+    var clean = [];
+    for (var i = 0; i < values.length; i++) {
+      var v = values[i];
+      if (v !== null && v !== undefined && v === v) {
+        clean.push(v);
+      }
+    }
+    if (!clean.length) {
+      return null;
+    }
+    clean.sort(function (a, b) { return a - b; });
+    var pos = (clean.length - 1) * q;
+    var base = Math.floor(pos);
+    var rest = pos - base;
+    if (clean[base + 1] !== undefined) {
+      return clean[base] + rest * (clean[base + 1] - clean[base]);
+    }
+    return clean[base];
+  }
+
+  /**
+   * 取数组中最后一个非空值
+   *
+   * @param {Array<number>} values 数值数组
+   * @returns {number|null} 最新有效值
+   */
+  function lastValid(values) {
+    for (var i = values.length - 1; i >= 0; i--) {
+      var v = values[i];
+      if (v !== null && v !== undefined && v === v) {
+        return v;
+      }
+    }
+    return null;
+  }
+
+  // ---------- ECharts 走势图 ----------
+
+  /**
+   * 构造走势图 option：双 y 轴（PE 类 / 其他）+ 图例切换 + 分位参考线 + 分位带
+   *
+   * 【双轴缘由】PE 常在 10~100 量级而 PB 多在 1~10、PCF 可到 200+，
+   *              混在同一坐标轴会让低量纲曲线被压成直线，无法辨识走势。
+   *
+   * @param {object} args 参数集
+   *   history     {dates, series}  后端 history 字段
+   *   indicatorMeta {指标: {label}} 指标中文名映射
+   *   primary     {string} 主指标（画参考线与分位带的那一个）
+   * @returns {object} ECharts option
+   */
+  function buildTrendOption(args) {
+    var history = args.history;
+    var meta = args.indicatorMeta || {};
+    var primary = args.primary;
+
+    var dates = history.dates;
+    var seriesList = [];
+    var yAxis = [];
+    var leftIndex = 0;
+    var rightIndex = -1;
+
+    var keys = Object.keys(history.series);
+    var hasRight = false;
+    for (var k = 0; k < keys.length; k++) {
+      if (PE_INDICATORS.indexOf(keys[k]) === -1) {
+        hasRight = true;
+        break;
+      }
+    }
+    if (hasRight) {
+      rightIndex = 1;
+      yAxis.push(
+        { type: "value", name: "PE 类", scale: true, position: "left",
+          axisLabel: { color: "#64748b", fontSize: 11 },
+          axisLine: { lineStyle: { color: "#cbd5e1" } },
+          splitLine: { lineStyle: { color: "#eef2f7" } },
+          nameTextStyle: { color: "#94a3b8", fontSize: 11 } },
+        { type: "value", name: "PB / PS / PCF", scale: true, position: "right",
+          axisLabel: { color: "#64748b", fontSize: 11 },
+          axisLine: { lineStyle: { color: "#cbd5e1" } },
+          splitLine: { show: false },
+          nameTextStyle: { color: "#94a3b8", fontSize: 11 } }
+      );
+    } else {
+      yAxis.push(
+        { type: "value", scale: true,
+          axisLabel: { color: "#64748b", fontSize: 11 },
+          axisLine: { lineStyle: { color: "#cbd5e1" } },
+          splitLine: { lineStyle: { color: "#eef2f7" } } }
+      );
+    }
+
+    var legendData = [];
+    for (var i = 0; i < keys.length; i++) {
+      var indicator = keys[i];
+      var values = history.series[indicator];
+      var isPrimary = indicator === primary;
+      var axisIndex = hasRight ? (PE_INDICATORS.indexOf(indicator) === -1 ? 1 : 0) : 0;
+
+      var extra = {};
+      if (isPrimary) {
+        extra = buildPrimaryMarks(values);
+      }
+
+      seriesList.push({
+        name: meta[indicator] || indicator,
+        type: "line",
+        data: values,
+        yAxisIndex: axisIndex,
+        showSymbol: false,
+        smooth: false,
+        connectNulls: false,
+        lineStyle: { width: isPrimary ? 2.2 : 1.4, opacity: isPrimary ? 1 : 0.65 },
+        emphasis: { focus: "series" },
+        z: isPrimary ? 5 : 3,
+        animation: false,
+        markArea: extra.markArea,
+        markLine: extra.markLine
+      });
+      legendData.push(meta[indicator] || indicator);
+    }
+
+    return {
+      animation: false,
+      backgroundColor: "transparent",
+      legend: {
+        data: legendData,
+        top: 4,
+        left: 8,
+        icon: "roundRect",
+        itemWidth: 13,
+        itemHeight: 4,
+        textStyle: { color: "#475569", fontSize: 12 },
+        selectedMode: true
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "line", lineStyle: { color: "#cbd5e1" } },
+        backgroundColor: "#ffffff",
+        borderColor: "#e2e8f0",
+        borderWidth: 1,
+        padding: 9,
+        textStyle: { color: "#0f172a", fontSize: 12.5 },
+        extraCssText: "box-shadow:0 4px 14px rgba(15,23,42,.10);border-radius:8px;",
+        formatter: function (params) {
+          if (!params.length) {
+            return "";
+          }
+          var html = '<div style="font-weight:600;margin-bottom:5px">' + params[0].axisValue + "</div>";
+          for (var p = 0; p < params.length; p++) {
+            var item = params[p];
+            var value = item.value;
+            if (value === null || value === undefined || value !== value) {
+              value = "-";
+            } else {
+              value = formatNumber(value, 2);
+            }
+            html +=
+              '<div style="display:flex;justify-content:space-between;gap:16px">' +
+              '<span style="color:#64748b">' + item.marker + item.seriesName + "</span>" +
+              '<span style="font-weight:600;font-family:var(--mono)">' + value + "</span>" +
+              "</div>";
+          }
+          return html;
+        }
+      },
+      grid: { left: 58, right: hasRight ? 58 : 20, top: 40, bottom: 66 },
+      xAxis: {
+        type: "category",
+        data: dates,
+        boundaryGap: false,
+        axisLine: { lineStyle: { color: "#cbd5e1" } },
+        axisTick: { show: false },
+        axisLabel: { color: "#64748b", fontSize: 11, hideOverlap: true }
+      },
+      yAxis: yAxis,
+      dataZoom: [
+        { type: "inside", start: 0, end: 100 },
+        {
+          type: "slider",
+          start: 0,
+          end: 100,
+          height: 16,
+          bottom: 8,
+          borderColor: "#e2e8f0",
+          backgroundColor: "#f8fafc",
+          fillerColor: "rgba(37,99,235,0.12)",
+          handleStyle: { color: "#2563eb", borderColor: "#2563eb" },
+          moveHandleStyle: { color: "#93c5fd" },
+          textStyle: { color: "#94a3b8", fontSize: 10 },
+          dataBackground: {
+            lineStyle: { color: "#cbd5e1" },
+            areaStyle: { color: "#e2e8f0" }
+          }
+        }
+      ],
+      series: seriesList
+    };
+  }
+
+  /**
+   * 给主指标构造分位参考线与分位带
+   *
+   * 【参考线口径】10% / 50% / 90% 分位 + 25%~75% 分位带，
+   *   直接由当前窗口内的序列现算，避免后端再传一组分位数。
+   *
+   * @param {Array<number>} values 主指标序列
+   * @returns {object} {markLine, markArea}
+   */
+  function buildPrimaryMarks(values) {
+    var p10 = quantile(values, 0.10);
+    var p25 = quantile(values, 0.25);
+    var p50 = quantile(values, 0.50);
+    var p75 = quantile(values, 0.75);
+    var p90 = quantile(values, 0.90);
+    var current = lastValid(values);
+
+    if (p50 === null) {
+      return {};
+    }
+
+    var markLineData = [
+      { yAxis: p90, name: "90% 分位",
+        label: { formatter: "高估线 90%", position: "insideEndTop", color: "#dc2626", fontSize: 10.5 },
+        lineStyle: { color: "#dc2626", type: "dashed", width: 1 } },
+      { yAxis: p50, name: "中位数",
+        label: { formatter: "中位数", position: "insideEndTop", color: "#475569", fontSize: 10.5 },
+        lineStyle: { color: "#94a3b8", type: "solid", width: 1 } },
+      { yAxis: p10, name: "10% 分位",
+        label: { formatter: "低估线 10%", position: "insideEndBottom", color: "#16a34a", fontSize: 10.5 },
+        lineStyle: { color: "#16a34a", type: "dashed", width: 1 } }
+    ];
+    if (current !== null) {
+      markLineData.push({
+        yAxis: current,
+        name: "当前值",
+        label: { formatter: "当前 " + formatNumber(current, 2), position: "insideStartTop",
+          color: "#2563eb", fontSize: 11, fontWeight: 600 },
+        lineStyle: { color: "#2563eb", type: "solid", width: 1.6 }
+      });
+    }
+
+    return {
+      markLine: { silent: true, symbol: "none", data: markLineData, z: 6 },
+      markArea: {
+        silent: true,
+        itemStyle: { color: "rgba(100,116,139,0.09)" },
+        data: [[{ yAxis: p25 }, { yAxis: p75 }]]
+      }
+    };
+  }
+
+  /**
+   * 创建或复用 ECharts 实例并应用 option
+   *
+   * @param {HTMLElement} dom 图表容器
+   * @param {object} option ECharts option
+   * @returns {object} ECharts 实例
+   */
+  function renderChart(dom, option) {
+    var chart = echarts.getInstanceByDom(dom);
+    if (!chart) {
+      chart = echarts.init(dom, null, { renderer: "canvas" });
+    }
+    chart.setOption(option, true);
+    return chart;
+  }
+
+  /**
+   * 创建带指定文本的元素（统一用 textContent，杜绝 HTML 注入）
+   *
+   * @param {string} tag 标签名
+   * @param {string} className class，可省略
+   * @param {string} text 文本内容，可省略
+   * @returns {HTMLElement} 元素
+   */
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) {
+      node.className = className;
+    }
+    if (text !== undefined && text !== null) {
+      node.textContent = text;
+    }
+    return node;
+  }
+
+  /**
+   * 创建带指定 HTML 的元素（仅用于本项目自己生成的受控 HTML，如徽章）
+   *
+   * @param {string} tag 标签名
+   * @param {string} className class
+   * @param {string} html HTML 字符串
+   * @returns {HTMLElement} 元素
+   */
+  function elHtml(tag, className, html) {
+    var node = document.createElement(tag);
+    if (className) {
+      node.className = className;
+    }
+    node.innerHTML = html;
+    return node;
+  }
+
+  // ---------- 导出 ----------
+  window.SL = {
+    el: el,
+    elHtml: elHtml,
+    fetchJson: fetchJson,
+    formatNumber: formatNumber,
+    formatPercent: formatPercent,
+    formatInt: formatInt,
+    levelOf: levelOf,
+    levelBadge: levelBadge,
+    tempbar: tempbar,
+    quantile: quantile,
+    lastValid: lastValid,
+    buildTrendOption: buildTrendOption,
+    renderChart: renderChart,
+    hexA: hexA,
+    LEVEL7: LEVEL7
+  };
+})();

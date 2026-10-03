@@ -150,11 +150,17 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
 - `app/dashboard`：把数据渲染成网页。
-- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，实现「输入代码 → 点击分析 → 图表与分位结论」。
+- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，三个页面共用一套数据层：
+  - **个股分析 `/`**：输入代码或中文名 → 分位徽章 + 0-100 温度条 + 多窗口分位对比 + 双 y 轴走势图（10/50/90 分位参考线与 25%~75% 分位带）+ 指标明细表。
+  - **全市场 Dashboard `/market`**：5 指标切换、市场/搜索过滤、七档评级分布与分位直方图、可排序分页排行表（点行跳个股页）。
+  - **指数估值 `/indices`**：6 大宽基指数卡片（成分中位数口径）+ 点击展开走势图。
   - `server.py`：`create_app()` 装配层——**路由一律用 `app.add_url_rule()` 注册表写法，不用 `@app.route` 装饰器**（遵守本文件禁用装饰器的规定）。
-  - `api.py`：接口层——只做「参数解析 → facade 取数 → analyzer 计算 → 组装 JSON」；所有 facade 调用经**全局 `threading.Lock` 串行**（DuckDB 连接非线程安全），纯内存统计放在锁外。
-  - `static/`：本地托管 ECharts（vendored，离线可用）与前端交互脚本；`templates/`：分析页模板。
-  - **依赖方向 `app.web → stocklab.facade / stocklab.analytics`，与 `app.dashboard` 平行，不修改 `stocklab/` 核心库任何文件。**
+  - `store.py`：**进程级数据访问单例**——(1) 单例门面 + 串行锁，修复「每请求重建门面反复抢写锁」；(2) 全市场窗口函数 SQL 与指数聚合，走本模块自己的单例连接 + 第二把锁，与门面锁互不嵌套；(3) 七档评级 `percentile_level()`、证券表与聚合结果的进程内缓存。
+  - `api.py`：个股接口层——只做「参数解析 → 代码/名称解析 → store 取数 → analyzer 计算 → 组装 JSON」，纯内存统计放在锁外。
+  - `market_api.py`：全市场与指数接口层——参数校验 → store 聚合 → 过滤/排序/分页，不经门面锁。
+  - `static/`：`base.css` 设计系统、`common.js` 共享工具（请求超时、七档配色、温度条、ECharts option 工厂）与各页脚本；`templates/`：三个页面模板。
+  - **依赖方向 `app.web → stocklab.facade / stocklab.analytics`（`store.py` 另直接用 `duckdb` 做只读聚合），与 `app.dashboard` 平行，不修改 `stocklab/` 核心库任何文件。**
+  - **七档评级仅存在于 Web 展示层**（`store.percentile_level` 与 `static/common.js` 的 `LEVEL7`，两侧口径由 `tests/test_web_api.py` 双向校验）；`stocklab.analytics` 内部仍是三档结论。
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
   - `facade` 可依赖两者，但 **`datasource` 与 `persistence` 绝不可反向 import `facade`**，否则形成循环依赖。
@@ -227,21 +233,31 @@ StockLab/
 │   │       └── dashboard.html         #    网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
 │   ├── web/                            #   本地 Web 分析服务（Flask，浏览器端点击分析）
 │   │   ├── __init__.py                #     导出 create_app
-│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器）
-│   │   ├── api.py                     #     接口层：参数解析 → facade → analyzer → JSON（全局锁串行取数）
+│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器），页面 3 + 接口 6 + 图标 1
+│   │   ├── store.py                   #     进程级数据访问单例：单例门面锁 / 聚合连接锁 / 七档评级 / 进程内缓存
+│   │   ├── api.py                     #     个股接口：代码与中文名解析 → store → analyzer → JSON
+│   │   ├── market_api.py              #     全市场与指数接口：过滤排序分页 → store 聚合 → JSON
 │   │   ├── templates/
-│   │   │   └── analysis.html          #     分析页模板（亮色报表风）
+│   │   │   ├── analysis.html          #     个股分析页（顶栏导航 / 温度条 / 多窗口 / 明细表）
+│   │   │   ├── market.html            #     全市场 Dashboard（统计卡 / 分布图 / 排行表 / 分页）
+│   │   │   └── indices.html           #     指数估值页（指数卡片 + 走势详情）
 │   │   └── static/
 │   │       ├── echarts.min.js         #     ECharts 5.5 vendored（本地托管，离线可用）
-│   │       └── app.js                 #     前端交互：联想 / 分析请求 / 卡片表格 / 走势图
+│   │       ├── base.css               #     共享设计系统：顶栏 / 卡片 / 表格 / 徽章 / 温度条 / 七档色
+│   │       ├── common.js              #     带超时的请求、格式化、七档配色、ECharts 双轴与参考线 option 工厂
+│   │       ├── app.js                 #     个股页：联想键盘操作 / 分析渲染 / URL 还原
+│   │       ├── market.js              #     Dashboard：统计卡 / 直方图 / 排行分页
+│   │       └── indices.js             #     指数页：卡片列表 / 详情加载
 │   └── scripts/                       #   CLI 入口
 │       ├── generate_sector_trend.py   #     命令行入口：生成板块走势网页
 │       ├── sync_market_data.py        #     命令行入口：全市场数据同步到本地 DuckDB（五个阶段）
 │       ├── serve_web.py               #     命令行入口：启动本地 Web 分析服务（仅监听 127.0.0.1）
+│       ├── verify_market_sql.py       #     抽样校验：全市场分位 SQL 与 analyzer 口径一致（退出码可进 CI）
 │       ├── analyze_pe_distribution.py #     命令行入口：全市场市盈率分布统计
 │       └── analyze_valuation_percentile.py # 命令行入口：个股历史估值分位计算
 ├── tests/                              # ── 自检脚本 ──
-│   └── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
+│   ├── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
+│   └── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样）
 ├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
 │   └── stocklab.duckdb                 #     本地 DuckDB 单文件数据库
 ├── output/                             # ── 同上 ──
@@ -272,8 +288,10 @@ StockLab/
 | | `stocklab.analytics.markdown_reporter` | 全市场分布：归档级 Markdown（表格 + 自动结论） |
 | **仪表板** | `app.dashboard.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
 | | `app.dashboard.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
-| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器） |
-| | `app.web.api` | 接口层：`/api/percentile` 分位分析、`/api/securities` 证券联想、`/api/health`；facade 调用全局锁串行 |
+| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器），页面 3 + 接口 6 + favicon |
+| | `app.web.store` | **进程级数据访问单例**：门面锁 / 聚合连接锁、全市场窗口函数 SQL、指数成分中位数序列、七档评级、进程内缓存 |
+| | `app.web.api` | 个股接口：`/api/percentile` 分位 + 多窗口、`/api/securities` 联想（排序 + 大小写不敏感）、代码与中文名解析 |
+| | `app.web.market_api` | 全市场接口：`/api/market/ranking`（过滤/排序/分页 + 七档分布与直方图）、`/api/indices`、`/api/index/detail` |
 | **脚本** | `app/scripts/sync_market_data.py` | 5 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分 |
 | | `app/scripts/generate_sector_trend.py` | 可视化生成 CLI：月数/输出路径/配置文件可配 |
 | | `app/scripts/serve_web.py` | 本地分析服务 CLI：端口/优先级/数据库路径可配，仅监听 127.0.0.1 |
@@ -300,6 +318,12 @@ StockLab/
 
 # 全链路自检（可选股票代码，默认 000001.SZ）
 ./venv/bin/python tests/test_data_interfaces.py 000001.SZ
+
+# Web 层自检（会打开本地 DuckDB，须先停止 serve_web.py）
+./venv/bin/python tests/test_web_api.py
+
+# 全市场分位 SQL 与 analyzer 口径抽样比对（默认 300 只，非 0 退出码即为不一致）
+./venv/bin/python app/scripts/verify_market_sql.py 300
 
 # 同步全市场数据到本地 DuckDB（不带子命令 = 一键全跑前三个阶段）
 ./venv/bin/python app/scripts/sync_market_data.py --start-date 2025-01-01 --end-date 2026-09-30
@@ -355,6 +379,9 @@ StockLab/
 | **历史估值分位(单股)** | Facade → ValuationHistoryRepo → Analyzer → Reporter | 本地序列 → CDF分位 → 控制台/MD |
 | **全市场PE分布快照** | Facade → DailyValuationRepo → DistributionAnalyzer → MarkdownReporter | 单日横截面 → 中位数/分桶/极值 → 归档MD |
 | **板块10年走势网页** | `python app/scripts/generate_sector_trend.py` | Facade → TencentClient(并发月线) → PageGenerator → dashboard.html |
+| **浏览器点开分析** | `python app/scripts/serve_web.py` → `/` `/market` `/indices` | store(单例锁) → facade/analyzer → JSON → ECharts |
+| **全市场分位排行** | `GET /api/market/ranking?indicator=pe_ttm` | store 窗口函数 SQL → 七档评级 → 过滤/排序/分页 |
+| **指数估值** | `GET /api/indices`、`GET /api/index/detail?code=000300` | index_memberships 成分中位数序列 → analyzer 分位 |
 
 ---
 
@@ -375,7 +402,7 @@ pip install -r requirements.txt
 | baostock | 0.9.4 | 备用历史行情与 PE |
 | pandas | 3.0.6 | 数据清洗与时序对齐 |
 | requests | 2.34.2 | 腾讯直连 HTTP（实时行情、公司名称、板块 K 线） |
-| duckdb | 1.4.3 | 本地分析型数据仓库（全市场 A 股数据持久化） |
+| duckdb | 1.4.3 | 本地分析型数据仓库（全市场 A 股数据持久化；`app.web.store` 另直接用它做全市场与指数聚合查询） |
 | Flask | 3.1.3 | 本地 Web 分析服务（`app/web` 专用；含 Werkzeug/Jinja2 等 6 个传递依赖，均锁定实测版本） |
 
 > `numpy` 与 `matplotlib` **不在 requirements.txt 中**，是 akshare / pandas 带入的传递依赖（实测环境：numpy 2.5.3、matplotlib 3.11.2）。全库无 `import numpy` / `import matplotlib`，绘图一律由前端 ECharts 在浏览器内完成。
@@ -436,11 +463,32 @@ pip install -r requirements.txt
     HTTP 200 但数据为空。`MarketService.fetch_company_profile()` 已实现，
     在接口开放的环境可直接用于补齐 `securities.industry` / `list_date`；
     接口不可用时以 `reference.index_memberships` 的指数成分作为同业分组的替代维度。
-14. **Web 分析服务（`serve_web.py`）的并发约束**：
+14. **Web 分析服务（`serve_web.py`）的并发与锁约束**：
     - 服务只监听 `127.0.0.1`，单用户本地工具，**不设鉴权、不对外暴露**；若将来要开放到局域网，必须先补鉴权。
-    - `app.web.api` 内有**全局 `threading.Lock`**：所有 facade 调用（取数 + 可能的回写）串行执行，纯内存统计在锁外并行。实测 8 并发请求全部成功（0.12s）。新增接口时**务必沿用这把锁**，不要绕过它直连 facade。
-    - **DuckDB 同文件跨进程单写者**：Web 服务运行期间不要同时跑 `sync_market_data.py`，否则后启动的一方会拿锁失败（报 `Could not set lock`）。先停同步、或先停服务再同步。
-    - 未知代码或远端回退时接口耗时可达数秒（实测 5.7s），属正常现象，前端已带 loading 态。
+    - **两把进程内串行锁，全在 `app.web.store` 里，新增接口必须经 `store`，不要绕过它直连 facade**：
+      - `_FACADE_LOCK`：包住「单例门面的创建 + 取数 + 可能的回写」；门面是**进程级单例**，只在首次建连一次，
+        连接失效才重建（修复了「每请求重建门面反复抢写锁」——初版实测每个请求都要重建一次）。
+      - `_STORE_LOCK`：包住全市场 / 指数聚合连接的全部查询。
+      - 两把锁**互不嵌套**，纯内存统计（analyzer）在锁外并行。实测混合 36 个并发请求全部 200。
+    - **DuckDB 对数据库文件是进程级独占锁，服务会长期持有**：
+      - 服务运行期间，**任何**外部进程（`sync_market_data.py`、`tests/test_web_api.py`、
+        `verify_market_sql.py` 等）连**只读连接**都会被拒，报 `Could not set lock on file`。
+      - 因此这些脚本**必须先停服务**再跑；相关脚本已对锁冲突给出可操作提示而非抛栈。
+      - 反向也成立：外部进程持锁时服务启动即失败。
+    - **同进程内不允许混合配置的连接**：门面是写连接时，同进程再开 `read_only=True` 会直接报
+      `Can't open a connection to same database file with a different configuration than existing connections`。
+      所以 `store` 的聚合连接也必须用默认写连接（初版踩过此坑，表现为「门面一打开，Dashboard 与指数接口全返回空」）。
+    - **上游 `securities` 表只有 `ts_code/symbol/name/exchange/market/list_status` 有值**：
+      `industry`、`area`、`list_date`、`is_hs` 全表为空（巨潮接口已需授权，见第 13 条），
+      因此 Web 层不查也不展示这些字段，避免出现恒为空的「行业 / 上市日期」。
+    - 未知代码或远端回退时接口耗时可达数秒（实测 5.7s），属正常现象，前端已带 loading 态与 15~30s 超时。
+15. **七档评级只属于 Web 展示层**：`store.percentile_level()` 与 `static/common.js` 的 `LEVEL7` 必须保持
+    完全一致（`tests/test_web_api.py` 既解析 JS 阈值、又用 node 真实执行 `levelOf()` 双向校验）。
+    `stocklab.analytics` 内部仍是三档（≤30 / 30~70 / ≥70），三档用于档位结论、七档仅用于页面展示，互不替代。
+16. **全市场分位走 SQL、个股详情走 analyzer，两者口径必须恒等**：
+    5572 只 × 平均 794 行 = 442 万行，逐只调 analyzer 不可行，故用一条窗口函数
+    （`store._MARKET_SQL`）一次算完（实测 0.13s）。改动该 SQL 后**必须**重跑
+    `app/scripts/verify_market_sql.py 300` 做抽样比对。
 
 ---
 
