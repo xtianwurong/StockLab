@@ -178,7 +178,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   - **逐只深度取数**：`fundamental_service.py`（`FundamentalService`：东财三大报表 + 财务指标，单只约 60 次请求，按报告期分批）、`lifecycle_service.py`（`LifecycleService`：沪深北上市日历与退市日历，只读交易所官网）。两者同样经 `stocklab.normalization` 产出契约帧，只被 `sync_market_data.py` 调用。
   - **公共基础**：
     - `data_contract.py`：行情数据契约（3 个列名常量 + `StockRealtimeQuote`），`quote_service` 与 `_sources` 共用；单独成文件是为避免「通道 import 服务、服务又 import 通道」的循环导入（类比 C++ 只含 struct + constexpr 的公共头文件）。
-    - `tencent_client.py`：腾讯 HTTP 传输网关（`TencentMarketClient` + `normalize_symbol`），抹平股票/ETF/指数代码差异，提供 K 线 / 简称 / 盘口原始字段与多标的**并发**抓取。独立于 `_sources` 之外的原因：能力超出单股 `StockDataSource` 契约（ETF/指数 + 并发），且被两个上层独立复用——`_sources/tencent_source`（单股降级第三级）与 `facade.fetch_multi_monthly_close`（dashboard 板块走势 10 标的并发月线），故置于通道之下单独一层。
+    - `tencent_client.py`：腾讯 HTTP 传输网关（`TencentMarketClient` + `normalize_symbol`），抹平股票/ETF/指数代码差异，提供 K 线 / 简称 / 盘口原始字段与多标的**并发**抓取。独立于 `_sources` 之外的原因：能力超出单股 `StockDataSource` 契约（ETF/指数 + 并发），且被两个上层独立复用——`_sources/tencent_source`（单股降级第三级，新浪/通达信分列四/五级）与 `facade.fetch_multi_monthly_close`（dashboard 板块走势 10 标的并发月线），故置于通道之下单独一层。
     - `cninfo_client.py`：巨潮资讯公告 Gateway（独立于行情链路），提供 `resolve_org_id()`、`get_announcements()`、`fetch_announcements()`，支持分页 / UTC+8 日期 / PDF 拼接 / 去重；**不继承 StockDataSource**。
 - `stocklab/domain`：**列契约层（叶子包）**，只放「列名 + 列序元组」与 `DataContractError`，
   被 `datasource`、`persistence`、`normalization` 共同引用，自己不依赖任何 StockLab 包。
@@ -294,7 +294,7 @@ StockLab/
 │   │   ├── __init__.py                 #     导出个股服务与腾讯网关的公共 API
 │   │   ├── data_contract.py              #     统一数据契约：列名常量 + StockRealtimeQuote（无依赖，单股/入库两服务共用）
 │   │   ├── tencent_client.py           #     【腾讯传输网关】TencentMarketClient（股票/ETF/指数统一接入）
-│   │   ├── quote_service.py            #     【单股行情服务】StockQuoteService：三级降级编排 + 数据契约 re-export
+│   │   ├── quote_service.py            #     【单股行情服务】StockQuoteService：五级降级编排 + 数据契约 re-export
 │   │   ├── market_service.py             #     【入库取数】MarketService：7 个 fetch_* 输出领域契约帧（源缺列抛 DataContractError）
 │   │   ├── fundamental_service.py        #     【逐只基本面】FundamentalService：东财三大报表（单只约 60 次请求）
 │   │   ├── lifecycle_service.py          #     【生命周期】LifecycleService：沪深北上市日历 + 退市日历
@@ -348,7 +348,7 @@ StockLab/
 │   │   ├── universe.py                 #     universe_as_of：与 SecurityRepository.universe 同口径的 as-of 股票池
 │   │   └── metrics.py                  #     §9.3 十一项指标（252 日年化；分母为 0 → NaN）
 │   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
-│   │   ├── __init__.py                 #     本层统一出口（Database + 13 个 Repository）
+│   │   ├── __init__.py                 #     本层统一出口（Database + 14 个 Repository）
 │   │   ├── storage/                    #     数据存储基础设施
 │   │   │   ├── __init__.py             #       导出 Database / initialize_database
 │   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with，打开时校验版本）
@@ -359,9 +359,10 @@ StockLab/
 │   │   │   ├── 001_initial.sql         #       基线迁移（机制上线前的既有结构，全部 IF NOT EXISTS）
 │   │   │   ├── 002_fundamental.sql     #       fundamental 域四张表
 │   │   │   ├── 003_security_events.sql #       list_status → status + reference.security_events
-│   │   │   └── 004_research.sql        #       research.snapshots + research.snapshot_results（研究快照，只写不改）
+│   │   │   ├── 004_research.sql        #       research.snapshots + research.snapshot_results（研究快照，只写不改）
+│   │   │   └── 005_announcements.sql   #       corporate.announcements（巨潮公告索引，主键 announcement_id + 二次去重键）
 │   │   └── repository/                 #     数据访问层（表级 SQL 封装）
-│   │       ├── __init__.py             #       导出 BaseRepository 与 13 个 Repository
+│   │       ├── __init__.py             #       导出 BaseRepository 与 14 个 Repository
 │   │       ├── base.py                 #       BaseRepository：契约对齐 + 显式列名 UPSERT / 异常处理 / 日志模板
 │   │       ├── security.py             #       reference.securities（名录 upsert / 生命周期 upsert_lifecycle / universe(as_of)）
 │   │       ├── security_event.py       #       reference.security_events（生命周期事件按 as-of 查询）
@@ -452,7 +453,7 @@ StockLab/
 |------|------|----------|
 | **配置** | `stocklab.common.config` | 解析 `config.ini`，输出强类型配置对象（基准、板块、优先级） |
 | **基础工具** | `stocklab.common.type_conversion` | `safe_float` / `safe_int` —— 统一处理 `None/空串/占位符/-` |
-| **数据源** | `stocklab.datasource.quote_service` | **单股行情服务 `StockQuoteService`**：三通道降级、月线价格+PE对齐、实时行情 |
+| **数据源** | `stocklab.datasource.quote_service` | **单股行情服务 `StockQuoteService`**：五通道降级（AkShare→BaoStock→Tencent→Sina→TDX）、月线价格+PE对齐、实时行情 |
 | | `stocklab.datasource.data_contract` | **数据契约**：列名常量 + `StockRealtimeQuote`，单股行情/入库取数两服务共用 |
 | | `stocklab.datasource.tencent_client` | **腾讯传输网关 `TencentMarketClient`**：股票/ETF/指数不区分、并发批量、OHLCV全要素 |
 | | `stocklab.datasource.market_service` | **入库取数 `MarketService`**：基础信息/日K/估值快照/历史估值/行业估值/指数成分/公司概况 —— 输出领域契约帧，源缺列抛 `DataContractError` |
