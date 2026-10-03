@@ -150,15 +150,16 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
 - `app/dashboard`：把数据渲染成网页。
-- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，三个页面共用一套数据层：
+- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，四个页面共用一套数据层：
   - **个股分析 `/`**：输入代码或中文名 → 分位徽章 + 0-100 温度条 + 多窗口分位对比 + 双 y 轴走势图（10/50/90 分位参考线与 25%~75% 分位带）+ 指标明细表。
-  - **全市场 Dashboard `/market`**：5 指标切换、市场/搜索过滤、七档评级分布与分位直方图、可排序分页排行表（点行跳个股页）。
+  - **全市场 Dashboard `/market`**：5 指标切换、市场/搜索/评级过滤、七档评级分布（可点击钻取）与分位直方图、可排序分页排行表（点行跳个股页）。
   - **指数估值 `/indices`**：6 大宽基指数卡片（成分中位数口径）+ 点击展开走势图。
+  - **行业估值 `/industries`**：国证行业分类 1~4 级横截面，PE 三种口径 + 规模数据，条形图 + 明细表（板块洼地判断）。
   - `server.py`：`create_app()` 装配层——**路由一律用 `app.add_url_rule()` 注册表写法，不用 `@app.route` 装饰器**（遵守本文件禁用装饰器的规定）。
-  - `store.py`：**进程级数据访问单例**——(1) 单例门面 + 串行锁，修复「每请求重建门面反复抢写锁」；(2) 全市场窗口函数 SQL 与指数聚合，走本模块自己的单例连接 + 第二把锁，与门面锁互不嵌套；(3) 七档评级 `percentile_level()`、证券表与聚合结果的进程内缓存。
-  - `api.py`：个股接口层——只做「参数解析 → 代码/名称解析 → store 取数 → analyzer 计算 → 组装 JSON」，纯内存统计放在锁外。
-  - `market_api.py`：全市场与指数接口层——参数校验 → store 聚合 → 过滤/排序/分页，不经门面锁。
-  - `static/`：`base.css` 设计系统、`common.js` 共享工具（请求超时、七档配色、温度条、ECharts option 工厂）与各页脚本；`templates/`：三个页面模板。
+  - `store.py`：**进程级数据访问单例**——(1) 单例门面 + 串行锁，修复「每请求重建门面反复抢写锁」；(2) 全市场窗口函数 SQL 与指数聚合，走本模块自己的单例连接 + 第二把锁，与门面锁互不嵌套；(3) 七档评级 `percentile_level()`、证券表与聚合结果的进程内缓存；(4) 行业估值横截面 `load_industry_valuation()` 与数据截止日期 `market_data_as_of()`。
+  - `api.py`：个股接口层——只做「参数解析 → 代码/名称解析 → store 取数 → analyzer 计算 → 组装 JSON」，纯内存统计放在锁外；`/api/health` 额外返回 `data_as_of` 数据截止日期。
+  - `market_api.py`：全市场与指数接口层——参数校验 → store 聚合 → 过滤/排序/分页，不经门面锁；`/api/market/ranking` 支持 `level` 七档评级过滤（summary 仍按过滤前口径统计）；`/api/industries` 行业横截面。
+  - `static/`：`base.css` 设计系统、`common.js` 共享工具（请求超时、七档配色、温度条、七档图例、健康检查、ECharts option 工厂）与各页脚本；`templates/`：四个页面模板 + `_topbar.html` / `_footer.html` 共享 partial。
   - **依赖方向 `app.web → stocklab.facade / stocklab.analytics`（`store.py` 另直接用 `duckdb` 做只读聚合），与 `app.dashboard` 平行，不修改 `stocklab/` 核心库任何文件。**
   - **七档评级仅存在于 Web 展示层**（`store.percentile_level` 与 `static/common.js` 的 `LEVEL7`，两侧口径由 `tests/test_web_api.py` 双向校验）；`stocklab.analytics` 内部仍是三档结论。
 - **分层命名契约**：
@@ -233,21 +234,25 @@ StockLab/
 │   │       └── dashboard.html         #    网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
 │   ├── web/                            #   本地 Web 分析服务（Flask，浏览器端点击分析）
 │   │   ├── __init__.py                #     导出 create_app
-│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器），页面 3 + 接口 6 + 图标 1
-│   │   ├── store.py                   #     进程级数据访问单例：单例门面锁 / 聚合连接锁 / 七档评级 / 进程内缓存
+│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器），页面 4 + 接口 7 + 图标 1
+│   │   ├── store.py                   #     进程级数据访问单例：单例门面锁 / 聚合连接锁 / 七档评级 / 行业横截面 / 进程内缓存
 │   │   ├── api.py                     #     个股接口：代码与中文名解析 → store → analyzer → JSON
-│   │   ├── market_api.py              #     全市场与指数接口：过滤排序分页 → store 聚合 → JSON
+│   │   ├── market_api.py              #     全市场/指数/行业接口：过滤排序分页 → store 聚合 → JSON
 │   │   ├── templates/
-│   │   │   ├── analysis.html          #     个股分析页（顶栏导航 / 温度条 / 多窗口 / 明细表）
-│   │   │   ├── market.html            #     全市场 Dashboard（统计卡 / 分布图 / 排行表 / 分页）
-│   │   │   └── indices.html           #     指数估值页（指数卡片 + 走势详情）
+│   │   │   ├── _topbar.html           #     共享顶栏（导航 / 状态 / 数据截止）
+│   │   │   ├── _footer.html           #     共享页脚（口径说明 / 免责声明）
+│   │   │   ├── analysis.html          #     个股分析页（温度条 / 多窗口 / 明细表 / 七档图例）
+│   │   │   ├── market.html            #     全市场 Dashboard（统计卡 / 分布图 / 排行表 / 分页 / 评级钻取）
+│   │   │   ├── indices.html           #     指数估值页（指数卡片 + 走势详情）
+│   │   │   └── industries.html        #     行业估值页（层级切换 / PE 条形图 / 明细表）
 │   │   └── static/
 │   │       ├── echarts.min.js         #     ECharts 5.5 vendored（本地托管，离线可用）
-│   │       ├── base.css               #     共享设计系统：顶栏 / 卡片 / 表格 / 徽章 / 温度条 / 七档色
-│   │       ├── common.js              #     带超时的请求、格式化、七档配色、ECharts 双轴与参考线 option 工厂
+│   │       ├── base.css               #     共享设计系统：顶栏 / 卡片 / 表格 / 徽章 / 温度条 / 七档色 / 图例 / 页脚
+│   │       ├── common.js              #     带超时的请求、格式化、七档配色、七档图例、健康检查、ECharts option 工厂
 │   │       ├── app.js                 #     个股页：联想键盘操作 / 分析渲染 / URL 还原
-│   │       ├── market.js              #     Dashboard：统计卡 / 直方图 / 排行分页
-│   │       └── indices.js             #     指数页：卡片列表 / 详情加载
+│   │       ├── market.js              #     Dashboard：统计卡 / 直方图 / 评级钻取 / 排行分页
+│   │       ├── indices.js             #     指数页：卡片列表 / 详情加载
+│   │       └── industries.js          #     行业页：层级切换 / 条形图 / 明细表
 │   └── scripts/                       #   CLI 入口
 │       ├── generate_sector_trend.py   #     命令行入口：生成板块走势网页
 │       ├── sync_market_data.py        #     命令行入口：全市场数据同步到本地 DuckDB（五个阶段）
@@ -288,7 +293,7 @@ StockLab/
 | | `stocklab.analytics.markdown_reporter` | 全市场分布：归档级 Markdown（表格 + 自动结论） |
 | **仪表板** | `app.dashboard.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
 | | `app.dashboard.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
-| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器），页面 3 + 接口 6 + favicon |
+| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器），页面 4 + 接口 7 + favicon |
 | | `app.web.store` | **进程级数据访问单例**：门面锁 / 聚合连接锁、全市场窗口函数 SQL、指数成分中位数序列、七档评级、进程内缓存 |
 | | `app.web.api` | 个股接口：`/api/percentile` 分位 + 多窗口、`/api/securities` 联想（排序 + 大小写不敏感）、代码与中文名解析 |
 | | `app.web.market_api` | 全市场接口：`/api/market/ranking`（过滤/排序/分页 + 七档分布与直方图）、`/api/indices`、`/api/index/detail` |
@@ -379,8 +384,9 @@ StockLab/
 | **历史估值分位(单股)** | Facade → ValuationHistoryRepo → Analyzer → Reporter | 本地序列 → CDF分位 → 控制台/MD |
 | **全市场PE分布快照** | Facade → DailyValuationRepo → DistributionAnalyzer → MarkdownReporter | 单日横截面 → 中位数/分桶/极值 → 归档MD |
 | **板块10年走势网页** | `python app/scripts/generate_sector_trend.py` | Facade → TencentClient(并发月线) → PageGenerator → dashboard.html |
-| **浏览器点开分析** | `python app/scripts/serve_web.py` → `/` `/market` `/indices` | store(单例锁) → facade/analyzer → JSON → ECharts |
+| **浏览器点开分析** | `python app/scripts/serve_web.py` → `/` `/market` `/indices` `/industries` | store(单例锁) → facade/analyzer → JSON → ECharts |
 | **全市场分位排行** | `GET /api/market/ranking?indicator=pe_ttm` | store 窗口函数 SQL → 七档评级 → 过滤/排序/分页 |
+| **行业估值横截面** | `GET /api/industries?level=1` | store 行业表 → 层级过滤 → PE 三口径 + 规模 |
 | **指数估值** | `GET /api/indices`、`GET /api/index/detail?code=000300` | index_memberships 成分中位数序列 → analyzer 分位 |
 
 ---

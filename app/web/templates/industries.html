@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockLab - 行业估值</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/base.css">
+  <script src="/static/echarts.min.js"></script>
+  <style>
+    /* ---------- 层级切换 ---------- */
+    .level-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .level-tab {
+      border: 1px solid var(--border-color);
+      background: var(--bg-card);
+      color: var(--text-sub);
+      font-size: 13px;
+      font-weight: 550;
+      padding: 6px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .level-tab:hover { border-color: var(--border-strong); }
+    .level-tab.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 650;
+    }
+
+    /* ---------- 行业条形图 ---------- */
+    #industry-chart { width: 100%; height: 420px; }
+    @media (max-width: 860px) {
+      #industry-chart { height: 320px; }
+    }
+
+    /* ---------- 行业表 ---------- */
+    .industry-table th:nth-child(1) { min-width: 130px; }
+    .industry-table td.num { text-align: right; font-family: var(--mono); }
+    .industry-table td .sub { display: block; font-size: 11px; color: var(--text-faint); }
+  </style>
+</head>
+<body>
+  {% set active_page = "industries" %}
+  {% include "_topbar.html" %}
+
+  <main class="container">
+    <div class="page-head">
+      <div class="page-title">行业估值</div>
+      <div class="page-desc">
+        国证行业分类下各行业的 PE 三种口径与规模数据，用于
+        <span class="term" data-tip="在行业横截面中寻找 PE 明显低于全市场中位数的板块，作为选股的方向性参考。">板块洼地判断</span>。
+        数据为每日横截面快照，非历史序列。
+      </div>
+    </div>
+
+    <section class="card card-pad">
+      <div class="toolbar">
+        <div class="field">
+          <label class="field-label">行业层级</label>
+          <div class="level-tabs" id="level-tabs"></div>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <button class="btn btn-primary" id="btn-reload">刷新</button>
+      </div>
+    </section>
+
+    <div class="message" id="message" style="margin-top:14px"></div>
+
+    <!-- 统计卡 -->
+    <section class="stat-grid section" id="stat-grid">
+      <div class="stat-card"><div class="stat-k">行业数</div><div class="stat-v">-</div></div>
+      <div class="stat-card"><div class="stat-k">有 PE 行业</div><div class="stat-v">-</div></div>
+      <div class="stat-card"><div class="stat-k">行业中位 PE</div><div class="stat-v">-</div></div>
+      <div class="stat-card"><div class="stat-k">覆盖公司</div><div class="stat-v">-</div></div>
+    </section>
+
+    <!-- 条形图 -->
+    <section class="card section">
+      <div class="card-head">
+        <div class="card-title">行业 PE 中位数</div>
+        <div class="card-hint">按 PE 中位数升序，越靠左越便宜；灰色为当期无有效 PE</div>
+      </div>
+      <div class="card-pad"><div id="industry-chart"></div></div>
+    </section>
+
+    <!-- 明细表 -->
+    <section class="card section">
+      <div class="card-head">
+        <div class="card-title">行业明细</div>
+        <div class="card-hint">PE 加权 = 总市值加权；PE 中位 = 成分中位数；PE 算术 = 简单平均</div>
+      </div>
+      <div class="table-wrap">
+        <table class="table industry-table">
+          <thead>
+            <tr>
+              <th>行业</th>
+              <th class="num">公司数</th>
+              <th class="num">有 PE</th>
+              <th class="num">PE 加权</th>
+              <th class="num">PE 中位</th>
+              <th class="num">PE 算术</th>
+              <th class="num">总市值(亿)</th>
+              <th class="num">净利润(亿)</th>
+            </tr>
+          </thead>
+          <tbody id="industry-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  {% include "_footer.html" %}
+
+  <script src="/static/common.js"></script>
+  <script src="/static/industries.js"></script>
+</body>
+</html>

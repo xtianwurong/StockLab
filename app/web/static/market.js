@@ -115,6 +115,9 @@
         total = data.total || 0;
         renderStats(data.summary);
         renderDistribution(data.summary);
+        if (marketLegend) {
+          marketLegend.innerHTML = SL.levelLegend();
+        }
         renderTable(data.items || []);
         renderPager();
         renderFilterHint();

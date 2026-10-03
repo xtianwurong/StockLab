@@ -552,6 +552,9 @@ def industry_stat_dates():
 
     dates = []
     for value in frame["stat_date"].tolist():
+        # DuckDB 可能返回 datetime 或 date，统一成 YYYY-MM-DD 文本
+        if hasattr(value, "date") and not isinstance(value, str):
+            value = value.date()
         dates.append(value.isoformat() if hasattr(value, "isoformat") else str(value))
     _cache_put("industry_dates", dates)
     return dates
@@ -634,6 +637,9 @@ def market_data_as_of():
     if frame is not None and not frame.empty:
         raw = frame["d"].iloc[0]
         if raw is not None and raw == raw:  # None / NaT 排除
+            # DuckDB 可能返回 datetime 或 date，统一成 YYYY-MM-DD 文本
+            if hasattr(raw, "date") and not isinstance(raw, str):
+                raw = raw.date()
             value = raw.isoformat() if hasattr(raw, "isoformat") else str(raw)
     _cache_put("market_as_of", value)
     return value

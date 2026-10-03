@@ -5,7 +5,7 @@ StockLab - 全市场与指数接口处理模块 (app.web.market_api)
 ==============================================================================
 
 【模块职责】
-  首页 Dashboard（全市场分位排行）与指数估值页的数据接口。
+  首页 Dashboard（全市场分位排行）、指数估值页与行业估值页的数据接口。
   只做「参数解析 -> 调用 store -> 过滤排序分页 -> 组装 JSON」，
   不含统计逻辑（分位计算在 store，档位映射在 store.percentile_level）。
 
@@ -36,10 +36,6 @@ __all__ = [
     "handle_index_detail",
 ]
 
-
-# 可用的估值指标（与 store 支持的列名一致）
-_INDICATORS = ("pe_ttm", "pe_static", "pb", "ps", "pcf")
-
 # 行业层级取值（国证行业分类：1 一级 ~ 4 细分）
 _INDUSTRY_LEVELS = (1, 2, 3, 4)
 
@@ -47,6 +43,10 @@ _INDUSTRY_LEVELS = (1, 2, 3, 4)
 _LEVEL_NAMES = (
     "极度低估", "低估", "正常偏低", "正常", "正常偏高", "高估", "极度高估", "-",
 )
+
+
+# 可用的估值指标（与 store 支持的列名一致）
+_INDICATORS = ("pe_ttm", "pe_static", "pb", "ps", "pcf")
 
 # 分页上限：Dashboard 一次最多回 200 行，其余靠翻页
 _MAX_PAGE_SIZE = 200

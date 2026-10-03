@@ -71,7 +71,7 @@ def run_route_tests():
     print("=" * 65)
 
     client = _client()
-    for path in ("/", "/market", "/indices", "/favicon.ico"):
+    for path in ("/", "/market", "/indices", "/industries", "/favicon.ico"):
         response = client.get(path)
         assert response.status_code == 200, "%s 返回 %s" % (path, response.status_code)
         print("  -> %-14s 200, %d bytes" % (path, len(response.data)))
@@ -79,7 +79,9 @@ def run_route_tests():
     health = _json(client.get("/api/health"))
     assert health["status"] == "ok"
     assert health["db_path"]
-    print("  -> /api/health  status=%s db=%s" % (health["status"], health["db_path"]))
+    assert health["data_as_of"], "健康检查应带数据截止日期"
+    print("  -> /api/health  status=%s db=%s as_of=%s" % (
+        health["status"], health["db_path"], health["data_as_of"]))
 
 
 def run_validation_tests():
@@ -380,6 +382,55 @@ def run_market_ranking_tests():
     print("  -> indicator=pb 标签=%s，前 3 只 %s" % (
         pb["indicator_label"], [item["name"] for item in pb["items"]]))
 
+    # 评级过滤：只返回该档标的，且 summary 仍按全市场口径统计
+    low = _json(client.get("/api/market/ranking?level=%E6%9E%81%E5%BA%A6%E4%BD%8E%E4%BC%B0&limit=200"))
+    assert low["total"] > 0, "极度低估档应有标的"
+    assert all(item["level"] == "极度低估" for item in low["items"]), "评级过滤失效"
+    assert sum(low["summary"]["level_counts"].values()) == low["summary"]["total"], \
+        "summary 应按过滤前口径统计"
+    print("  -> level=极度低估 命中 %d 只（summary total=%d）" % (
+        low["total"], low["summary"]["total"]))
+
+    bad_level = client.get("/api/market/ranking?level=不存在")
+    assert bad_level.status_code == 400, "非法评级应返回 400"
+    print("  -> 非法评级参数正确拒绝")
+
+
+def run_industry_tests():
+    """阶段九：行业估值横截面（层级切换 / 汇总 / 排序）"""
+    print("\n" + "=" * 65)
+    print("【阶段九：行业估值】")
+    print("=" * 65)
+
+    client = _client()
+
+    body = _json(client.get("/api/industries?level=1"))
+    assert body["items"], "一级行业不应为空"
+    assert body["stat_date"], "应返回统计日期"
+    assert body["summary"]["industry_count"] == len(body["items"]), \
+        "汇总行业数应等于条目数"
+    for item in body["items"]:
+        assert item["industry_name"], "行业名不应为空"
+        assert item["pe_median"] is None or item["pe_median"] > 0, \
+            "PE 中位数应为正或空: %s" % item["industry_name"]
+    # 按 PE 中位数升序（缺失排最后）
+    medians = [item["pe_median"] for item in body["items"] if item["pe_median"] is not None]
+    assert medians == sorted(medians), "行业应按 PE 中位数升序"
+    print("  -> 一级行业 %d 个，统计日 %s，行业中位 PE %s" % (
+        len(body["items"]), body["stat_date"], body["summary"]["median_pe"]))
+
+    # 层级切换：二级行业数量应多于一级
+    level2 = _json(client.get("/api/industries?level=2"))
+    assert len(level2["items"]) > len(body["items"]), "二级行业应多于一级"
+    print("  -> 二级行业 %d 个" % len(level2["items"]))
+
+    # 非法层级 400
+    bad = client.get("/api/industries?level=9")
+    assert bad.status_code == 400, "level=9 应返回 400"
+    bad2 = client.get("/api/industries?level=abc")
+    assert bad2.status_code == 400, "level=abc 应返回 400"
+    print("  -> 非法层级参数正确拒绝")
+
 
 def run_index_tests():
     """阶段九：指数列表与单指数详情"""
@@ -500,6 +551,7 @@ def main():
         run_frontend_level_tests()
         run_consensus_tests()
         run_market_ranking_tests()
+        run_industry_tests()
         run_index_tests()
         run_percentile_detail_tests()
 

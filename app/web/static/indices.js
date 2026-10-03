@@ -265,6 +265,11 @@
     }
   });
 
+  var legendBox = document.getElementById("index-legend");
+  if (legendBox) {
+    legendBox.innerHTML = SL.levelLegend();
+  }
+
   SL.checkHealth();
   renderTabs();
   loadList();
