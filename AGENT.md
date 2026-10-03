@@ -124,6 +124,8 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
          ├──►  stocklab.factor ──►  stocklab.screener
          │        （因子与筛选纯计算：只吃 DataFrame，不碰网络/数据库）
          │
+         ├──►  stocklab.backtest           （回测纯计算：只吃 DataFrame，不碰网络/数据库）
+         │
          ├──►  stocklab.research ──┬──►  stocklab.persistence（查数 + 写研究快照）
          │        （研究编排层）      ├──►  stocklab.factor    （算因子）
          │                          └──►  stocklab.screener   （判条件）
@@ -132,11 +134,13 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
                 （只对本地落库）                └──►  stocklab.persistence.migrations
 ```
 
-> `stocklab.factor`（27 个因子 + 预处理）与 `stocklab.screener`（规则/分组/流水线）
-> **只接收调用方传入的 DataFrame**：因子算什么、条件怎么判都与网络和数据库无关，可离线单测；
+> `stocklab.factor`（27 个因子 + 预处理）、`stocklab.screener`（规则/分组/流水线）与
+> `stocklab.backtest`（引擎/组合/成本/指标/股票池）**只接收调用方传入的 DataFrame**：
+> 因子算什么、条件怎么判、怎么撮合都与网络和数据库无关，可离线单测；
 > 「取数」这一件事只由 `stocklab.research.frame` 承担，它按 Point-in-Time 拼出因子输入帧
 > （每只股票一行），再交给因子层与筛选层。`stocklab.research` 是**编排层**：
-> 允许同时依赖 persistence 与两个纯计算包，与 facade 同属「取数 / 编排」这一侧。
+> 允许同时依赖 persistence 与三个纯计算包，与 facade 同属「取数 / 编排」这一侧
+> （回测结果是否落库、信号由谁拼，也都在编排层决定）。
 
 > `stocklab.analytics` **不 import `facade` / `datasource` / `persistence`**：它只接收调用方传入的
 > DataFrame 做统计聚合，因此可脱离网络与数据库独立单测。取数仍由入口脚本经 facade 完成。
@@ -157,6 +161,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 | `stocklab.fundamental` | `domain` | `pandas` | 无 |
 | `stocklab.factor` | 无（层内互引 `factor`） | `pandas` | `math` |
 | `stocklab.screener` | `factor` | `pandas` | 无 |
+| `stocklab.backtest` | 无（层内互引 `backtest.order`） | `pandas` | 无 |
 | `stocklab.research` | `domain` `factor` `screener` `persistence` | `pandas` | `datetime` `hashlib` `json` `logging` |
 | `app.dashboard` | `common` `facade`（层内互引 `dashboard`） | 无 | `datetime` `json` `logging` `os` |
 | `app.web` | `facade` `analytics`（层内互引 `web`） | `flask` | `logging` `os` `threading` |
@@ -207,6 +212,25 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
     **预处理(§7.6) → 判定**，所以阈值作用在处理后的值上；`ScreenResult.summary`（每只股票一行：
     ts_code / name / passed / failed_rules / 各因子值）+ `detail`（股票 × 规则长表：
     factor_value / threshold / passed / reason），正是 §8.2 要求的输出。
+- `stocklab/backtest`：**回测层（V2 §9 / Phase 3），纯计算**，不取数、不落库。
+  - `engine.py`：`BacktestEngine.run(prices, signals, dividends, benchmark)` —— 每个交易日固定四步：
+    `unlock()`（T+1 解锁）→ 分红入账 → 撮合昨日委托（**先卖后买**，一律按收盘价）→ 计值并由当日信号下单；
+    **成交日恒为信号日的下一个交易日**，「当天算的信号当天成交」在结构上不可能，输出 `BacktestResult`
+    （权益曲线 / 成交 / 委托 / 期末持仓 / `metrics()`）。
+  - `portfolio.py` + `order.py` + `trade.py`：`Cash` / `Position` / `Order` / `Trade`；
+    `available` 就是 T+1 可卖数量——买入只加 `qty` 不加 `available`，`unlock()` 才解锁，卖不动即报错；
+    平均成本**含买入费用**、卖出费用从已实现盈亏里扣（现金与权益对得上账）；
+    委托只有 待撮合 / 已成交 / 已拒绝 三种归宿，**拒绝必须写明原因**。
+  - `cost.py`：`CostModel` = 佣金（最低 5 元）+ 印花税（仅卖出）+ 滑点，三段分列不揉成一个费率。
+  - `universe.py`：`universe_as_of(securities, as_of)` —— 与 `SecurityRepository.universe` **逐字同口径**
+    的幸存者安全股票池（上市日 <= as-of 且退市日 > as-of，`list_date` 未知保守纳入）。
+  - `metrics.py`：§9.3 要求的全部 11 个指标，统一按 **252 个交易日**年化；CAGR（几何）与
+    Annual Return（算术）分列；**分母为 0（无波动 / 无下行 / 无回撤 / 无亏损交易）一律返回 NaN**，
+    绝不用 inf 冒充「表现很好」。
+  - 涨跌停 / 停牌：行情给 `limit_up` / `limit_down` / `suspended` 列就用它，否则由
+    `pre_close × (1±limit_rate)`（按 0.01 取整）与「有行情但成交量为 0」推导；
+    **买不进 / 卖不出的原因逐条写进 `orders.reason`**，退市持仓按最近价计值并在
+    `equity.stale_count` 计数，绝不静默清零。
 - `stocklab/research`：**研究编排层（V2 §6）**，因子与筛选唯一「查库 / 落库」的入口。
   - `frame.py`：`build_factor_frame(as_of_date, ts_codes, factor_names, extra_columns, database)` ——
     as-of 股票池（含 as-of 之后才退市的、排除已退市与后上市）、估值与基本面只读
@@ -311,6 +335,15 @@ StockLab/
 │   │   ├── __init__.py                 #     导出 ScreenRule / ScreenGroup / ScreenPipeline / ScreenResult / ScreenError
 │   │   ├── rules.py                    #     9 种操作符表驱动 + AND/OR 组嵌套 + 逐行 explain（满足/未满足/无数据）
 │   │   └── pipeline.py                 #     from_spec / spec 往返、执行顺序（算因子→预处理→判定→组合）、summary + detail
+│   ├── backtest/                       #   回测层（V2 §9，纯计算：只吃 DataFrame，不联网不查库）
+│   │   ├── __init__.py                 #     导出 BacktestEngine / BacktestResult / Portfolio / Order / Trade / CostModel / universe_as_of
+│   │   ├── engine.py                   #     四步日循环（解锁→分红→撮合昨日委托→计值下单）、成交日=信号日+1、拒绝理由留痕
+│   │   ├── portfolio.py                #     Cash / Position / T+1 可卖数量 / 平均成本含费 / 缺价拒绝计值
+│   │   ├── order.py                    #     BacktestError + 买卖方向 + Order（待撮合/已成交/已拒绝）
+│   │   ├── trade.py                    #     Trade：成交金额、佣金/印花税/滑点三段、已实现盈亏
+│   │   ├── cost.py                     #     CostModel：佣金（最低 5 元）+ 印花税（仅卖出）+ 滑点
+│   │   ├── universe.py                 #     universe_as_of：与 SecurityRepository.universe 同口径的 as-of 股票池
+│   │   └── metrics.py                  #     §9.3 十一项指标（252 日年化；分母为 0 → NaN）
 │   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
 │   │   ├── __init__.py                 #     本层统一出口（Database + 13 个 Repository）
 │   │   ├── storage/                    #     数据存储基础设施
@@ -394,6 +427,7 @@ StockLab/
 │   ├── test_factor_engine.py           #     因子引擎自检（登记契约 / 六分类 / 数学手算核对 / 预处理与非法配置）
 │   ├── test_screener.py                #     选股器自检（操作符 / AND·OR 嵌套 / 缺失值 / 预处理生效 / spec 往返）
 │   ├── test_research_snapshot.py       #     研究快照自检（PIT 帧 / 筛选 / 快照写入 / 复现比对 / 空库），全部用临时库
+│   ├── test_backtest.py                #     回测自检（成本 / T+1 / 指标手算 / 幸存者安全 / 撮合与拒绝理由 / 非法输入）
 │   └── test_pit_universe.py            #     PIT 与股票池自检（未来泄漏 / 幸存者偏差 / 指标派生）
 ├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
 │   └── stocklab.duckdb                 #     本地 DuckDB 单文件数据库
@@ -425,6 +459,9 @@ StockLab/
 | | `stocklab.factor.base` / `preprocessing` | `Factor` 定义（`categories` 为元组，一个因子可挂多个分类）+ `FactorDataError`；§7.6 预处理 winsorize / zscore / rank / missing / 行业·市值中性化（非法配置一律拒绝） |
 | **筛选** | `stocklab.screener.rules` | 9 种操作符表驱动 + AND/OR 可嵌套组；除 `isna` 外缺失值一律判不通过，`explain()` 逐行给出「满足 / 未满足 / 无数据」 |
 | | `stocklab.screener.pipeline` | `from_spec` / `spec` 往返（与 §8.1 YAML 同构）；执行顺序 = 算因子 → 预处理 → **判定** → 组合；输出 `summary` + `detail`（§8.2） |
+| **回测** | `stocklab.backtest.engine` | `BacktestEngine.run(prices, signals, dividends, benchmark)`：四步日循环（T+1 解锁 → 分红 → 撮合昨日委托先卖后买按收盘价 → 计值下单），**成交日恒为信号日+1**；输出权益曲线 / 成交 / 委托 / 期末持仓 |
+| | `stocklab.backtest.portfolio` / `order` / `trade` | `Portfolio`（现金 + `available` 可卖数量，`unlock()` 才解锁）、`Order`（待撮合/已成交/已拒绝，拒绝必写原因）、`Trade`（费用三段 + 已实现盈亏，平均成本含买入费用） |
+| | `stocklab.backtest.cost` / `universe` / `metrics` | `CostModel`（佣金最低 5 元 + 印花税仅卖出 + 滑点）、`universe_as_of`（与 `SecurityRepository.universe` 同口径）、`compute_metrics`（§9.3 十一项，252 日年化，分母为 0 → NaN） |
 | **研究** | `stocklab.research.frame` | `build_factor_frame`：Point-in-Time 拼因子输入帧（as-of 股票池 / `available_date <= as-of` / 上年同期 / 日线派生动量·波动率·回撤）；无数据源的列 NaN 落地并告警 |
 | | `stocklab.research.snapshot` | `create_snapshot` / `load_snapshot` / `list_snapshots` / `rerun_snapshot`（按 spec 重新生成并逐行比对）+ `config_version` / `data_version` / `factor_version`；快照只写不改 |
 | **外观** | `stocklab.facade.market_data` | **统一取数门面**：本地优先/远端优先策略、Cache-Aside 回写 |
@@ -517,6 +554,7 @@ StockLab/
 ./venv/bin/python tests/test_factor_engine.py     # 因子登记契约、数学手算核对与预处理
 ./venv/bin/python tests/test_screener.py          # 操作符、AND/OR 嵌套、缺失值与 spec 往返
 ./venv/bin/python tests/test_research_snapshot.py # PIT 输入帧、快照写入与复现比对
+./venv/bin/python tests/test_backtest.py          # 回测：成本 / T+1 / 指标手算 / 幸存者安全 / 撮合与拒绝理由
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
 ./venv/bin/python app/scripts/sync_market_data.py --securities-only
@@ -738,6 +776,38 @@ pip install -r requirements.txt
       （退出码 1，可进 CI）；`data_version` = `schema_v{N}@{as-of 前最近一个估值交易日}`，
       `factor_version` = `stocklab.factor.FACTOR_VERSION`，`config_version` = 条件内容哈希。
     - `run_research.py` 要写库，**必须先停 `serve_web.py`**（见第 14 条的 DuckDB 写锁）。
+27. **回测层（`stocklab.backtest`）是纯计算，撮合口径约定**：
+    - 只吃四个帧：`prices` / `signals` / `dividends` / `benchmark`，**不联网、不查库**；
+      行情、信号怎么来由调用方（research 层）负责，回测结果是否落库也由调用方决定。
+    - **信号 = 当日完整目标权重**（`0 <= weight <= 1`、同一日合计 `<= 1`，A 股不做空），
+      持仓里没出现的标的按 0 处理即清仓；信号日必须是行情里的交易日，否则直接报错——
+      绝不把信号悄悄挪到别的日子。
+    - **成交日恒为信号日的下一个交易日、一律按收盘价、先卖后买**：当天算的信号当天成交
+      这种前视偏差在结构上不可能；每日顺序固定为
+      `unlock()`（T+1 解锁）→ 分红入账 → 撮合昨日委托 → 计值并下单。
+    - 买入按手（`lot_size`，默认 100 股）取整；现金不够时**部分成交**，
+      成交数量与「部分成交」原因都写进 `orders`，不静默少买。
+    - **买不进 / 卖不出必须留痕**：涨停不可买、跌停不可卖、停牌与退市无价格、
+      现金不足一手、T+1 不可卖——全部写进 `orders.reason`，`result.rejected` 可直接查。
+      涨跌停先看行情的 `limit_up` / `limit_down` 列，没有才用
+      `pre_close × (1±limit_rate)` 按 0.01 取整推导；`limit_rate` 默认 0.10，
+      **创业板 30xxxx / 科创板 688xxx 须传 0.20、北交所 0.30**，否则判断偏松。
+    - **退市持仓不清零**：仍持有的退市标的按最近价格计值并在 `equity.stale_count` 计数，
+      卖出被明确拒绝；股票池用 `universe_as_of`（口径与 `SecurityRepository.universe`
+      逐字一致）在信号侧防幸存者偏差。
+    - 分红只建模**现金分红**（`cash_per_share` × 除权日持仓），送股转增未建模——
+      公司行为数据仍未接入，同第 25 条；过户费（上交所 0.001%）金额远低于佣金，未建模。
+28. **回测指标口径（§9.3）**：
+    - 统一按 **252 个交易日**年化，`cagr` 是几何（复合）、`annual_return` 是算术（日均 × 252），
+      两者不同、都要给；`excess_return` = 策略 CAGR − 基准 CAGR，需在 `run(benchmark=...)` 传入。
+    - 胜率 / 盈亏比只认**卖出的已实现盈亏**（平均成本法、已扣买卖全部费用），不用浮动盈亏凑数。
+    - **分母为 0 一律 NaN**（无波动 / 无下行 / 无回撤 / 无亏损交易），绝不用 inf 或 0 冒充；
+      权益为空 → NaN，有权益但一笔没交易 → 换手 0（有意义的 0，不是缺数据）。
+29. **Phase 3 同样是「引擎先行、数据后补」**：
+    - 引擎 / 组合 / 成本 / 股票池 / 指标全部用合成数据单测（`tests/test_backtest.py` 七阶段手算核对）；
+    - `market.daily_prices` 仍只有 3 行 → 真实回测暂时无从谈起，因此**本阶段没有新增迁移**，
+      `BacktestResult` 只在内存，`run_backtest.py` 待价格数据补齐后再接（§11 未要求回测表）；
+    - 补数据路径与网络限制见第 25 条。
 
 ---
 
