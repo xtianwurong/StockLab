@@ -44,6 +44,7 @@ __all__ = [
     "handle_industries_page",
     "handle_screener_page",
     "handle_compare_page",
+    "handle_portfolio_page",
     "handle_favicon",
     "handle_health",
     "handle_percentile",
@@ -406,6 +407,16 @@ def handle_compare_page():
         str: HTML 页面
     """
     return render_template("compare.html")
+
+
+def handle_portfolio_page():
+    """
+    组合监控页面（自选股 + 分位阈值告警）
+
+    Returns:
+        str: HTML 页面
+    """
+    return render_template("portfolio.html")
 
 
 def handle_favicon():

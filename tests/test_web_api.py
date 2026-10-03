@@ -18,6 +18,7 @@ StockLab - Web 层测试 (tests/test_web_api.py)
    10. 多窗口分位（全部 / 近十年 / 近五年 / 近三年）
    11. 选股器：因子覆盖率如实标注、算子表、模板就绪度、漏斗、散点、亏损股剔除
    12. 多股对比：分位与个股页逐字一致、序列按交易日对齐（缺失断线不填充）、区间裁剪
+   13. 组合监控：codes 精确过滤与 q 模糊搜索语义区分、自选分位与个股页一致
 
 【运行方式】
   # 必须先停掉 serve_web.py —— DuckDB 同文件跨进程单写者（见 AGENT.md）
@@ -813,6 +814,99 @@ def run_compare_tests():
     print("  -> 页面要素与导航高亮齐备")
 
 
+def run_portfolio_tests():
+    """阶段十四：组合监控（自选股 codes 精确过滤 + 分位口径一致性）"""
+    print("\n" + "=" * 65)
+    print("【阶段十四：组合监控】")
+    print("=" * 65)
+
+    client = _client()
+    codes = "600519.SH,000001.SZ,300750.SZ"
+
+    # codes 精确过滤：只返回点名的三只
+    data = _json(client.get(
+        "/api/market/ranking?codes=%s&indicator=pe_ttm&limit=50" % codes))
+    assert data["total"] == 3, "codes 过滤应只返回 3 只，实际 %s" % data["total"]
+    assert sorted(item["ts_code"] for item in data["items"]) == \
+        sorted(["600519.SH", "000001.SZ", "300750.SZ"])
+    assert data["summary"]["total"] == 3, "summary 应按过滤后口径统计"
+
+    # 过滤确实生效：远小于全市场
+    full = _json(client.get("/api/market/ranking?indicator=pe_ttm&limit=1"))
+    assert full["total"] > 1000, "全市场标的数应远大于 1000"
+    assert data["total"] < full["total"], "codes 过滤后应显著少于全市场"
+    print("  -> codes 精确过滤：%d 只（全市场 %d 只）" % (data["total"], full["total"]))
+
+    # q 是「代码或名称的子串匹配」，codes 是「ts_code 精确集合」，两者语义不同：
+# 用一个会命中多只的名称关键字证明 codes 不能被 q 替代
+    fuzzy = _json(client.get("/api/market/ranking?q=银行&indicator=pe_ttm"))
+    exact_code = _json(client.get("/api/market/ranking?codes=000001.SZ&indicator=pe_ttm"))
+    assert fuzzy["total"] > 1, "「银行」应命中多只银行股，实际 %d" % fuzzy["total"]
+    assert exact_code["total"] == 1, "codes 精确过滤应只 1 条"
+    assert exact_code["items"][0]["name"] == "平安银行"
+    # codes 里的票必然能在 q 的结果里按名称找到，反之不成立
+    names_in_fuzzy = set(item["name"] for item in fuzzy["items"])
+    assert "平安银行" in names_in_fuzzy
+    assert len(names_in_fuzzy) > 1, "q 的结果应包含多只，证明它不是精确集合"
+    print("  -> q 名称模糊命中 %d 只（多只），codes 精确命中 %d 只（唯一）" % (
+        fuzzy["total"], exact_code["total"]))
+
+    # 不存在的代码：返回 0 条而不是 500
+    missing = _json(client.get(
+        "/api/market/ranking?codes=999999.SH&indicator=pe_ttm"))
+    assert missing["total"] == 0
+    assert missing["items"] == []
+    print("  -> 不存在的代码返回 0 条（不报错）")
+
+    # 自选股的分位必须与个股页一致（同一 analyzer）
+    for row in data["items"]:
+        if row["percentile"] is None:
+            continue
+        single = _json(client.get(
+            "/api/percentile?code=%s&period=全部" % row["ts_code"]))
+        match = [item for item in single["results"] if item["indicator"] == "pe_ttm"]
+        assert match, "%s 个股页应有 pe_ttm" % row["ts_code"]
+        assert match[0]["percentile"] == row["percentile"], \
+            "%s 自选分位(%s) 与个股页(%s) 不一致" % (
+                row["ts_code"], row["percentile"], match[0]["percentile"])
+        assert match[0]["level7"] == row["level"], \
+            "%s 评级(%s) 与个股页(%s) 不一致" % (
+                row["ts_code"], row["level"], match[0]["level7"])
+    print("  -> 自选分位与评级与个股页逐字一致")
+
+    # 两项指标都能按 codes 取（页面一次拉 PE + PB）
+    pb = _json(client.get(
+        "/api/market/ranking?codes=%s&indicator=pb&limit=50" % codes))
+    assert pb["total"] == 3, "PB 也应支持 codes 过滤"
+    assert pb["indicator"] == "pb"
+    print("  -> PE / PB 两项指标均可按 codes 取数")
+
+    # 组合 codes + market 过滤（两个条件同时生效）
+    sh = _json(client.get(
+        "/api/market/ranking?codes=%s&indicator=pe_ttm&market=SH" % codes))
+    assert all(item["market"] == "SH" for item in sh["items"]), "codes 与 market 应叠加生效"
+    print("  -> codes 与 market 过滤可叠加")
+
+    # 页面要素
+    page = client.get("/portfolio").get_data(as_text=True)
+    for element_id in ("add-input", "add-suggest", "alert-indicator", "stat-grid",
+                       "watch-grid", "watch-table-card", "watch-head"):
+        assert 'id="%s"' % element_id in page, "组合监控页缺少 %s" % element_id
+    assert "/static/portfolio.js" in page
+    assert 'class="nav-link active"' in page, "组合监控页导航未高亮"
+    # 自选列表纯客户端存储：存储逻辑必须在 portfolio.js 里。
+# 内联脚本只有布局的防闪烁主题脚本（读 sl-theme），不得出现自选列表的存储键。
+    inline_scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", page, re.S)
+    assert inline_scripts, "页面应有内联的首屏主题脚本"
+    for script_body in inline_scripts:
+        assert "sl-watchlist" not in script_body, \
+            "自选列表的存储逻辑不应内联在页面脚本里"
+        assert "sl-theme" in script_body or "localStorage" not in script_body, \
+            "内联脚本若读 localStorage，只应是布局的主题脚本"
+    assert "localStorage" in page, "页面应说明自选列表存在浏览器本地"
+    print("  -> 页面要素齐备；自选存储逻辑仅在 portfolio.js（内联脚本只有主题防闪烁）")
+
+
 def main():
     """按阶段顺序执行全部用例"""
     global _APP
@@ -835,6 +929,7 @@ def main():
         run_percentile_detail_tests()
         run_screener_tests()
         run_compare_tests()
+        run_portfolio_tests()
 
     print("\n" + "=" * 65)
     print("全部测试通过")

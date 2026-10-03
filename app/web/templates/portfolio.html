@@ -1,0 +1,260 @@
+{#  组合监控（自选股 + 分位阈值告警）(app/web/templates/portfolio.html)  #}
+{% extends "_layout.html" %}
+{% set active_page = "portfolio" %}
+
+{% block main_class %}container{% endblock %}
+{% block page_title %}组合监控{% endblock %}
+
+{% block page_css %}
+<style>
+  /* ---------- 查询区 ---------- */
+  .add-row {
+    display: grid;
+    grid-template-columns: minmax(280px, 2.4fr) minmax(190px, 1fr) auto;
+    gap: var(--space-3);
+    align-items: end;
+  }
+  .field-code { position: relative; }
+
+  .suggest {
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 0;
+    right: 0;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    z-index: var(--z-dropdown);
+    display: none;
+  }
+  .suggest.open { display: block; }
+  .suggest-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: var(--font-base);
+  }
+  .suggest-item:last-child { border-bottom: none; }
+  .suggest-item:hover, .suggest-item.active { background: var(--accent-soft); }
+  .suggest-code { font-family: var(--font-mono); color: var(--text-sub); min-width: 84px; }
+  .suggest-name { color: var(--text-main); font-weight: 600; }
+  .suggest-empty { padding: var(--space-3); font-size: var(--font-base); color: var(--text-muted); }
+
+  /* ---------- 概览统计 ---------- */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+    gap: var(--space-3);
+  }
+  .stat-card {
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-k { font-size: var(--font-sm); color: var(--text-muted); }
+  .stat-v {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    line-height: 1.15;
+    margin-top: var(--space-1);
+  }
+  .stat-sub { font-size: var(--font-xs); color: var(--text-faint); margin-top: 2px; }
+
+  /* ---------- 自选股卡 ---------- */
+  .watch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--space-3);
+  }
+  .watch-card {
+    position: relative;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--dur-base) var(--ease-out),
+                border-color var(--dur-base) var(--ease-out),
+                transform var(--dur-base) var(--ease-out);
+  }
+  .watch-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+  .watch-card.alerted { border-color: var(--warning-500); }
+  .watch-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+  .watch-name { font-size: var(--font-xl); font-weight: 700; letter-spacing: -0.01em; }
+  .watch-code { font-family: var(--font-mono); font-size: var(--font-xs); color: var(--text-faint); }
+  .watch-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 50%;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    flex: none;
+  }
+  .watch-close:hover { background: var(--danger-500); color: #fff; }
+
+  .watch-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .watch-mk { font-size: var(--font-xs); color: var(--text-muted); }
+  .watch-mv {
+    font-family: var(--font-mono);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-top: 2px;
+  }
+  .watch-mrow { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+  .watch-rank { font-size: var(--font-xs); color: var(--text-faint); font-family: var(--font-mono); }
+
+  .watch-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+  }
+  .watch-alert {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--bg-subtle);
+  }
+  .watch-alert.hit { background: var(--warning-50); }
+  .watch-alert select { height: 28px; font-size: var(--font-sm); }
+  .watch-alert-state { font-size: var(--font-xs); font-weight: 600; }
+
+  /* ---------- 表格视图 ---------- */
+  .watch-table-wrap { overflow-x: auto; }
+  .cell-v { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+  .cell-p { font-size: var(--font-xs); color: var(--text-faint); font-family: var(--font-mono); }
+  .name-cell { display: flex; align-items: center; gap: var(--space-2); }
+  .alert-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-faint); flex: none;
+  }
+  .alert-dot.hit { background: var(--warning-500); }
+
+  @media (max-width: 900px) {
+    .add-row { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="page-title">组合监控</div>
+  <div class="page-desc">
+    自选股列表保存在本机浏览器，按阈值盯
+    <span class="term" data-tip="分位口径与个股页一致：剔除 PE/PB ≤ 0 的亏损期样本后，当前值在自身历史中的百分位。">历史分位</span>，
+    跌破设定档位即高亮提醒。一键可把当前列表送进多股对比页。
+  </div>
+</div>
+
+<!-- 添加区 -->
+<section class="card card-pad">
+  <div class="add-row">
+    <div class="field field-code">
+      <label class="field-label" for="add-input">添加标的</label>
+      <input class="input" id="add-input" type="text" autocomplete="off"
+             placeholder="输入代码或中文名后回车，如 600519.SH 或 贵州茅台" list="none">
+      <div class="suggest" id="add-suggest"></div>
+    </div>
+    <div class="field">
+      <label class="field-label" for="alert-indicator">告警指标</label>
+      <select class="select" id="alert-indicator">
+        <option value="pe_ttm">PE-TTM 分位</option>
+        <option value="pb">PB 分位</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="btn-refresh">刷新全部</button>
+  </div>
+  <div class="row row-tight" style="margin-top: var(--space-3)">
+    <button class="btn btn-sm" id="btn-compare" type="button">送入多股对比</button>
+    <button class="btn btn-sm" id="btn-export" type="button">导出 CSV</button>
+    <button class="btn btn-sm btn-ghost" id="btn-clear" type="button">清空自选</button>
+    <span class="spacer"></span>
+    <span class="text-sm text-faint" id="meta-count"></span>
+  </div>
+  <div class="field-hint" style="margin-top: var(--space-2)">
+    自选列表存在浏览器 localStorage，不上传服务器；换机器需重新添加。
+  </div>
+</section>
+
+<div class="message" id="message" style="margin-top: var(--space-3)"></div>
+
+<div id="result-area" class="stack" style="margin-top: var(--space-4)">
+  <div id="watch-empty" class="card">
+    <div class="empty-state">
+      <div class="empty-state-icon">★</div>
+      <div class="empty-state-title">还没有自选股</div>
+      <div class="empty-state-desc">
+        加上 2~10 只常看的标的，页面会自动列出它们的 PE / PB 当前值、历史分位、
+        全市场排名，并按你设定的档位高亮提醒。
+      </div>
+    </div>
+  </div>
+
+  <div id="watch-body" class="hidden stack">
+    <!-- 概览 -->
+    <section class="stat-grid" id="stat-grid"></section>
+
+    <!-- 卡片视图 -->
+    <section class="section">
+      <div class="section-head">
+        <div class="section-title">自选股</div>
+        <div class="tabs" id="view-tabs">
+          <button class="tab active" type="button" data-view="card">卡片</button>
+          <button class="tab" type="button" data-view="table">表格</button>
+        </div>
+      </div>
+
+      <div class="watch-grid" id="watch-grid"></div>
+
+      <div class="card hidden" id="watch-table-card">
+        <div class="watch-table-wrap">
+          <table class="table">
+            <thead><tr id="watch-head"></tr></thead>
+            <tbody id="watch-body-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="/static/portfolio.js"></script>
+{% endblock %}

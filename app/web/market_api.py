@@ -158,6 +158,7 @@ def handle_market_ranking():
         q (str): 按代码或名称过滤，可空
         market (str): 按市场过滤（SH/SZ/BJ），可空
         level (str): 按七档评级过滤（如 极度低估），可空；"-" 表示分位不可用
+        codes (str): 精确指定 ts_code 列表（逗号分隔），可空；与 q 的模糊搜索互不替代
         offset (int): 分页偏移，默认 0
         limit (int): 每页条数，默认 50，上限 200
 
@@ -187,6 +188,16 @@ def handle_market_ranking():
     market = request.args.get("market", "").strip().upper()
     level = request.args.get("level", "").strip()
 
+    # 自选股精确过滤：组合监控页按 ts_code 列表取数（q 是模糊搜索，语义不同）
+    wanted_codes = None
+    raw_codes = request.args.get("codes", "").strip()
+    if raw_codes:
+        wanted_codes = set()
+        for item in raw_codes.split(","):
+            code = item.strip().upper()
+            if code:
+                wanted_codes.add(code)
+
     if level and level not in _LEVEL_NAMES:
         return jsonify({
             "error": "参数 [level] 非法，合法值: %s" % " / ".join(_LEVEL_NAMES)
@@ -209,6 +220,8 @@ def handle_market_ranking():
     # 保证评级面板在按档筛选时仍显示全貌而不是塌缩成单档）
     filtered = []
     for row in rows:
+        if wanted_codes is not None and row["ts_code"] not in wanted_codes:
+            continue
         if market and row["market"] != market:
             continue
         if keyword:

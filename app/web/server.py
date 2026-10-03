@@ -16,6 +16,7 @@ StockLab - Web 服务装配模块 (app.web.server)
   /industries                    行业估值页面（模板渲染）
   /screener                      选股器页面（模板渲染）
   /compare                       多股对比页面（模板渲染）
+  /portfolio                     组合监控页面（自选股 + 分位阈值告警，模板渲染）
   /favicon.ico                   站点图标（消除每页 404 噪音）
   /static/*                      本地静态资源（含 vendored ECharts，离线可用）
   /api/health                    健康检查
@@ -28,6 +29,7 @@ StockLab - Web 服务装配模块 (app.web.server)
   /api/screener/meta?as_of=      选股器元数据（因子覆盖率 / 算子 / 预置模板）
   /api/screener/run              选股器执行（POST {spec, as_of, sort, order, limit}）
   /api/compare?codes=            多股对比（2~10 只 × 5 指标分位 + 对齐后的估值走势）
+  /api/market/ranking?codes=     全市场排行（codes 参数支持精确指定自选股列表）
   ==============================================================================
 """
 
@@ -83,6 +85,9 @@ def create_app(priority=None, db_path=None):
     app.add_url_rule(
         "/compare", "compare", api.handle_compare_page, methods=["GET"]
     )
+    app.add_url_rule(
+        "/portfolio", "portfolio", api.handle_portfolio_page, methods=["GET"]
+    )
     app.add_url_rule("/favicon.ico", "favicon", api.handle_favicon, methods=["GET"])
 
     # 数据接口
@@ -133,5 +138,5 @@ def create_app(priority=None, db_path=None):
     app.register_error_handler(404, api.handle_not_found)
     app.register_error_handler(500, api.handle_internal_error)
 
-    _logger.info("Flask 应用已创建，路由 17 条（页面 6 + 接口 10 + 图标 1）")
+    _logger.info("Flask 应用已创建，路由 18 条（页面 7 + 接口 10 + 图标 1）")
     return app
