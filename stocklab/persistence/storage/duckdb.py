@@ -15,7 +15,6 @@ StockLab - DuckDB 连接管理模块 (stocklab.persistence.storage.duckdb)
 """
 
 import logging
-import os
 
 import duckdb
 
@@ -54,9 +53,8 @@ class Database:
         self._connection = None
 
     def _ensure_initialized(self):
-        """确保数据库已初始化（数据库文件存在 + Schema 已建立）"""
-        if not os.path.exists(self._db_path):
-            initialize_database(self._db_path)
+        """确保数据库已初始化：建目录 + 比对版本表执行未应用的迁移（幂等）"""
+        initialize_database(self._db_path)
 
     def get_connection(self):
         """

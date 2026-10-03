@@ -30,6 +30,7 @@ import logging
 
 import pandas as pd
 
+from stocklab.domain import INDEX_MEMBERSHIP_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class IndexMembershipRepository(BaseRepository):
     """
 
     _TABLE_NAME = "reference.index_memberships"
+    _COLUMNS = INDEX_MEMBERSHIP_COLUMNS
 
     def upsert(self, membership_df):
         """

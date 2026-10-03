@@ -18,6 +18,7 @@ import logging
 
 import pandas as pd
 
+from stocklab.domain import DAILY_PRICE_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class DailyPriceRepository(BaseRepository):
     """
 
     _TABLE_NAME = "market.daily_prices"
+    _COLUMNS = DAILY_PRICE_COLUMNS
 
     def upsert(self, prices_df):
         """

@@ -26,6 +26,7 @@ import logging
 
 import pandas as pd
 
+from stocklab.domain import VALUATION_HISTORY_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class ValuationHistoryRepository(BaseRepository):
     """
 
     _TABLE_NAME = "market.valuation_history"
+    _COLUMNS = VALUATION_HISTORY_COLUMNS
 
     def upsert(self, history_df):
         """

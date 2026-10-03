@@ -5,8 +5,10 @@ StockLab - 入库取数模块 (stocklab.datasource.market_service)
 ==============================================================================
 
 【模块职责】
-   从外部数据源取数，输出与本地 DuckDB 表**严格同名同序**的 pandas DataFrame，
-   供 Repository 的 UPSERT 按位置匹配写入（列序即契约，改任一侧必须同步改另一侧）。
+   从外部数据源取数，并经 stocklab.normalization.akshare 归一化为
+   **领域契约 DataFrame**（列名与列序固定，见 stocklab.domain）。
+   归一化前是源列结构、归一化后是契约结构，Repository 写入时按契约显式列名写入，
+   因此数据源改列序/改列名不会再影响落库正确性。
    7 个公开 fetch_* 方法与 7 张库表一一对应，调用方仅两个：
      - app/scripts/sync_market_data.py（入库同步编排）
      - stocklab.facade.MarketDataFacade（远端分支，Cache-Aside 回写本地库）
@@ -24,8 +26,9 @@ StockLab - 入库取数模块 (stocklab.datasource.market_service)
    - 中证官网：指数成分
 
 【设计原则】
-   - 列序即契约：输出列与库表严格同名同序，UPSERT SELECT * 按位置匹配
+   - 契约归一化：源列 → normalizer → 领域契约列序，Repository 显式列名写入
    - 失败降级：取数失败记录日志并返回空 DataFrame，由调用方决定是否中止
+   - 源列改版（DataContractError）不可重试：记 ERROR 并直接返回空帧，绝不带病写库
 """
 
 import logging
@@ -33,6 +36,17 @@ import time
 
 import akshare as ak
 import pandas as pd
+
+from stocklab.domain import DataContractError
+from stocklab.normalization.akshare import (
+    normalize_company_profile,
+    normalize_daily_prices,
+    normalize_daily_valuations,
+    normalize_index_membership,
+    normalize_industry_valuation,
+    normalize_securities,
+    normalize_valuation_history,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -43,7 +57,7 @@ __all__ = [
 
 class MarketService:
     """
-    入库取数类：外部数据源 → 与库表同名同序的 DataFrame
+    入库取数类：外部数据源 → 归一化后的领域契约 DataFrame
 
     【职责】按粒度分四组，共 7 个方法：
       1. 全市场一次返回：fetch_securities（证券名录）、fetch_realtime_valuations（估值快照）
@@ -72,7 +86,8 @@ class MarketService:
         获取全市场股票基础信息
 
         Returns:
-            pd.DataFrame: 证券基础信息表，包含 ts_code, name, industry, area 等列
+            pd.DataFrame: 证券基础信息表（SECURITY_COLUMNS 契约列序）；
+                          失败或源列不匹配时返回空表
         """
         for attempt in range(1, self._retry_count + 1):
             try:
@@ -81,26 +96,13 @@ class MarketService:
                     _logger.warning("stock_info_a_code_name 返回空数据")
                     return pd.DataFrame()
 
-                # 标准化列名
-                result = pd.DataFrame()
-                result["ts_code"] = raw["code"].apply(self._normalize_ts_code)
-                result["symbol"] = raw["code"]
-                result["name"] = raw["name"]
-                result["exchange"] = result["ts_code"].apply(
-                    lambda x: x.split(".")[1] if "." in x else ""
-                )
-                result["market"] = result["ts_code"].apply(
-                    lambda x: "SH" if ".SH" in x else ("SZ" if ".SZ" in x else "BJ")
-                )
-                result["industry"] = ""
-                result["area"] = ""
-                result["list_date"] = None
-                result["delist_date"] = None
-                result["list_status"] = "L"
-                result["is_hs"] = ""
-
+                result = normalize_securities(raw)
                 _logger.info("获取全市场股票基础信息: %d 只", len(result))
                 return result
+            except DataContractError as error:
+                # 源列改版不可重试：拒绝产出缺列数据
+                _logger.error("证券名录数据契约违约，本批次不入库: %s", error)
+                return pd.DataFrame()
             except Exception as error:
                 _logger.debug(
                     "stock_info_a_code_name 第 %d/%d 次失败: %s",
@@ -124,7 +126,8 @@ class MarketService:
             end_date (str): 结束日期，格式 "YYYYMMDD"
 
         Returns:
-            pd.DataFrame: 日 K 行情表，包含 ts_code, trade_date, open, high, low, close 等列
+            pd.DataFrame: 日 K 行情表（DAILY_PRICE_COLUMNS 契约列序）；
+                          失败或源列不匹配时返回空表
         """
         symbol = ts_code.split(".")[0]
 
@@ -140,21 +143,12 @@ class MarketService:
                 if raw is None or raw.empty:
                     return pd.DataFrame()
 
-                # 标准化列名
-                result = pd.DataFrame()
-                result["ts_code"] = ts_code
-                result["trade_date"] = pd.to_datetime(raw["日期"]).dt.date
-                result["open"] = raw["开盘"].astype(float)
-                result["high"] = raw["最高"].astype(float)
-                result["low"] = raw["最低"].astype(float)
-                result["close"] = raw["收盘"].astype(float)
-                result["pre_close"] = raw["昨收"].astype(float) if "昨收" in raw.columns else None
-                result["change"] = raw["涨跌额"].astype(float) if "涨跌额" in raw.columns else None
-                result["pct_chg"] = raw["涨跌幅"].astype(float) if "涨跌幅" in raw.columns else None
-                result["volume"] = raw["成交量"].astype(float) if "成交量" in raw.columns else None
-                result["amount"] = raw["成交额"].astype(float) if "成交额" in raw.columns else None
-
-                return result
+                return normalize_daily_prices(raw, ts_code)
+            except DataContractError as error:
+                _logger.error(
+                    "[%s] 日 K 数据契约违约，本批次不入库: %s", ts_code, error
+                )
+                return pd.DataFrame()
             except Exception as error:
                 _logger.debug(
                     "stock_zh_a_hist [%s] 第 %d/%d 次失败: %s",
@@ -173,7 +167,8 @@ class MarketService:
         获取最新全市场估值快照（东方财富实时行情）
 
         Returns:
-            pd.DataFrame: 全市场估值表，包含 ts_code, trade_date, pe, pe_ttm, pb 等列
+            pd.DataFrame: 全市场估值表（DAILY_VALUATION_COLUMNS 契约列序）；
+                          失败或源列不匹配时返回空表
         """
         for attempt in range(1, self._retry_count + 1):
             try:
@@ -182,29 +177,12 @@ class MarketService:
                     _logger.warning("stock_zh_a_spot_em 返回空数据")
                     return pd.DataFrame()
 
-                # 标准化列名：必须与 market.daily_valuations 表的 16 列严格同名同序，
-                # 否则 Repository 的 SELECT * 批量写入会因列数不匹配而失败。
-                # 数据源不提供的字段统一留 NULL，保留 NULL 语义。
-                result = pd.DataFrame()
-                result["ts_code"] = raw["代码"].apply(self._normalize_ts_code)
-                result["trade_date"] = pd.Timestamp.now().date()
-                result["turnover_rate"] = self._numeric_column(raw, "换手率")
-                result["turnover_rate_f"] = float("nan")
-                result["pe"] = self._numeric_column(raw, "市盈率-动态")
-                result["pe_ttm"] = self._numeric_column(raw, "市盈率(TTM)")
-                result["pb"] = self._numeric_column(raw, "市净率")
-                result["ps"] = float("nan")
-                result["ps_ttm"] = float("nan")
-                result["dv_ratio"] = float("nan")
-                result["dv_ttm"] = float("nan")
-                result["total_share"] = float("nan")
-                result["float_share"] = float("nan")
-                result["free_share"] = float("nan")
-                result["total_mv"] = self._numeric_column(raw, "总市值")
-                result["circ_mv"] = self._numeric_column(raw, "流通市值")
-
+                result = normalize_daily_valuations(raw, pd.Timestamp.now().date())
                 _logger.info("获取全市场估值快照: %d 只", len(result))
                 return result
+            except DataContractError as error:
+                _logger.error("估值快照数据契约违约，本批次不入库: %s", error)
+                return pd.DataFrame()
             except Exception as error:
                 _logger.debug(
                     "stock_zh_a_spot_em 第 %d/%d 次失败: %s",
@@ -243,11 +221,11 @@ class MarketService:
             period (str, optional): 历史区间，"全部" 或 "近五年" 等
 
         Returns:
-            pd.DataFrame: 历史估值表，列为
-                          ts_code / trade_date / pe_ttm / pe_static / pb / ps / pcf；
+            pd.DataFrame: 历史估值表（VALUATION_HISTORY_COLUMNS 契约列序）；
                           单个指标取不到时整列为 NaN，不省略列
         """
-        # 百度接口接受 6 位纯数字代码；部分指标缺失时整列 NaN，不抛错
+        # 百度接口接受 6 位纯数字代码；各指标可用性不一致，逐指标单独取，
+        # 单个指标失败不影响其余指标（缺口整列写 NULL，绝不省略列）
         indicator_map = [
             ("pe_ttm", "市盈率(TTM)"),
             ("pe_static", "市盈率(静)"),
@@ -258,29 +236,30 @@ class MarketService:
 
         symbol = ts_code.split(".")[0]
 
-        # 以 PE-TTM 的交易日为基准轴，其余指标按日期对齐后并入；
-        # PE-TTM 缺失时退化用 PB，仍缺失则说明该标的完全无可用估值数据
-        base_dates, base_values = self._fetch_baidu_indicator_frame(
-            symbol, "市盈率(TTM)", period
-        )
-        if base_dates.empty:
-            base_dates, _ = self._fetch_baidu_indicator_frame(symbol, "市净率", period)
-        if base_dates.empty:
+        indicator_frames = {}
+        for column_name, indicator in indicator_map:
+            dates, values = self._fetch_baidu_indicator_frame(symbol, indicator, period)
+            if dates.empty:
+                indicator_frames[column_name] = pd.DataFrame(
+                    columns=["trade_date", column_name]
+                )
+            else:
+                indicator_frames[column_name] = pd.DataFrame(
+                    {"trade_date": dates, column_name: values}
+                )
+
+        # PE-TTM 与 PB 是「有无估值数据」的最低判据（ps / pcf 该接口本就不提供）
+        if indicator_frames["pe_ttm"].empty and indicator_frames["pb"].empty:
             _logger.warning("[%s] 未返回任何历史估值数据", ts_code)
             return pd.DataFrame()
 
-        result = pd.DataFrame()
-        result["trade_date"] = base_dates
-        result["pe_ttm"] = base_values
-
-        for column_name, indicator in indicator_map[1:]:
-            _, series_values = self._fetch_baidu_indicator_frame(symbol, indicator, period)
-            result[column_name] = series_values
-
-        result["ts_code"] = ts_code
-        # 列序必须与 market.valuation_history 表定义严格一致（UPSERT 按位置匹配）
-        result = result[["ts_code", "trade_date"] + [item[0] for item in indicator_map]]
-        result = result.sort_values(by="trade_date")
+        try:
+            result = normalize_valuation_history(indicator_frames, ts_code)
+        except DataContractError as error:
+            _logger.error("[%s] 历史估值数据契约违约: %s", ts_code, error)
+            return pd.DataFrame()
+        if result.empty:
+            return pd.DataFrame()
 
         _logger.info(
             "获取 %s 历史估值序列: %d 个交易日（%s ~ %s）",
@@ -289,7 +268,7 @@ class MarketService:
             result["trade_date"].iloc[0],
             result["trade_date"].iloc[-1],
         )
-        return result.reset_index(drop=True)
+        return result
 
     def fetch_industry_valuation(self, stat_date, classification="国证行业分类"):
         """
@@ -310,7 +289,9 @@ class MarketService:
            - 支持任意有效日期，不限于季末。
 
         Args:
-            stat_date (str): 统计日期 YYYY-MM-DD
+            stat_date (str): 统计日期，YYYY-MM-DD 或 YYYYMMDD 均可
+                             （巨潮接口内部按 date[:4]+date[4:6]+date[6:] 拼接，
+                              只认 YYYYMMDD，故此处统一转换）
             classification (str, optional): 行业分类体系，
                                             "国证行业分类"（293 个，4 层）
                                             或 "证监会行业分类"（120 个，2 层）
@@ -321,11 +302,12 @@ class MarketService:
                           priced_company_count / total_market_value / net_profit /
                           pe_weighted / pe_median / pe_arithmetic
         """
+        cninfo_date = pd.to_datetime(stat_date).strftime("%Y%m%d")
         raw = pd.DataFrame()
         for attempt in range(1, self._retry_count + 1):
             try:
                 fetched = ak.stock_industry_pe_ratio_cninfo(
-                    symbol=classification, date=stat_date
+                    symbol=classification, date=cninfo_date
                 )
                 if fetched is None or fetched.empty:
                     _logger.warning(
@@ -345,23 +327,14 @@ class MarketService:
         if raw.empty:
             return pd.DataFrame()
 
-        result = pd.DataFrame()
-        result["industry_code"] = raw["行业编码"].astype(str)
-        result["stat_date"] = pd.to_datetime(stat_date).date()
-        result["classification"] = classification
-        result["industry_level"] = pd.to_numeric(
-            raw["行业层级"], errors="coerce"
-        ).astype("Int64")
-        result["industry_name"] = raw["行业名称"].astype(str).str.strip()
-        result["company_count"] = pd.to_numeric(raw["公司数量"], errors="coerce")
-        result["priced_company_count"] = pd.to_numeric(
-            raw["纳入计算公司数量"], errors="coerce"
-        )
-        result["total_market_value"] = self._numeric_or_nan(raw["总市值-静态"])
-        result["net_profit"] = self._numeric_or_nan(raw["净利润-静态"])
-        result["pe_weighted"] = self._numeric_or_nan(raw["静态市盈率-加权平均"])
-        result["pe_median"] = self._numeric_or_nan(raw["静态市盈率-中位数"])
-        result["pe_arithmetic"] = self._numeric_or_nan(raw["静态市盈率-算术平均"])
+        try:
+            result = normalize_industry_valuation(raw, stat_date, classification)
+        except DataContractError as error:
+            _logger.error(
+                "行业估值 [%s @ %s] 数据契约违约，本批次不入库: %s",
+                classification, stat_date, error,
+            )
+            return pd.DataFrame()
 
         _logger.info(
             "获取行业估值 [%s @ %s]: %d 个行业（%d 个一级）",
@@ -369,24 +342,6 @@ class MarketService:
             int((result["industry_level"] == 1).sum()),
         )
         return result
-
-    def _numeric_or_nan(self, series):
-        """
-        安全转数值；列缺失或无法解析时返回全 NaN
-
-        【为何不省略列】
-           UPSERT 按位置匹配列序，省略列会导致整体写入失败。
-           数据源不提供的列必须保留并写 NULL。
-
-        Args:
-            series (pd.Series): 原始列
-
-        Returns:
-            pd.Series: 数值列
-        """
-        if series is None:
-            return float("nan")
-        return pd.to_numeric(series, errors="coerce")
 
     def fetch_index_membership(self, index_code):
         """
@@ -429,16 +384,13 @@ class MarketService:
         if raw.empty:
             return pd.DataFrame()
 
-        result = pd.DataFrame()
-        # _normalize_ts_code 是标量函数，对 Series 需逐元素调用
-        constituent_codes = raw["成分券代码"].astype(str).str.zfill(6)
-        result["ts_code"] = constituent_codes.apply(self._normalize_ts_code)
-        result["index_code"] = str(raw["指数代码"].iloc[0])
-        result["index_name"] = str(raw["指数名称"].iloc[0])
-        result["effective_date"] = pd.to_datetime(raw["日期"]).dt.date
-
-        # 同一次返回里生效日期一致，去重后写入
-        result = result.drop_duplicates(subset=["ts_code", "index_code", "effective_date"])
+        try:
+            result = normalize_index_membership(raw)
+        except DataContractError as error:
+            _logger.error(
+                "指数 [%s] 成分数据契约违约，本批次不入库: %s", index_code, error
+            )
+            return pd.DataFrame()
 
         _logger.info(
             "获取指数 [%s] %s 成分: %d 只（生效日 %s）",
@@ -447,7 +399,7 @@ class MarketService:
             len(result),
             result["effective_date"].iloc[0],
         )
-        return result[["ts_code", "index_code", "index_name", "effective_date"]]
+        return result
 
     def fetch_company_profile(self, ts_code):
         """
@@ -500,56 +452,7 @@ class MarketService:
             _logger.warning("[%s] 公司概况不可用（巨潮限流或该标的未收录）", ts_code)
             return pd.DataFrame()
 
-        row = raw.iloc[0]
-        result = pd.DataFrame()
-        result["ts_code"] = ts_code
-        result["industry"] = self._clean_text_field(row, "所属行业")
-        result["list_date"] = self._clean_date_field(row, "上市日期")
-        result["index_membership"] = self._clean_text_field(row, "入选指数")
-        return result
-
-    def _clean_text_field(self, row, column_name):
-        """
-        提取并清洗概况表中的文本字段
-
-        Args:
-            row (pd.Series): 概况表的一行
-            column_name (str): 目标列名
-
-        Returns:
-            str: 清洗后的文本；缺失或为占位值时返回空字符串
-        """
-        if column_name not in row:
-            return ""
-        value = row[column_name]
-        # NaN 自身不等于自身，据此识别缺失
-        if value is None or value != value:
-            return ""
-        text = str(value).strip()
-        if text in ("None", "nan", "NaT", "-"):
-            return ""
-        return text
-
-    def _clean_date_field(self, row, column_name):
-        """
-        提取并清洗概况表中的日期字段
-
-        Args:
-            row (pd.Series): 概况表的一行
-            column_name (str): 目标列名
-
-        Returns:
-            datetime.date: 日期对象；缺失或无法解析时返回 None（落库即 NULL）
-        """
-        if column_name not in row:
-            return None
-        value = row[column_name]
-        if value is None or value != value:
-            return None
-        try:
-            return pd.to_datetime(str(value).strip()).date()
-        except (ValueError, TypeError):
-            return None
+        return normalize_company_profile(raw, ts_code)
 
     def _fetch_baidu_indicator_frame(self, symbol, indicator, period):
         """
@@ -589,35 +492,3 @@ class MarketService:
 
         _logger.info("指标 [%s] 在 %s 上不可用，写入 NULL", indicator, symbol)
         return pd.Series(dtype="object"), pd.Series(dtype="float64")
-
-    def _normalize_ts_code(self, code):
-        """
-        将纯数字代码转换为标准 ts_code 格式
-
-        Args:
-            code (str): 纯数字代码，如 "600519"
-
-        Returns:
-            str: 标准格式，如 "600519.SH"
-        """
-        code = str(code).strip()
-        if code.startswith(("6", "5", "90")):
-            return code + ".SH"
-        if code.startswith(("4", "8", "92")):
-            return code + ".BJ"
-        return code + ".SZ"
-
-    def _numeric_column(self, raw, column_name):
-        """
-        安全提取 DataFrame 中的数值列，列不存在时返回全 NaN 列
-
-        Args:
-            raw (pd.DataFrame): 原始数据表
-            column_name (str): 目标列名
-
-        Returns:
-            pd.Series: 数值列；列缺失时返回全 NaN 序列（保持列结构完整）
-        """
-        if column_name in raw.columns:
-            return pd.to_numeric(raw[column_name], errors="coerce")
-        return float("nan")

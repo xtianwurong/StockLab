@@ -31,6 +31,7 @@ import logging
 
 import pandas as pd
 
+from stocklab.domain import INDUSTRY_VALUATION_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class IndustryValuationRepository(BaseRepository):
     """
 
     _TABLE_NAME = "market.industry_valuations"
+    _COLUMNS = INDUSTRY_VALUATION_COLUMNS
 
     def upsert(self, industry_df):
         """

@@ -11,10 +11,15 @@ StockLab 本地数据持久化层 (stocklab.persistence)
 """
 
 from .repository import (
+    BalanceSheetRepository,
+    CashflowStatementRepository,
     DailyPriceRepository,
     DailyValuationRepository,
+    FinancialIndicatorRepository,
     IndexMembershipRepository,
+    IncomeStatementRepository,
     IndustryValuationRepository,
+    SecurityEventRepository,
     SecurityRepository,
     ValuationHistoryRepository,
 )
@@ -25,9 +30,14 @@ __all__ = [
     "DEFAULT_DB_PATH",
     "initialize_database",
     "SecurityRepository",
+    "SecurityEventRepository",
     "DailyPriceRepository",
     "DailyValuationRepository",
     "ValuationHistoryRepository",
     "IndexMembershipRepository",
     "IndustryValuationRepository",
+    "IncomeStatementRepository",
+    "BalanceSheetRepository",
+    "CashflowStatementRepository",
+    "FinancialIndicatorRepository",
 ]

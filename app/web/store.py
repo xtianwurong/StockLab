@@ -336,9 +336,9 @@ def load_securities():
       既不占门面锁，也消除每按键一次的建连开销。
 
     【列的取舍】
-      上游数据源只填充 ts_code / symbol / name / exchange / market /
-      list_status；industry、area、list_date、is_hs 全表为空，
-      因此这里不查这些列，页面也不展示（避免出现恒为空的字段）。
+      上游数据源只填充 ts_code / symbol / name / exchange / market / status；
+      industry、area、is_hs 全表为空，list_date / delist_date 需运行
+      「securities 生命周期同步」后才有值，页面不展示恒为空的字段。
 
     Returns:
         pd.DataFrame: 证券表；读取失败返回空 DataFrame
@@ -349,7 +349,7 @@ def load_securities():
             return _SECURITIES_CACHE
 
     frame = _query(
-        "SELECT ts_code, symbol, name, exchange, market, list_status "
+        "SELECT ts_code, symbol, name, exchange, market, status "
         "FROM reference.securities"
     )
     if frame is None:
