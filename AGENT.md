@@ -112,41 +112,70 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
          │                 └──►  stocklab.analytics       （纯统计变换）
          │
          ├──►  stocklab.facade  ──┬──►  stocklab.datasource
-         │        （统一取数入口）  └──►  stocklab.persistence
+         │        （统一取数入口）  │         │
+         │                        │         └──►  stocklab.normalization（源表 → 契约帧）
+         │                        └──►  stocklab.persistence
          │
          ├──►  stocklab.analytics
          │        （纯统计变换：只吃 DataFrame，不碰网络/数据库，零层内依赖）
          │
+         ├──►  stocklab.fundamental      （财务指标纯派生：不取数、不落库）
+         │
          └──►  stocklab.persistence  ──►  stocklab.persistence.storage
-                                        （只对本地落库；零内部依赖）
+                （只对本地落库）                └──►  stocklab.persistence.migrations
 ```
 
 > `stocklab.analytics` **不 import `facade` / `datasource` / `persistence`**：它只接收调用方传入的
 > DataFrame 做统计聚合，因此可脱离网络与数据库独立单测。取数仍由入口脚本经 facade 完成。
+>
+> `stocklab.domain` 与 `stocklab.normalization` 是**共享叶子包**：`domain` 只放列契约与异常，
+> `normalization` 只把源表帧改写成契约帧（不碰网络与数据库），两者的导入方可以是
+> `datasource`、`persistence`、`analytics` 或 `fundamental`，但它们自己不得反向依赖任何一方。
 
 | 包 | 依赖的 StockLab 包 | 第三方库 | 标准库 |
 |----|------------------|---------|--------|
 | `stocklab.common` | 无 | `requests`（仅 `http_client` 补丁用） | `configparser` `logging` `math` `os` `types` |
-| `stocklab.datasource` | `common`（层内互引 `datasource`） | `akshare` `baostock` `pandas` `requests` | `concurrent.futures` `contextlib` `datetime` `io` `logging` `time` |
-| `stocklab.persistence` | 无（仅层内 `persistence.storage`） | `duckdb` `pandas` | `logging` `os` |
+| `stocklab.domain` | 无 | `pandas` | `logging` |
+| `stocklab.normalization` | `domain` | `pandas` | `logging` |
+| `stocklab.datasource` | `common` `domain` `normalization`（层内互引 `datasource`） | `akshare` `baostock` `pandas` `requests` | `concurrent.futures` `contextlib` `datetime` `io` `logging` `time` |
+| `stocklab.persistence` | `domain`（仅层内 `persistence.storage` / `persistence.migrations`） | `duckdb` `pandas` | `logging` `os` `datetime` `re` |
 | `stocklab.facade` | `common` `datasource` `persistence` | `pandas` | `logging` |
 | `stocklab.analytics` | 无（层内互引 `analytics`） | `pandas` | `logging` `os` `unicodedata` |
+| `stocklab.fundamental` | `domain` | `pandas` | 无 |
 | `app.dashboard` | `common` `facade`（层内互引 `dashboard`） | 无 | `datetime` `json` `logging` `os` |
 | `app.web` | `facade` `analytics`（层内互引 `web`） | `flask` | `logging` `os` `threading` |
 
 > `stocklab.persistence` **不依赖 `common`**：持久化层无配置语义，解析 `config.ini` 对它没有意义。
+> `datasource` 与 `persistence` 仍然互不 import：`normalization` 是两者的公共下游，
+> `datasource` 产出契约帧后交由入口脚本/facade 写库，`persistence` 不知道数据来自哪里。
 
 - `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换、HTTP 全局配置）。
   - `http_client.py`：浏览器 UA 补丁，**由入口脚本显式调用**，导入本包不产生任何全局副作用。
 - `stocklab/datasource`：**只负责对外取数**，不感知本地存储。内部按用途分三块：
   - **分析/行情取数**（单股维度、三级降级）：`quote_service.py`（`StockQuoteService`：月线价格 / PE-TTM / 简称 / 实时行情；价格通道 AkShare → BaoStock → 腾讯，估值通道 AkShare → BaoStock）→ `_sources/`（三个通道的私有实现，外部勿依赖）。
-  - **入库取数**（多粒度、单源直连）：`market_service.py`（`MarketService`：7 个 `fetch_*` 方法与 7 张库表一一对应，输出与表**严格同名同序**供 UPSERT 按位置写入；粒度含全市场快照 / 单股序列 / 行业横截面 / 指数成分四种，直连各 akshare 接口（自带重试与限流），**不做通道降级**。调用方仅两个：`app/scripts/sync_market_data.py` 与 facade 远端分支（Cache-Aside 回写本地库）。
+  - **入库取数**（多粒度、单源直连）：`market_service.py`（`MarketService`：7 个 `fetch_*` 方法与 7 张库表一一对应，输出**领域契约列**（`stocklab.domain`）而非「与表同序的 DataFrame」；粒度含全市场快照 / 单股序列 / 行业横截面 / 指数成分四种，直连各 akshare 接口（自带重试与限流），**不做通道降级**。归一化一律委托 `stocklab.normalization`，源表缺列时抛 `DataContractError` 并返回空表（绝不产出缺列帧）。调用方仅两个：`app/scripts/sync_market_data.py` 与 facade 远端分支（Cache-Aside 回写本地库）。
+  - **逐只深度取数**：`fundamental_service.py`（`FundamentalService`：东财三大报表 + 财务指标，单只约 60 次请求，按报告期分批）、`lifecycle_service.py`（`LifecycleService`：沪深北上市日历与退市日历，只读交易所官网）。两者同样经 `stocklab.normalization` 产出契约帧，只被 `sync_market_data.py` 调用。
   - **公共基础**：
     - `data_contract.py`：行情数据契约（3 个列名常量 + `StockRealtimeQuote`），`quote_service` 与 `_sources` 共用；单独成文件是为避免「通道 import 服务、服务又 import 通道」的循环导入（类比 C++ 只含 struct + constexpr 的公共头文件）。
     - `tencent_client.py`：腾讯 HTTP 传输网关（`TencentMarketClient` + `normalize_symbol`），抹平股票/ETF/指数代码差异，提供 K 线 / 简称 / 盘口原始字段与多标的**并发**抓取。独立于 `_sources` 之外的原因：能力超出单股 `StockDataSource` 契约（ETF/指数 + 并发），且被两个上层独立复用——`_sources/tencent_source`（单股降级第三级）与 `facade.fetch_multi_monthly_close`（dashboard 板块走势 10 标的并发月线），故置于通道之下单独一层。
+- `stocklab/domain`：**列契约层（叶子包）**，只放「列名 + 列序元组」与 `DataContractError`，
+  被 `datasource`、`persistence`、`normalization` 共同引用，自己不依赖任何 StockLab 包。
+  - `contract.py`：`check_columns` / `require_columns` / `align_columns`（缺列抛异常、多余列丢弃并告警、按契约重排）。
+  - `security.py` / `market_data.py` / `valuation.py` / `fundamental.py`：各表契约元组与状态/事件枚举。
+- `stocklab/normalization`：**源表 → 契约帧的唯一改写点（叶子包）**，不取数、不落库。
+  - `base.py`：`normalize_ts_code` / `pick_column` / `to_numeric_column` / `to_date_series` / `clean_text_value` / `clean_date_value` 等原子原语。
+  - `akshare.py`：证券名录、日K、估值快照、历史估值、行业估值、指数成分、公司概况 7 个源格式归一化。
+  - `exchange.py`：上市/退市日历归一化、`merge_lifecycle`（回填日期 + 推导 status + 补入退市股）、`build_lifecycle_events`。
+  - `eastmoney.py`：东财三大报表 → PIT 帧（`available_date = announce_date`，有息负债口径在此定义）。
+  > **构造帧必须用 `pd.DataFrame(dict)` / `pd.DataFrame([dict])`**：逐列赋值时若先给标量再给 Series，
+  > 标量列会广播成全 NaN（曾导致日 K 的 `ts_code` 全 NaN、DuckDB 主键拒绝、整批静默写 0 行）。
+- `stocklab/fundamental`：**财务指标纯派生**，由利润表 + 资产负债表算 ROE / ROA / ROIC / 毛利率 /
+  净利率 / 同比，公告日取两表较晚者；不取数、不落库，可离线单测。
 - `stocklab/persistence`：**只负责本地落库**，既不依赖 `common`，也不依赖任何外部数据源（AkShare / BaoStock / 腾讯）。
-  - `storage/`：DuckDB 连接管理与 Schema 定义。
-  - `repository/`：SQL 读写封装，仅依赖 pandas 与本层 `storage/`。
+  - `storage/`：DuckDB 连接管理；`schema.py` 只做「委托迁移器」，**DDL 全部写在 `migrations/`**。
+  - `migrations/`：`NNN_*.sql` 迁移文件 + `SchemaMigrator`（引导 `sys.schema_version`、按序补跑未应用迁移）。
+  - `repository/`：SQL 读写封装，仅依赖 pandas、`domain` 与本层 `storage/`；写入一律经 `BaseRepository`
+    契约对齐 + 显式列名 INSERT（不依赖 DataFrame 列序、不写 `SELECT *`）。
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
 - `app/dashboard`：把数据渲染成网页。
@@ -193,28 +222,54 @@ StockLab/
 │   │   ├── data_contract.py              #     统一数据契约：列名常量 + StockRealtimeQuote（无依赖，单股/入库两服务共用）
 │   │   ├── tencent_client.py           #     【腾讯传输网关】TencentMarketClient（股票/ETF/指数统一接入）
 │   │   ├── quote_service.py            #     【单股行情服务】StockQuoteService：三级降级编排 + 数据契约 re-export
-│   │   ├── market_service.py             #     【入库取数】MarketService：7 个 fetch_* 与 7 张库表同名同序（粒度混合，非仅全市场）
+│   │   ├── market_service.py             #     【入库取数】MarketService：7 个 fetch_* 输出领域契约帧（源缺列抛 DataContractError）
+│   │   ├── fundamental_service.py        #     【逐只基本面】FundamentalService：东财三大报表（单只约 60 次请求）
+│   │   ├── lifecycle_service.py          #     【生命周期】LifecycleService：沪深北上市日历 + 退市日历
 │   │   └── _sources/                   #     单股通道实现包（下划线前缀 = 私有，外部勿依赖）
 │   │       ├── __init__.py             #       导出抽象基类与三个通道实现
 │   │       ├── base.py                 #       StockDataSource 抽象基类（纯虚接口 + 标准化/降采样工具）
 │   │       ├── akshare_source.py       #       东方财富主通道（akshare，含重试与列名防御）
 │   │       ├── baostock_source.py      #       证券宝备用通道（专有 Socket + login/logout 会话管理）
 │   │       └── tencent_source.py       #       腾讯直连通道（实时行情/简称/备用日线降采样）
+│   ├── domain/                         #   列契约层（叶子包，零 StockLab 依赖）
+│   │   ├── __init__.py                 #     导出契约元组、状态/事件枚举与 DataContractError
+│   │   ├── contract.py                 #     check_columns / require_columns / align_columns（缺列即拒绝）
+│   │   ├── security.py                 #     SECURITY_COLUMNS / SECURITY_EVENT_COLUMNS / INDEX_MEMBERSHIP_COLUMNS + 枚举
+│   │   ├── market_data.py              #     DAILY_PRICE_COLUMNS
+│   │   ├── valuation.py                #     DAILY_VALUATION / VALUATION_HISTORY / INDUSTRY_VALUATION 列契约
+│   │   └── fundamental.py              #     FUNDAMENTAL_PIT_COLUMNS（报告期 + 公告日 + 可见日）与四表契约
+│   ├── normalization/                  #   归一化层（叶子包：源表 → 契约帧，不取数不落库）
+│   │   ├── __init__.py                 #     导出三层归一化入口
+│   │   ├── base.py                     #     原子原语：代码 / 选列 / 数值 / 日期 / 文本清洗
+│   │   ├── akshare.py                  #     证券名录、日K、估值快照、历史估值、行业估值、指数成分、公司概况
+│   │   ├── exchange.py                 #     上市/退市日历、merge_lifecycle（回填日期 + 推导 status）、build_lifecycle_events
+│   │   └── eastmoney.py                #     东财三大报表 → PIT 帧（available_date = announce_date）
+│   ├── fundamental/                    #   基本面派生层（纯计算，不取数不落库）
+│   │   ├── __init__.py                 #     导出 build_financial_indicators + 与 V2 文档 §3.1 目录的对应关系
+│   │   └── indicator.py                #     ROE / ROA / ROIC / 毛利率 / 净利率 / 同比；公告日取两表较晚者
 │   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
-│   │   ├── __init__.py                 #     本层统一出口（Database + 五个 Repository）
+│   │   ├── __init__.py                 #     本层统一出口（Database + 11 个 Repository）
 │   │   ├── storage/                    #     数据存储基础设施
 │   │   │   ├── __init__.py             #       导出 Database / initialize_database
-│   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with）
-│   │   │   └── schema.py               #       DDL 唯一定义与 initialize_database()
+│   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with，打开时校验版本）
+│   │   │   └── schema.py               #       initialize_database()：委托迁移器（**不含 DDL**）
+│   │   ├── migrations/                 #     数据库结构迁移（DDL 的唯一真相）
+│   │   │   ├── __init__.py             #       导出 SchemaMigrator / MIGRATIONS_DIR
+│   │   │   ├── runner.py               #       SchemaMigrator：引导 sys.schema_version、按序补跑、失败不记版本
+│   │   │   ├── 001_initial.sql         #       基线迁移（机制上线前的既有结构，全部 IF NOT EXISTS）
+│   │   │   ├── 002_fundamental.sql     #       fundamental 域四张表
+│   │   │   └── 003_security_events.sql #       list_status → status + reference.security_events
 │   │   └── repository/                 #     数据访问层（表级 SQL 封装）
-│   │       ├── __init__.py             #       导出 BaseRepository 与五个 Repository
-│   │       ├── base.py                 #       BaseRepository：通用 UPSERT / 异常处理 / 日志模板
-│   │       ├── security.py             #       reference.securities 读写
+│   │       ├── __init__.py             #       导出 BaseRepository 与 11 个 Repository
+│   │       ├── base.py                 #       BaseRepository：契约对齐 + 显式列名 UPSERT / 异常处理 / 日志模板
+│   │       ├── security.py             #       reference.securities（名录 upsert / 生命周期 upsert_lifecycle / universe(as_of)）
+│   │       ├── security_event.py       #       reference.security_events（生命周期事件按 as-of 查询）
 │   │       ├── daily_price.py          #       market.daily_prices 读写
 │   │       ├── daily_valuation.py      #       market.daily_valuations 读写
 │   │       ├── valuation_history.py    #       market.valuation_history 读写
 │   │       ├── index_membership.py     #       reference.index_memberships 读写
-│   │       └── industry_valuation.py   #       market.industry_valuations 读写
+│   │       ├── industry_valuation.py   #       market.industry_valuations 读写
+│   │       └── fundamental.py          #       fundamental 四表 + find_as_of / latest_as_of / cross_section_as_of
 │   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
 │   │   ├── __init__.py                 #     导出 MarketDataFacade
 │   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
@@ -255,14 +310,17 @@ StockLab/
 │   │       └── industries.js          #     行业页：层级切换 / 条形图 / 明细表
 │   └── scripts/                       #   CLI 入口
 │       ├── generate_sector_trend.py   #     命令行入口：生成板块走势网页
-│       ├── sync_market_data.py        #     命令行入口：全市场数据同步到本地 DuckDB（五个阶段）
+│       ├── sync_market_data.py        #     命令行入口：全市场数据同步到本地 DuckDB（八个阶段）
 │       ├── serve_web.py               #     命令行入口：启动本地 Web 分析服务（仅监听 127.0.0.1）
 │       ├── verify_market_sql.py       #     抽样校验：全市场分位 SQL 与 analyzer 口径一致（退出码可进 CI）
 │       ├── analyze_pe_distribution.py #     命令行入口：全市场市盈率分布统计
 │       └── analyze_valuation_percentile.py # 命令行入口：个股历史估值分位计算
 ├── tests/                              # ── 自检脚本 ──
 │   ├── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
-│   └── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样）
+│   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样）
+│   ├── test_migrations.py              #     迁移自检（新库 / 幂等 / 老库升级 / 失败不记版本 / 序号重复）
+│   ├── test_data_contract.py           #     数据契约自检（缺列拒绝 / 乱序写入不错位 / 契约与 DDL 一致）
+│   └── test_pit_universe.py            #     PIT 与股票池自检（未来泄漏 / 幸存者偏差 / 指标派生）
 ├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
 │   └── stocklab.duckdb                 #     本地 DuckDB 单文件数据库
 ├── output/                             # ── 同上 ──
@@ -281,11 +339,19 @@ StockLab/
 | **数据源** | `stocklab.datasource.quote_service` | **单股行情服务 `StockQuoteService`**：三通道降级、月线价格+PE对齐、实时行情 |
 | | `stocklab.datasource.data_contract` | **数据契约**：列名常量 + `StockRealtimeQuote`，单股行情/入库取数两服务共用 |
 | | `stocklab.datasource.tencent_client` | **腾讯传输网关 `TencentMarketClient`**：股票/ETF/指数不区分、并发批量、OHLCV全要素 |
-| | `stocklab.datasource.market_service` | **入库取数 `MarketService`**：基础信息/日K/估值快照/历史估值/行业估值/指数成分/公司概况 —— 输出与库表同名同序 |
+| | `stocklab.datasource.market_service` | **入库取数 `MarketService`**：基础信息/日K/估值快照/历史估值/行业估值/指数成分/公司概况 —— 输出领域契约帧，源缺列抛 `DataContractError` |
+| | `stocklab.datasource.fundamental_service` | **逐只基本面 `FundamentalService`**：东财利润表/资产负债表/现金流量表（按报告期分批，单只约 60 次请求） |
+| | `stocklab.datasource.lifecycle_service` | **生命周期 `LifecycleService`**：沪深北上市日历与退市日历（只读交易所官网，名录外的退市股也由此补齐） |
+| **契约** | `stocklab.domain.contract` | **列契约三件套**：`check_columns` / `require_columns` / `align_columns`，缺列即拒绝 |
+| | `stocklab.domain.*` | 各表列契约元组与 `SECURITY_STATUSES` / `SECURITY_EVENT_TYPES` 枚举 |
+| **归一化** | `stocklab.normalization.base` | 源表原子原语：代码归一、选列、数值/日期/文本清洗 |
+| | `stocklab.normalization.akshare` / `exchange` / `eastmoney` | 7 类 akshare 源表、交易所上市退市日历（含 `merge_lifecycle`）、东财三大报表 → 契约帧 |
+| **派生** | `stocklab.fundamental.indicator` | 财务指标纯派生：ROE / ROA / ROIC / 毛利率 / 净利率 / 同比，公告日取两表较晚者 |
 | **外观** | `stocklab.facade.market_data` | **统一取数门面**：本地优先/远端优先策略、Cache-Aside 回写 |
-| **持久化** | `stocklab.persistence.storage.schema` | DuckDB DDL 定义：7 张表、3 个 Schema、复合主键 |
-| | `stocklab.persistence.storage.duckdb` | 连接管理：延迟初始化、上下文管理器 |
-| | `stocklab.persistence.repository.*` | 表级 Repository：继承 `BaseRepository` 统一 UPSERT / 异常处理，按代码/日期查询 |
+| **持久化** | `stocklab.persistence.migrations` | **迁移执行器 `SchemaMigrator`**：`NNN_*.sql` 为 DDL 唯一真相，`sys.schema_version` 记录版本、失败不记版本 |
+| | `stocklab.persistence.storage.schema` | `initialize_database()`：委托迁移器（**本文件不含 DDL**） |
+| | `stocklab.persistence.storage.duckdb` | 连接管理：延迟初始化、上下文管理器、打开时校验结构版本 |
+| | `stocklab.persistence.repository.*` | 表级 Repository：经 `BaseRepository` 契约对齐 + 显式列名 UPSERT / 异常处理；含 PIT 查询与 `universe(as_of)` |
 | **分析** | `stocklab.analytics.valuation_percentile` | **历史分位 CDF 口径**：排除亏损期、输出档位判定 |
 | | `stocklab.analytics.valuation_distribution` | **全市场 PE 分布**：中位数/分位/固定语义分桶/交易所对比/极值榜单 |
 | **渲染** | `stocklab.analytics.percentile_reporter` | 单股分位：控制台表格 + Markdown |
@@ -297,7 +363,7 @@ StockLab/
 | | `app.web.store` | **进程级数据访问单例**：门面锁 / 聚合连接锁、全市场窗口函数 SQL、指数成分中位数序列、七档评级、进程内缓存 |
 | | `app.web.api` | 个股接口：`/api/percentile` 分位 + 多窗口、`/api/securities` 联想（排序 + 大小写不敏感）、代码与中文名解析 |
 | | `app.web.market_api` | 全市场接口：`/api/market/ranking`（过滤/排序/分页 + 七档分布与直方图）、`/api/indices`、`/api/index/detail` |
-| **脚本** | `app/scripts/sync_market_data.py` | 5 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分 |
+| **脚本** | `app/scripts/sync_market_data.py` | 8 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分/行业估值/生命周期/基本面（默认全跑一、二、三、五、七） |
 | | `app/scripts/generate_sector_trend.py` | 可视化生成 CLI：月数/输出路径/配置文件可配 |
 | | `app/scripts/serve_web.py` | 本地分析服务 CLI：端口/优先级/数据库路径可配，仅监听 127.0.0.1 |
 
@@ -336,13 +402,24 @@ StockLab/
 # 增量同步（自动从最新交易日期同步到当前）
 ./venv/bin/python app/scripts/sync_market_data.py --incremental
 
-# 五个阶段分开执行（子命令，公共参数可在子命令前后任意位置）
+# 各阶段分开执行（子命令，公共参数可在子命令前后任意位置）
 ./venv/bin/python app/scripts/sync_market_data.py securities                 # 阶段一：股票基础信息
 ./venv/bin/python app/scripts/sync_market_data.py prices --incremental       # 阶段二：日 K 行情
 ./venv/bin/python app/scripts/sync_market_data.py prices --start-date 1990-12-19   # 阶段二：全历史回补
 ./venv/bin/python app/scripts/sync_market_data.py valuations                 # 阶段三：估值快照
 ./venv/bin/python app/scripts/sync_market_data.py valuation-history --period 近五年  # 阶段四：历史估值序列
 ./venv/bin/python app/scripts/sync_market_data.py indexes                     # 阶段五：主流宽基指数成分
+./venv/bin/python app/scripts/sync_market_data.py industries --stat-date 2026-09-30 # 阶段六：行业估值横截面
+./venv/bin/python app/scripts/sync_market_data.py lifecycle                   # 阶段七：证券生命周期（上市/退市日历）
+
+# 阶段八：Point-in-Time 基本面（逐只抓取，耗时以小时计，不参与一键全跑）
+./venv/bin/python app/scripts/sync_market_data.py fundamentals --ts-code 600519.SH
+./venv/bin/python app/scripts/sync_market_data.py fundamentals --workers 8
+
+# 数据质量自检（均用临时数据库，但 test_web_api / test_data_interfaces 会打开本地库）
+./venv/bin/python tests/test_migrations.py        # 迁移幂等与老库升级
+./venv/bin/python tests/test_data_contract.py     # 契约对齐与显式列名写入
+./venv/bin/python tests/test_pit_universe.py      # Point-in-Time 与 as-of 股票池
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
 ./venv/bin/python app/scripts/sync_market_data.py --securities-only
@@ -464,11 +541,12 @@ pip install -r requirements.txt
 12. **历史估值分位的样本数会小于交易日数**：差额即被排除的亏损期。
     例如金科股份 606 个交易日中 PE-TTM 仅 402 个有效样本（排除 204 个亏损期），
     这是刻意为之——亏损期不具备估值比较意义，计入分母会扭曲结论。
-13. **巨潮 `stock_profile_cninfo` 已需授权**：实测返回
-    `{"resultcode": 451, "resultmsg": "ApiFilter 未经授权的访问,code:003 token null"}`，
-    HTTP 200 但数据为空。`MarketService.fetch_company_profile()` 已实现，
-    在接口开放的环境可直接用于补齐 `securities.industry` / `list_date`；
-    接口不可用时以 `reference.index_memberships` 的指数成分作为同业分组的替代维度。
+13. **巨潮 `stock_profile_cninfo` 已恢复可用**（实测 600519 / 000001 / 300750 均返回 1×26 表，
+    曾于 2025 年返回 `resultcode 451 ApiFilter` 授权错误）。`MarketService.fetch_company_profile()`
+    返回 `industry / list_date / index_membership` 契约帧，可一次性补齐
+    `securities.industry` 与 `index_membership`；全量回填约 5572 次请求（单只约 0.2 秒），
+    需要时按 `fundamentals` 阶段的「并发取数 → 串行落库」模式接一个可选阶段，
+    接口再失效时仍以 `reference.index_memberships` 的指数成分作为同业分组的替代维度。
 14. **Web 分析服务（`serve_web.py`）的并发与锁约束**：
     - 服务只监听 `127.0.0.1`，单用户本地工具，**不设鉴权、不对外暴露**；若将来要开放到局域网，必须先补鉴权。
     - **两把进程内串行锁，全在 `app.web.store` 里，新增接口必须经 `store`，不要绕过它直连 facade**：
@@ -484,9 +562,11 @@ pip install -r requirements.txt
     - **同进程内不允许混合配置的连接**：门面是写连接时，同进程再开 `read_only=True` 会直接报
       `Can't open a connection to same database file with a different configuration than existing connections`。
       所以 `store` 的聚合连接也必须用默认写连接（初版踩过此坑，表现为「门面一打开，Dashboard 与指数接口全返回空」）。
-    - **上游 `securities` 表只有 `ts_code/symbol/name/exchange/market/list_status` 有值**：
-      `industry`、`area`、`list_date`、`is_hs` 全表为空（巨潮接口已需授权，见第 13 条），
-      因此 Web 层不查也不展示这些字段，避免出现恒为空的「行业 / 上市日期」。
+    - **上游 `securities` 表的 `industry` / `area` / `is_hs` 全表为空**：
+      这三列由名录阶段写入但名录不提供，页面不查也不展示；
+      `list_date` / `delist_date` / `status` 必须先跑
+      `sync_market_data.py lifecycle`（阶段七）才有值，Web 层读 `status`
+      （`list_status` 已由迁移 003 删除，同一含义不留两列）。
     - 未知代码或远端回退时接口耗时可达数秒（实测 5.7s），属正常现象，前端已带 loading 态与 15~30s 超时。
 15. **七档评级只属于 Web 展示层**：`store.percentile_level()` 与 `static/common.js` 的 `LEVEL7` 必须保持
     完全一致（`tests/test_web_api.py` 既解析 JS 阈值、又用 node 真实执行 `levelOf()` 双向校验）。
@@ -495,6 +575,44 @@ pip install -r requirements.txt
     5572 只 × 平均 794 行 = 442 万行，逐只调 analyzer 不可行，故用一条窗口函数
     （`store._MARKET_SQL`）一次算完（实测 0.13s）。改动该 SQL 后**必须**重跑
     `app/scripts/verify_market_sql.py 300` 做抽样比对。
+17. **数据库结构只由迁移文件定义**：
+    - `stocklab/persistence/migrations/NNN_*.sql` 是 DDL 的唯一真相；改表结构必须**新增**
+      `NNN_描述.sql`，禁止直接改 `storage/schema.py`（该文件只剩 `initialize_database()` 的委托）。
+    - `SchemaMigrator` 在每次打开/初始化数据库时比对 `sys.schema_version`，按序补跑未应用迁移；
+      每个迁移只执行一次，执行失败即中止且**不记版本**（修复文件后重跑即可，故迁移文件自身必须幂等，
+      新建表一律 `IF NOT EXISTS`；`ALTER TABLE` 只能写在基线 `001` 之后的迁移里）。
+    - `001_initial.sql` 是机制上线前的既有结构，全部 `IF NOT EXISTS`，老库补跑不会报错、
+      新库与老库走完全相同的升级路径；两个迁移文件同号会直接 `RuntimeError`。
+    - 自检：`tests/test_migrations.py`（新库 / 幂等 / 老库升级 / 失败不记版本 / 序号重复）。
+18. **数据契约是「源 → 库」的唯一闸门**：
+    - 新增表必须同时落三处：`stocklab/domain` 契约元组、`migrations/NNN_*.sql` DDL、
+      `repository/` 的 `_TABLE_NAME` + `_COLUMNS`；`tests/test_data_contract.py` 会比对
+      契约列名集合与 DDL 列名集合是否完全一致。
+    - 归一化层（`stocklab.normalization`）在源表缺列时抛 `DataContractError`，
+      `fetch_*` 捕获后记 ERROR 并返回空表，`sync_*` 把空表判为该阶段失败（退出码 1）——
+      **绝不产出缺列帧**，也绝不把半批数据写进库。
+    - Repository 写入一律「契约对齐 → 显式列名 INSERT ... ON CONFLICT」，因此 DataFrame 列序任意、
+      契约外列被丢弃、缺契约列直接拒绝；`conflict_columns` / `update_columns` 必须属于契约。
+19. **构造 DataFrame 必须用 `pd.DataFrame(dict)` 或 `pd.DataFrame([dict])`**：
+    逐列赋值时若先给标量再给 Series，标量列会被广播成全 NaN（实测导致日 K 的 `ts_code`
+    全 NaN → DuckDB 主键拒绝 → 整批静默写 0 行）。
+20. **证券生命周期的字段归属（两套写入不可合并）**：
+    - `SecurityRepository.upsert()`（名录阶段）只更新 `symbol/name/exchange/market/industry/area/is_hs`；
+    - `SecurityRepository.upsert_lifecycle()`（生命周期阶段）只更新 `list_date/delist_date/status`，
+      并把退市日历中、名录里没有的退市股整行插入（否则退市股永远进不了样本池）；
+    - 合并的后果：名录帧的日期恒为空，一并更新会把生命周期阶段回填的日期抹成 NULL。
+    - `securities.status` 取值见 `SECURITY_STATUSES`（`list_status` 已由迁移 003 删除）。
+      历史研究用 `SecurityRepository.universe(as_of_date)` 取 as-of 股票池，
+      **禁止拿「当前在市列表」当历史样本**（幸存者偏差）。自检：`tests/test_pit_universe.py`。
+21. **Point-in-Time 查询必须带 `available_date`**：`fundamental` 四张表的 `find_as_of` /
+    `latest_as_of` / `cross_section_as_of` 一律以**公告日**为可见性判据——报告期早于 as-of
+    不等于当时已知（4 月才公告的年报，在 3 月底的回测里就是未来信息）。
+22. **`fundamentals` 阶段不参与一键全跑**：单只约 60 次 HTTP 请求，全市场约 35 万次（数小时量级）。
+    与阶段四一致，**并发只用于取数、落库必须串行**（DuckDB 连接非线程安全）；
+    支持 `--ts-code`（逗号分隔，单只验证）与 `--workers`（默认 8）。
+23. **行业估值接口的日期参数是 `YYYYMMDD`**：巨潮按 `date[:4]+date[4:6]+date[6:]` 拼接，
+    传 `2026-09-30` 会拼成非法日期并抛 `KeyError 'records'`（表现为整阶段无数据）。
+    `fetch_industry_valuation` 内部已统一转换，CLI 的 `--stat-date` 两种格式都能用。
 
 ---
 

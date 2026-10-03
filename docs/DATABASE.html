@@ -480,8 +480,24 @@
       <div class="subtitle">本地 DuckDB 数据仓库的设计思想、整体框架、表间关联、字段含义与当前数据实况</div>
       <div class="meta">
         统计基准：2026-10-02 ｜ 数据库文件：<code>data/stocklab.duckdb</code>（约 144 MB）<br>
-        DDL 唯一来源：<code>stocklab/persistence/storage/schema.py</code>
+        DDL 唯一来源：<code>stocklab/persistence/migrations/NNN_*.sql</code>（<code>SchemaMigrator</code> 启动时按 <code>sys.schema_version</code> 自动补跑）
       </div>
+    </div>
+
+    <!-- V2 结构变更说明 -->
+    <div class="callout callout-warn" style="margin-top: 20px;">
+      <strong>V2 结构变更（本文档的字段说明与填充率统计仍为 2026-10-02 的 v1 实况）</strong><br>
+      ① 结构改为<strong>迁移文件</strong>定义：<code>001_initial.sql</code>（基线 = 下文的 v1 结构）、
+      <code>002_fundamental.sql</code>（新增 <code>fundamental</code> 域四张表
+      <code>income_statements</code> / <code>balance_sheets</code> / <code>cashflow_statements</code> /
+      <code>financial_indicators</code>）、<code>003_security_events.sql</code>。<br>
+      ② <code>reference.securities</code> 的 <code>list_status</code>（L/D/P）改为语义化列
+      <code>status</code>（<code>PRE_LIST</code> / <code>LISTED</code> / <code>PAUSED</code> /
+      <code>DELISTED</code>，见 <code>stocklab.domain.SECURITY_STATUSES</code>），原列已删除；并新增
+      <code>reference.security_events</code> 生命周期事件表。<br>
+      ③ <code>list_date</code> / <code>delist_date</code> 由「证券生命周期」阶段从沪深北交易所
+      上市/退市日历回填，历史时点股票池用
+      <code>SecurityRepository.universe(as_of)</code> 推导（防幸存者偏差）。
     </div>
 
     <!-- Navigation -->
@@ -727,7 +743,7 @@
                 <div class="er-field"><span class="field-name">market</span><span class="field-type">VARCHAR</span></div>
                 <div class="er-field"><span class="field-name">industry</span><span class="field-type">VARCHAR</span></div>
                 <div class="er-field"><span class="field-name">list_date</span><span class="field-type">DATE</span></div>
-                <div class="er-field"><span class="field-name">list_status</span><span class="field-type">VARCHAR</span></div>
+                <div class="er-field"><span class="field-name">status</span><span class="field-type">VARCHAR</span></div>
               </div>
               <div class="er-table-footer">
                 <span class="row-count">5,572 行 · 全市场证券档案（权威主体表）</span>
@@ -940,22 +956,22 @@
             <td><code>list_date</code></td>
             <td>DATE</td>
             <td>是</td>
-            <td><span class="badge badge-error">0%</span></td>
-            <td>上市日期。同上，当前不可用</td>
+            <td>100%</td>
+            <td>上市日期。由「证券生命周期」阶段从沪深北交易所上市日历回填</td>
           </tr>
           <tr>
             <td><code>delist_date</code></td>
             <td>DATE</td>
             <td>是</td>
-            <td><span class="badge badge-error">0%</span></td>
-            <td>退市日期。同上，当前不可用（当前无退市记录）</td>
+            <td>6.1%</td>
+            <td>退市日期。仅退市股非空（迁移 003 + 生命周期阶段回填，共 361 只）</td>
           </tr>
           <tr>
-            <td><code>list_status</code></td>
+            <td><code>status</code></td>
             <td>VARCHAR</td>
             <td>是</td>
             <td>100%</td>
-            <td>上市状态。当前全部为 <code>'L'</code>（上市中），无退市样本</td>
+            <td>生命周期状态：<code>LISTED</code> / <code>DELISTED</code> / <code>PAUSED</code> / <code>PRE_LIST</code>（取代原 <code>list_status</code>）</td>
           </tr>
           <tr>
             <td><code>is_hs</code></td>
@@ -1375,9 +1391,11 @@
         <tbody>
           <tr><td><code>ts_code</code> / <code>symbol</code> / <code>name</code></td><td>100%</td><td><span class="badge badge-ok">✓ 可用</span></td></tr>
           <tr><td><code>exchange</code> / <code>market</code></td><td>100%</td><td><span class="badge badge-ok">✓ 可用</span></td></tr>
-          <tr><td><code>list_status</code></td><td>100%</td><td><span class="badge badge-ok">✓ 全为 'L'</span></td></tr>
-          <tr><td><code>industry</code> / <code>area</code></td><td><strong>0%</strong></td><td><span class="badge badge-error">⬜ 数据源不可用</span></td></tr>
-          <tr><td><code>list_date</code> / <code>delist_date</code> / <code>is_hs</code></td><td><strong>0%</strong></td><td><span class="badge badge-error">⬜ 数据源不可用</span></td></tr>
+          <tr><td><code>status</code></td><td>100%</td><td><span class="badge badge-ok">✓ LISTED 5572 / DELISTED 361</span></td></tr>
+          <tr><td><code>industry</code> / <code>area</code></td><td><strong>0%</strong></td><td><span class="badge badge-error">⬜ 数据源未接入同步阶段</span></td></tr>
+          <tr><td><code>list_date</code></td><td>100%</td><td><span class="badge badge-ok">✓ 生命周期阶段回填</span></td></tr>
+          <tr><td><code>delist_date</code></td><td>6.1%</td><td><span class="badge badge-ok">✓ 仅退市股非空（361 只）</span></td></tr>
+          <tr><td><code>is_hs</code></td><td>0%</td><td><span class="badge badge-error">⬜ 数据源不可用</span></td></tr>
         </tbody>
       </table>
 
