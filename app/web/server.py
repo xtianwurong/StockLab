@@ -14,6 +14,7 @@ StockLab - Web 服务装配模块 (app.web.server)
   /market                        全市场分位 Dashboard（模板渲染）
   /indices                       指数估值页面（模板渲染）
   /industries                    行业估值页面（模板渲染）
+  /screener                      选股器页面（模板渲染）
   /favicon.ico                   站点图标（消除每页 404 噪音）
   /static/*                      本地静态资源（含 vendored ECharts，离线可用）
   /api/health                    健康检查
@@ -23,6 +24,8 @@ StockLab - Web 服务装配模块 (app.web.server)
   /api/industries?level=       行业估值横截面（国证行业分类 1~4 级）
   /api/indices?indicator=        指数估值列表
   /api/index/detail?code=        单指数估值走势与明细
+  /api/screener/meta?as_of=      选股器元数据（因子覆盖率 / 算子 / 预置模板）
+  /api/screener/run              选股器执行（POST {spec, as_of, sort, order, limit}）
   ==============================================================================
 """
 
@@ -33,6 +36,7 @@ from flask import Flask
 
 from app.web import api
 from app.web import market_api
+from app.web import screener_api
 
 _logger = logging.getLogger("StockLab.Web.Server")
 
@@ -70,6 +74,9 @@ def create_app(priority=None, db_path=None):
     app.add_url_rule(
         "/industries", "industries", api.handle_industries_page, methods=["GET"]
     )
+    app.add_url_rule(
+        "/screener", "screener", api.handle_screener_page, methods=["GET"]
+    )
     app.add_url_rule("/favicon.ico", "favicon", api.handle_favicon, methods=["GET"])
 
     # 数据接口
@@ -97,10 +104,22 @@ def create_app(priority=None, db_path=None):
         market_api.handle_index_detail,
         methods=["GET"],
     )
+    app.add_url_rule(
+        "/api/screener/meta",
+        "screener_meta",
+        screener_api.handle_screener_meta,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/screener/run",
+        "screener_run",
+        screener_api.handle_screener_run,
+        methods=["POST"],
+    )
 
     # 错误兜底
     app.register_error_handler(404, api.handle_not_found)
     app.register_error_handler(500, api.handle_internal_error)
 
-    _logger.info("Flask 应用已创建，路由 12 条（页面 4 + 接口 7 + 图标 1）")
+    _logger.info("Flask 应用已创建，路由 15 条（页面 5 + 接口 9 + 图标 1）")
     return app

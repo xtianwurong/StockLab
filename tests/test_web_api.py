@@ -16,6 +16,7 @@ StockLab - Web 层测试 (tests/test_web_api.py)
     8. 全市场排行的排序 / 过滤 / 分页 / null 恒排最后
     9. 指数列表与单指数详情
    10. 多窗口分位（全部 / 近十年 / 近五年 / 近三年）
+   11. 选股器：因子覆盖率如实标注、算子表、模板就绪度、漏斗、散点、亏损股剔除
 
 【运行方式】
   # 必须先停掉 serve_web.py —— DuckDB 同文件跨进程单写者（见 AGENT.md）
@@ -71,7 +72,7 @@ def run_route_tests():
     print("=" * 65)
 
     client = _client()
-    for path in ("/", "/market", "/indices", "/industries", "/favicon.ico"):
+    for path in ("/", "/market", "/indices", "/industries", "/screener", "/favicon.ico"):
         response = client.get(path)
         assert response.status_code == 200, "%s 返回 %s" % (path, response.status_code)
         print("  -> %-14s 200, %d bytes" % (path, len(response.data)))
@@ -534,6 +535,160 @@ def run_percentile_detail_tests():
     print("  -> 覆盖当前值 pe_ttm=100 生效，分位 %s" % pe_item["percentile"])
 
 
+def run_screener_tests():
+    """阶段十二：选股器元数据与执行接口"""
+    print("\n" + "=" * 65)
+    print("【阶段十二：选股器】")
+    print("=" * 65)
+
+    client = _client()
+
+    # 元数据：因子覆盖率 / 算子 / 模板 / 时点
+    meta = _json(client.get("/api/screener/meta"))
+    assert meta["as_of"], "元数据应给出默认研究时点"
+    assert meta["factors"], "因子清单不应为空"
+    assert meta["operators"], "算子表不应为空"
+    assert meta["presets"], "预置模板不应为空"
+    assert meta["universe_size"] > 0, "股票池不应为空"
+
+    # 算子表必须与 stocklab.screener 的 9 种算子一致
+    assert len(meta["operators"]) == 9, "算子应恰有 9 种，实际 %d" % len(meta["operators"])
+    for item in meta["operators"]:
+        assert item["label"], "算子 %s 缺中文名" % item["key"]
+        assert item["needs_value"] == (item["key"] not in ("isna", "notna")), \
+            "算子 %s 的 needs_value 不对" % item["key"]
+
+    # 覆盖率必须如实反映数据现状：pe_ttm / pb 可用，其余多为无数据
+    by_name = {item["name"]: item for item in meta["factors"]}
+    assert by_name["pe_ttm"]["availability"] == "ready", "pe_ttm 应为全市场可用"
+    assert by_name["pe_ttm"]["coverage"] > 99, "pe_ttm 覆盖率应接近 100%"
+    assert by_name["pb"]["availability"] == "ready", "pb 应为可用"
+    # 无数据源的因子必须标 none，且覆盖率不为正
+    for name in ("roe", "dividend_yield", "momentum_12m"):
+        if name in by_name:
+            assert by_name[name]["availability"] in ("none", "sparse"), \
+                "%s 应标为无数据/稀疏，实际 %s" % (name, by_name[name]["availability"])
+
+    # 模板就绪度：引用了无数据因子的模板必须标 needs_data
+    for preset in meta["presets"]:
+        assert preset["readiness"] in ("ready", "needs_data"), preset["key"]
+        if preset["readiness"] == "needs_data":
+            referenced = [
+                rule["factor"]
+                for rule in preset["spec"]["rules"]
+                if by_name.get(rule["factor"], {}).get("availability") != "ready"
+            ]
+            assert referenced, "模板 %s 标为 needs_data 却没引用无数据因子" % preset["key"]
+    print("  -> meta：%d 个因子 / %d 个算子 / %d 个模板，pe_ttm 覆盖 %.1f%%" % (
+        len(meta["factors"]), len(meta["operators"]), len(meta["presets"]),
+        by_name["pe_ttm"]["coverage"]))
+
+    # 执行：双因子条件
+    spec = {
+        "rules": [
+            {"factor": "pe_ttm", "operator": "lt", "value": 15},
+            {"factor": "pb", "operator": "lt", "value": 1.5},
+        ]
+    }
+    result = _json(client.post("/api/screener/run", json={
+        "spec": spec, "as_of": meta["as_of"], "sort": "pe_ttm",
+        "order": "asc", "limit": 50,
+    }))
+    assert result["counts"]["total"] == meta["universe_size"], "总数应等于股票池"
+    assert result["counts"]["passed"] > 0, "估值双低条件应能筛出标的"
+    assert result["rows"], "应有结果行"
+    assert result["rows"][0]["pe_ttm"] <= 15, "首行应满足 PE 条件"
+    assert len(result["rows"]) <= 50, "limit 应生效"
+    # 默认剔除亏损股：spec 回显里应多出 pe_ttm > 0
+    assert result["positive_only"] is True
+    assert any(
+        rule["factor"] == "pe_ttm" and rule["operator"] == "gt" and rule["value"] == 0
+        for rule in result["spec"]["rules"]
+    ), "默认应注入 pe_ttm > 0 规则"
+    assert "pe_ttm" in result["condition"] and "AND" in result["condition"]
+    print("  -> run：%s，条件 %s" % (result["counts"], result["condition"]))
+
+    # 漏斗：逐条规则的通过数 + 是否在帧内
+    funnel = result["funnel"]
+    assert len(funnel) == 3, "漏斗应含注入的 1 条 + 用户的 2 条，实际 %d" % len(funnel)
+    for item in funnel:
+        assert item["in_frame"] is True
+        assert item["passed"] <= result["counts"]["total"]
+    # 亏损股剔除：只影响总通过数，不影响单条规则的独立漏斗
+    # （漏斗口径是「每条规则各自在全池上判定」，与 AND 组合结果本就不是同一个数）
+    keep_loss = _json(client.post("/api/screener/run", json={
+        "spec": spec, "as_of": meta["as_of"], "positive_only": False, "limit": 1,
+    }))
+    assert keep_loss["positive_only"] is False
+    # 不剔除时不应注入 pe_ttm > 0，漏斗也少一条
+    assert len(keep_loss["funnel"]) == 2, "不剔除时漏斗应为用户自己的 2 条"
+    assert not any(
+        rule["factor"] == "pe_ttm" and rule["value"] == 0
+        for rule in keep_loss["spec"]["rules"]
+    ), "不剔除时不应注入 pe_ttm > 0"
+    # 亏损股（PE≤0）会被「PE<15」误纳，所以含亏损股的通过数必然更多
+    assert keep_loss["counts"]["passed"] > result["counts"]["passed"], \
+        "含亏损股时通过数应更多（%s vs %s）" % (
+            keep_loss["counts"]["passed"], result["counts"]["passed"])
+
+    # 漏斗语义自证：pe_ttm>0 通过数 = 剔除亏损股后的候选池，应大于总通过数
+    positive_row = [f for f in funnel if f["factor"] == "pe_ttm" and f["operator"] == "gt"][0]
+    assert positive_row["passed"] > result["counts"]["passed"], \
+        "PE>0 的通过数应大于 AND 组合后的通过数"
+    print("  -> 漏斗 3 条（含注入的 PE>0：%d 只）；含亏损股通过 %d 只 vs 剔除后 %d 只" % (
+        positive_row["passed"], keep_loss["counts"]["passed"], result["counts"]["passed"]))
+
+    # 散点：两个有数据的因子才出图
+    scatter = result["scatter"]
+    assert scatter["points"], "双因子条件应产出散点"
+    assert scatter["x"] and scatter["y"] and scatter["x"] != scatter["y"]
+    for point in scatter["points"]:
+        assert len(point) == 5, "散点应为 [x, y, passed, code, name]"
+        assert isinstance(point[2], bool)
+    # 单因子条件没有第二个可用轴 -> 散点为空（前端隐藏该卡片）
+    single = _json(client.post("/api/screener/run", json={
+        "spec": {"rules": [{"factor": "pe_ttm", "operator": "lt", "value": 15}]},
+        "as_of": meta["as_of"], "limit": 5,
+    }))
+    assert single["scatter"]["points"] == [], "单因子不应产出散点"
+    print("  -> 散点：%s vs %s 共 %d 点；单因子时正确为空" % (
+        scatter["x"], scatter["y"], len(scatter["points"])))
+
+    # 参数校验
+    for payload, label in (
+        ({}, "空体"),
+        ({"spec": {}}, "spec 非对象"),
+        ({"spec": {"rules": []}}, "rules 为空"),
+        ({"spec": spec, "order": "x"}, "order 非法"),
+        ({"spec": spec, "limit": 0}, "limit 非法"),
+    ):
+        response = client.post("/api/screener/run", json=payload)
+        assert response.status_code == 400, "%s 应返回 400，实际 %s" % (
+            label, response.status_code)
+        assert "error" in _json(response), "%s 应带 error 字段" % label
+    print("  -> 5 组参数校验全部 400")
+
+    # 未登记因子 / 规则超限
+    unknown = client.post("/api/screener/run", json={
+        "spec": {"rules": [{"factor": "no_such_factor", "operator": "lt", "value": 1}]},
+    })
+    assert unknown.status_code == 400, "未登记因子应 400"
+    too_many = client.post("/api/screener/run", json={
+        "spec": {"rules": [{"factor": "pe_ttm", "operator": "lt", "value": i} for i in range(13)]},
+    })
+    assert too_many.status_code == 400, "超过 12 条规则应 400"
+    print("  -> 未登记因子 / 规则超限 均 400")
+
+    # 页面要素齐备
+    page = client.get("/screener").get_data(as_text=True)
+    for element_id in ("rule-list", "preset-select", "chk-positive", "as-of-select",
+                       "funnel-list", "scatter-chart", "industry-list", "btn-run"):
+        assert 'id="%s"' % element_id in page, "选股器页面缺少 %s" % element_id
+    assert "/static/screener.js" in page, "选股器页面未引入脚本"
+    assert 'class="nav-link active"' in page, "选股器页面导航未高亮"
+    print("  -> 页面要素与导航高亮齐备")
+
+
 def main():
     """按阶段顺序执行全部用例"""
     global _APP
@@ -554,6 +709,7 @@ def main():
         run_industry_tests()
         run_index_tests()
         run_percentile_detail_tests()
+        run_screener_tests()
 
     print("\n" + "=" * 65)
     print("全部测试通过")

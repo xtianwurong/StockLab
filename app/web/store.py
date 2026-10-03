@@ -186,6 +186,50 @@ def current_priority():
         return _get_facade().priority
 
 
+def facade_database():
+    """
+    取得门面持有的 Database 实例（供需要直接查库的接口层复用）
+
+    【为何必须复用而不是新建】
+      DuckDB 对同一文件只允许一个写连接；门面已经持有一个，
+      这里再 duckdb.connect() 同一文件会抛 "Could not set lock"。
+      选股器要跑 build_factor_frame（内部走 Repository），必须拿到
+      同一个 Database，因此从门面借，而不是自己建连接。
+
+    Returns:
+        Database: 门面的数据库实例
+    """
+    with _FACADE_LOCK:
+        return _get_facade()._database
+
+
+def valuation_dates(limit=60):
+    """
+    列出本地估值快照已有数据的交易日（新的在前），供选股器选 as-of 时点
+
+    Args:
+        limit (int): 最多返回多少个日期
+
+    Returns:
+        list[str]: ["YYYY-MM-DD", ...]；无数据返回空列表
+    """
+    frame = _query(
+        "SELECT DISTINCT trade_date FROM market.daily_valuations "
+        "ORDER BY trade_date DESC LIMIT ?",
+        [int(limit)],
+    )
+    if frame is None or frame.empty:
+        return []
+
+    dates = []
+    for value in frame["trade_date"].tolist():
+        # DuckDB 可能返回 datetime 或 date，统一成 YYYY-MM-DD 文本
+        if hasattr(value, "date") and not isinstance(value, str):
+            value = value.date()
+        dates.append(value.isoformat() if hasattr(value, "isoformat") else str(value))
+    return dates
+
+
 def current_db_path():
     """
     取得当前数据库文件路径（健康检查回显用）

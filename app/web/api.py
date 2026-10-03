@@ -42,6 +42,7 @@ __all__ = [
     "handle_market_page",
     "handle_indices_page",
     "handle_industries_page",
+    "handle_screener_page",
     "handle_favicon",
     "handle_health",
     "handle_percentile",
@@ -384,6 +385,16 @@ def handle_industries_page():
         str: HTML 页面
     """
     return render_template("industries.html")
+
+
+def handle_screener_page():
+    """
+    选股器页面（可视化规则编辑器）
+
+    Returns:
+        str: HTML 页面
+    """
+    return render_template("screener.html")
 
 
 def handle_favicon():

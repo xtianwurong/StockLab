@@ -259,8 +259,10 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   - `store.py`：**进程级数据访问单例**——(1) 单例门面 + 串行锁，修复「每请求重建门面反复抢写锁」；(2) 全市场窗口函数 SQL 与指数聚合，走本模块自己的单例连接 + 第二把锁，与门面锁互不嵌套；(3) 七档评级 `percentile_level()`、证券表与聚合结果的进程内缓存；(4) 行业估值横截面 `load_industry_valuation()` 与数据截止日期 `market_data_as_of()`。
   - `api.py`：个股接口层——只做「参数解析 → 代码/名称解析 → store 取数 → analyzer 计算 → 组装 JSON」，纯内存统计放在锁外；`/api/health` 额外返回 `data_as_of` 数据截止日期。
   - `market_api.py`：全市场与指数接口层——参数校验 → store 聚合 → 过滤/排序/分页，不经门面锁；`/api/market/ranking` 支持 `level` 七档评级过滤（summary 仍按过滤前口径统计）；`/api/industries` 行业横截面。
-  - `static/`：`base.css` 设计系统、`common.js` 共享工具（请求超时、七档配色、温度条、七档图例、健康检查、ECharts option 工厂）与各页脚本；`templates/`：四个页面模板 + `_topbar.html` / `_footer.html` 共享 partial。
-  - **依赖方向 `app.web → stocklab.facade / stocklab.analytics`（`store.py` 另直接用 `duckdb` 做只读聚合），与 `app.dashboard` 平行，不修改 `stocklab/` 核心库任何文件。**
+  - `screener_api.py`：选股器接口（`/api/screener/meta` 因子覆盖率+算子+模板就绪度、`/api/screener/run` 执行）。**只做编排**：筛选委托 `stocklab.screener.ScreenPipeline`、取数委托 `stocklab.research.frame.build_factor_frame`；因子帧按 as-of 缓存；数据库连接向 `store.facade_database()` **借用门面那一个**（DuckDB 同文件只允许一个写连接，另建会抛 `Could not set lock`）。默认注入 `pe_ttm > 0` 剔除亏损股——否则「PE<15」会把 PE 为负的亏损股全放进来，与估值分位页「亏损期剔除」口径相矛盾。
+  - `static/`：**三段式设计系统**：`tokens.css`（唯一取值来源：亮/暗双主题色板 + 间距/圆角/阴影/字号/动效/层级，保留全部历史变量名）、`components.css`（按钮/表单/卡片/表格/徽章/模态/抽屉/Toast/下拉/骨架屏等组件）、`base.css`（页面骨架与历史类名，颜色一律引用变量）。JS 分层：`common.js`（请求/格式化/评级/图表 option，导出 `window.SL`）、`charts.js`（`SL.charts`：调色板 + 图表登记簿 + 主题切换重绘 + 可复用 option 片段）、`ui.js`（`SL.ui`：Toast/模态/抽屉/下拉/Tooltip/防抖节流/剪贴板/CSV 导出/URL 参数/快捷键）、`theme.js`（`SL.theme`：亮暗切换 + localStorage + `sl:themechange` 广播 + 快捷键 T），另加各页脚本（`app.js` / `market.js` / `indices.js` / `industries.js` / `screener.js`）；`templates/`：五个页面模板统一 `extends "_layout.html"`（只覆盖 `page_title` / `page_css` / `content` / `page_scripts` 与 `main_class` / `active_page`）+ `_topbar.html`（导航数据驱动）/ `_footer.html` 共享 partial。
+  - **暗色主题链路**：`tokens.css` 是唯一定义处，`html[data-theme]` 切换；首屏防闪烁靠 `_layout.html` 里的内联脚本在 CSS 首绘前写 `data-theme`；ECharts 颜色一律经 `SL.charts.palette()` 读 CSS 变量，各页 `renderChart` 传 rebuild 回调，主题切换时由登记簿统一重绘（容器已移除则自动注销）。
+  - **依赖方向 `app.web → stocklab.facade / stocklab.analytics / stocklab.screener / stocklab.factor / stocklab.research`（`store.py` 另直接用 `duckdb` 做只读聚合；`screener_api.py` 直接调 `ScreenPipeline` / `build_factor_frame`，但只做参数解析与 JSON 组装，判定与取数逻辑一律留在 `stocklab/` 内），与 `app.dashboard` 平行，**不修改 `stocklab/` 核心库任何文件**。**
   - **七档评级仅存在于 Web 展示层**（`store.percentile_level` 与 `static/common.js` 的 `LEVEL7`，两侧口径由 `tests/test_web_api.py` 双向校验）；`stocklab.analytics` 内部仍是三档结论。
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
@@ -396,9 +398,10 @@ StockLab/
 │   │       └── dashboard.html         #    网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
 │   ├── web/                            #   本地 Web 分析服务（Flask，浏览器端点击分析）
 │   │   ├── __init__.py                #     导出 create_app
-│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器），页面 4 + 接口 7 + 图标 1
+│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器），页面 5 + 接口 9 + 图标 1
 │   │   ├── store.py                   #     进程级数据访问单例：单例门面锁 / 聚合连接锁 / 七档评级 / 行业横截面 / 进程内缓存
 │   │   ├── api.py                     #     个股接口：代码与中文名解析 → store → analyzer → JSON
+│   │   ├── screener_api.py             #     选股器接口：因子覆盖率元数据 + 执行筛选（委托 screener/research，连接借门面）
 │   │   ├── market_api.py              #     全市场/指数/行业接口：过滤排序分页 → store 聚合 → JSON
 │   │   ├── templates/
 │   │   │   ├── _topbar.html           #     共享顶栏（导航 / 状态 / 数据截止）
@@ -406,11 +409,18 @@ StockLab/
 │   │   │   ├── analysis.html          #     个股分析页（温度条 / 多窗口 / 明细表 / 七档图例）
 │   │   │   ├── market.html            #     全市场 Dashboard（统计卡 / 分布图 / 排行表 / 分页 / 评级钻取）
 │   │   │   ├── indices.html           #     指数估值页（指数卡片 + 走势详情）
-│   │   │   └── industries.html        #     行业估值页（层级切换 / PE 条形图 / 明细表）
+│   │   │   ├── industries.html        #     行业估值页（层级切换 / PE 条形图 / 明细表）
+│   │   │   └── screener.html          #     选股器页（规则编辑器 / 漏斗 / 散点 / 行业通过率 / 导出分享）
 │   │   └── static/
 │   │       ├── echarts.min.js         #     ECharts 5.5 vendored（本地托管，离线可用）
-│   │       ├── base.css               #     共享设计系统：顶栏 / 卡片 / 表格 / 徽章 / 温度条 / 七档色 / 图例 / 页脚
-│   │       ├── common.js              #     带超时的请求、格式化、七档配色、七档图例、健康检查、ECharts option 工厂
+│   │       ├── tokens.css             #     设计令牌（唯一取值来源）：亮/暗双主题 + 间距/圆角/阴影/字号/动效/层级
+│   │       ├── components.css         #     组件库：按钮 / 表单 / 卡片 / 表格 / 徽章 / 模态 / 抽屉 / Toast / 骨架屏
+│   │       ├── base.css               #     页面骨架与历史类名（顶栏 / 容器 / 温度条 / 图例 / 页脚），颜色只引用变量
+│   │       ├── common.js              #     SL：请求（支持 POST）/ 格式化 / 七档配色 / 图例 / 健康检查 / ECharts option
+│   │       ├── charts.js              #     SL.charts：调色板 + 图表登记簿 + 主题重绘 + 可复用 option 片段
+│   │       ├── ui.js                  #     SL.ui：Toast / 模态 / 抽屉 / 下拉 / Tooltip / 防抖 / CSV 导出 / 快捷键
+│   │       ├── theme.js               #     SL.theme：亮暗切换 + 持久化 + sl:themechange 广播 + 快捷键 T
+│   │       ├── screener.js            #     选股页：规则编辑 / 执行 / 漏斗 / 散点 / 导出分享
 │   │       ├── app.js                 #     个股页：联想键盘操作 / 分析渲染 / URL 还原
 │   │       ├── market.js              #     Dashboard：统计卡 / 直方图 / 评级钻取 / 排行分页
 │   │       ├── indices.js             #     指数页：卡片列表 / 详情加载
@@ -425,7 +435,7 @@ StockLab/
 │       └── analyze_valuation_percentile.py # 命令行入口：个股历史估值分位计算
 ├── tests/                              # ── 自检脚本（纯 assert，**无 pytest**，统一用 `./venv/bin/python tests/test_xxx.py` 运行）──
 │   ├── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
-│   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样）
+│   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样 / 选股器）
 │   ├── test_migrations.py              #     迁移自检（新库 / 幂等 / 老库升级 / 失败不记版本 / 序号重复）
 │   ├── test_data_contract.py           #     数据契约自检（缺列拒绝 / 乱序写入不错位 / 契约与 DDL 一致）
 │   ├── test_factor_engine.py           #     因子引擎自检（登记契约 / 六分类 / 数学手算核对 / 预处理与非法配置）
@@ -634,6 +644,12 @@ pip install -r requirements.txt
 
 > `numpy` 与 `matplotlib` **不在 requirements.txt 中**，是 akshare / pandas 带入的传递依赖（实测环境：numpy 2.5.3、matplotlib 3.11.2）。全库无 `import numpy` / `import matplotlib`，绘图一律由前端 ECharts 在浏览器内完成。
 > ECharts 5.5 已 vendored 于 `app/web/static/echarts.min.js`（约 1MB），**本地托管、离线可用**，页面不依赖外部 CDN。
+
+> **因子已登记 ≠ 因子有数据**：本地目前只有 `pe_ttm`（100%）、`pb`（99.5%）两个因子真正有数据源
+> （基本面仅同步了 600519 一只，日 K 尚未灌入），其余 25 个因子虽已登记但取值全为 NaN。
+> 因此选股器 `/api/screener/meta` **逐因子下发 coverage 与 availability**，规则编辑器里直接标色提示，
+> 预置模板也按「引用了无数据因子」标 `needs_data`——避免用户对着空因子建规则却只得到 0 只通过。
+> 数据补齐后覆盖率会自动上升，无需改前端。
 
 ---
 

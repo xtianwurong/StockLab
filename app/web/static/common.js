@@ -43,16 +43,31 @@
    * 发起 JSON 请求（带超时、自动解析、统一错误信息）
    *
    * @param {string} url 请求地址
-   * @param {number} timeoutMs 超时毫秒，默认 15000
+   * @param {number} [timeoutMs] 超时毫秒，默认 15000
+   * @param {object} [options] fetch 选项扩展（method / headers / body），
+   *                            用于 POST JSON 这类带请求体的接口
    * @returns {Promise<object>} 解析后的 JSON
    */
-  function fetchJson(url, timeoutMs) {
+  function fetchJson(url, timeoutMs, options) {
     var controller = new AbortController();
     var timer = setTimeout(function () {
       controller.abort();
     }, timeoutMs || 15000);
 
-    return fetch(url, { signal: controller.signal })
+    var init = { signal: controller.signal };
+    if (options) {
+      if (options.method) {
+        init.method = options.method;
+      }
+      if (options.headers) {
+        init.headers = options.headers;
+      }
+      if (options.body) {
+        init.body = options.body;
+      }
+    }
+
+    return fetch(url, init)
       .then(function (response) {
         return response.json().catch(function () {
           return {};

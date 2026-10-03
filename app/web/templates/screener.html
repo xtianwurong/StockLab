@@ -1,0 +1,325 @@
+{% extends "_layout.html" %}
+{% set active_page = "screener" %}
+
+{% block main_class %}container{% endblock %}
+{% block page_title %}选股器{% endblock %}
+
+{% block page_css %}
+<style>
+  /* ---------- 布局 ---------- */
+  .screen-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 400px) minmax(420px, 1fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+  .panel { position: sticky; top: calc(var(--topbar-height) + var(--space-4)); }
+
+  /* ---------- 规则卡 ---------- */
+  .rule-card {
+    padding: var(--space-3);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--bg-subtle);
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .rule-card + .rule-card { margin-top: var(--space-2); }
+  .rule-card:focus-within { border-color: var(--accent); background: var(--bg-card); }
+  .rule-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(84px, 1fr) minmax(76px, 1fr) 30px;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .rule-card .input,
+  .rule-card .select { height: var(--control-sm); font-size: var(--font-base); }
+  .rule-del { color: var(--text-faint); }
+  .rule-del:hover { color: var(--danger-500); }
+
+  .logic-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-2) 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+    color: var(--text-brand);
+    font-size: var(--font-sm);
+    font-weight: 600;
+  }
+
+  /* ---------- 因子选择 ---------- */
+  .factor-picker {
+    position: relative;
+    z-index: var(--z-dropdown);
+  }
+  .factor-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+    transition: background-color var(--dur-fast) var(--ease-out);
+  }
+  .factor-option:last-child { border-bottom: none; }
+  .factor-option:hover { background: var(--bg-hover); }
+  .factor-option.disabled { opacity: 0.5; cursor: not-allowed; }
+  .factor-name { font-family: var(--font-mono); font-size: var(--font-base); font-weight: 600; }
+  .factor-desc {
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ---------- 覆盖率条 ---------- */
+  .cov {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: none;
+  }
+  .cov-track {
+    width: 42px;
+    height: 5px;
+    border-radius: var(--radius-full);
+    background: var(--bg-inset);
+    overflow: hidden;
+  }
+  .cov-fill { height: 100%; border-radius: var(--radius-full); background: var(--success-500); }
+  .cov-fill.sparse { background: var(--warning-500); }
+  .cov-fill.none { background: var(--danger-500); }
+  .cov-text { font-size: var(--font-xs); color: var(--text-faint); font-family: var(--font-mono); }
+
+  .tag-cat {
+    display: inline-block;
+    padding: 1px var(--space-1);
+    border-radius: var(--radius-xs);
+    background: var(--bg-inset);
+    font-size: 10.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  /* ---------- 漏斗 ---------- */
+  .funnel { display: flex; flex-direction: column; gap: var(--space-2); }
+  .funnel-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 76px 52px;
+    gap: var(--space-2);
+    align-items: center;
+    font-size: var(--font-base);
+  }
+  .funnel-label { font-family: var(--font-mono); font-size: var(--font-base); color: var(--text-sub); }
+  .funnel-bar { height: 8px; border-radius: var(--radius-full); background: var(--bg-inset); overflow: hidden; }
+  .funnel-fill { height: 100%; border-radius: var(--radius-full); background: var(--accent); transition: width var(--dur-slow) var(--ease-out); }
+  .funnel-num { font-family: var(--font-mono); font-size: var(--font-sm); text-align: right; color: var(--text-muted); }
+
+  /* ---------- 结果 ---------- */
+  .result-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+  .pass-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-full);
+    background: var(--accent-soft);
+    color: var(--text-brand);
+    font-weight: 650;
+  }
+  .pass-chip b { font-family: var(--font-mono); font-size: var(--font-xl); }
+  .reason-cell {
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cond-text {
+    font-family: var(--font-mono);
+    font-size: var(--font-base);
+    color: var(--text-sub);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--bg-inset);
+    word-break: break-all;
+  }
+
+  /* ---------- 行业分布 ---------- */
+  .ind-list { display: flex; flex-direction: column; gap: var(--space-2); }
+  .ind-row { display: grid; grid-template-columns: minmax(0,1fr) 60px 52px; gap: var(--space-2); align-items: center; font-size: var(--font-base); }
+  .ind-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-sub); }
+
+  #scatter-chart { width: 100%; height: 300px; }
+
+  @media (max-width: 1020px) {
+    .screen-grid { grid-template-columns: 1fr; }
+    .panel { position: static; }
+    .rule-row { grid-template-columns: minmax(0, 1fr) minmax(80px, 1fr) 30px; }
+    .rule-row .rule-value { grid-column: 1 / -1; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="page-title">选股器</div>
+  <div class="page-desc">
+    按<span class="term" data-tip="条件在指定研究时点（as-of）上求值，只使用该时点之前已可见的数据，避免未来函数。">研究时点</span>的多因子条件筛选全市场。
+    每条规则独立判定后按 AND 组合，缺失值一律判不通过并在「未通过原因」里写明。
+  </div>
+</div>
+
+<!-- 查询区 -->
+<section class="card card-pad">
+  <div class="result-toolbar">
+    <div class="field" style="width: 168px">
+      <label class="field-label" for="as-of-select">研究时点</label>
+      <select class="select" id="as-of-select"></select>
+    </div>
+    <label class="switch" style="margin-top: 18px">
+      <input type="checkbox" id="chk-positive" checked>
+      <span class="switch-track"></span>
+      <span>剔除亏损股</span>
+    </label>
+    <div class="spacer"></div>
+    <span class="text-sm text-faint" id="meta-universe"></span>
+  </div>
+  <div class="field-hint" style="margin-top: var(--space-2)">
+    亏损股指 PE-TTM ≤ 0（不分位口径）。不勾选时它们可能被「PE 小于某值」这类条件误纳。
+  </div>
+</section>
+
+<div class="message" id="message" style="margin-top: var(--space-3)"></div>
+
+<div class="screen-grid" style="margin-top: var(--space-4)">
+  <!-- 左：规则编辑器 -->
+  <div class="panel">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">筛选条件</div>
+          <div class="card-hint">最多 12 条，按 AND 组合</div>
+        </div>
+        <button class="btn btn-sm" id="btn-add-rule" type="button">加一条</button>
+      </div>
+      <div class="card-body">
+        <div class="field">
+          <label class="field-label" for="preset-select">预置模板</label>
+          <select class="select" id="preset-select">
+            <option value="">自定义条件</option>
+          </select>
+          <div class="field-hint" id="preset-note"></div>
+        </div>
+
+        <hr class="divider" style="margin: var(--space-3) 0">
+
+        <div id="rule-list"></div>
+        <div class="logic-hint">
+          <span>全部条件同时满足（AND）</span>
+        </div>
+
+        <button class="btn btn-primary btn-block" id="btn-run" type="button" style="margin-top: var(--space-3)">
+          开始筛选
+        </button>
+        <div class="row row-tight" style="margin-top: var(--space-2)">
+          <button class="btn btn-sm btn-ghost" id="btn-share" type="button">复制分享链接</button>
+          <button class="btn btn-sm btn-ghost" id="btn-export" type="button">导出 CSV</button>
+          <button class="btn btn-sm btn-ghost" id="btn-clear" type="button">清空</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 右：结果 -->
+  <div class="stack" id="result-area">
+    <div id="result-empty" class="card">
+      <div class="empty-state">
+        <div class="empty-state-icon">⌗</div>
+        <div class="empty-state-title">设置条件后开始筛选</div>
+        <div class="empty-state-desc">
+          左侧选好因子与阈值后点击「开始筛选」。也可以先从预置模板挑一个改阈值。
+        </div>
+      </div>
+    </div>
+
+    <div id="result-body" class="hidden stack">
+      <!-- 概览 -->
+      <section class="card card-pad">
+        <div class="result-toolbar">
+          <span class="pass-chip">通过 <b id="stat-passed">-</b> / <span id="stat-total">-</span></span>
+          <span class="text-sm text-faint" id="stat-elapsed"></span>
+          <div class="spacer"></div>
+          <div class="field" style="width: 168px">
+            <label class="field-label" for="sort-select">排序</label>
+            <select class="select select-sm" id="sort-select"></select>
+          </div>
+        </div>
+        <div class="cond-text" id="cond-text" style="margin-top: var(--space-3)"></div>
+      </section>
+
+      <!-- 规则漏斗 -->
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">规则漏斗</div>
+            <div class="card-hint">每条规则各自筛掉了多少标的（独立判定，不是逐级串联）</div>
+          </div>
+        </div>
+        <div class="card-body"><div class="funnel" id="funnel-list"></div></div>
+      </section>
+
+      <!-- 散点 -->
+      <section class="card" id="scatter-card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">因子散点</div>
+            <div class="card-hint" id="scatter-hint">-</div>
+          </div>
+        </div>
+        <div class="card-body"><div id="scatter-chart"></div></div>
+      </section>
+
+      <!-- 结果表 -->
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">筛选结果</div>
+            <div class="card-hint" id="table-hint">-</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr id="result-head"></tr></thead>
+            <tbody id="result-body-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 行业分布 -->
+      <section class="card" id="industry-card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">行业通过率</div>
+            <div class="card-hint">样本不足 5 只的行业不参与排名</div>
+          </div>
+        </div>
+        <div class="card-body"><div class="ind-list" id="industry-list"></div></div>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="/static/screener.js"></script>
+{% endblock %}
