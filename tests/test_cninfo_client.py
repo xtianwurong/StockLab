@@ -26,17 +26,20 @@ import os
 import sys
 from datetime import date
 
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requests
 
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from stocklab.domain import ANNOUNCEMENT_COLUMNS
+import pytest
 from stocklab.datasource.cninfo_client import CninfoClient
 
 # 贵州茅台 2026-08-15 半年报公告（2026-10-03 实测返回的真实字段形态）
 MS_20260815 = 1786723200000
-
 
 class FakeResponse:
     """最小 HTTP 响应桩"""
@@ -44,7 +47,6 @@ class FakeResponse:
     def __init__(self, text="", status_code=200):
         self.text = text
         self.status_code = status_code
-
 
 class FakeTransport:
     """
@@ -96,7 +98,6 @@ class FakeTransport:
             return FakeResponse(json.dumps({"stockList": rows}))
         return FakeResponse("")
 
-
 def _announcement(sec_code, title, ms, announcement_id, adjunct_url, category=None):
     """构造一条原始公告 JSON（字段与实测返回一致）"""
     return {
@@ -109,7 +110,6 @@ def _announcement(sec_code, title, ms, announcement_id, adjunct_url, category=No
         "announcementTypeName": category,
     }
 
-
 def _client(**kwargs):
     """构造注入了 fake transport 的客户端，并清空模块级缓存保证测试隔离"""
     kwargs.setdefault("sleep_seconds", 0)
@@ -118,12 +118,8 @@ def _client(**kwargs):
     client.clear_cache()
     return client
 
-
-def run_field_parsing_test():
+def test_field_parsing():
     """测试单条公告解析：契约列、时间换算、标题清洗、PDF URL、category"""
-    print("\n" + "=" * 65)
-    print("【阶段一：测试公告 JSON 解析与字段归一化】")
-    print("=" * 65)
 
     transport = FakeTransport(
         query_pages={
@@ -197,12 +193,8 @@ def run_field_parsing_test():
     assert frame.iloc[0]["title"] == "正常公告"
     print("  -> 脏数据（缺代码/空标题/缺时间/缺 ID）5 取 1，全部被丢弃")
 
-
-def run_pagination_test():
+def test_pagination():
     """测试分页：页码透传、hasMore 终止、满 30 条才可能有下一页"""
-    print("\n" + "=" * 65)
-    print("【阶段二：测试分页与终止条件】")
-    print("=" * 65)
 
     page1 = [
         _announcement("600519", "公告-%02d" % i, MS_20260815, "id-%02d" % i,
@@ -255,12 +247,8 @@ def run_pagination_test():
     assert [p for p in transport.posts if "hisAnnouncement/query" in p[0]][0][1]["column"] == "sse"
     print("  -> 沪市 column=sse / 深市与全市场 column=szse 路由正确")
 
-
-def run_org_id_test():
+def test_org_id():
     """测试 orgId 解析：映射缓存 / topSearch 精确匹配 / 模糊命中拒绝 / 失败降级"""
-    print("\n" + "=" * 65)
-    print("【阶段三：测试 orgId 解析（禁止自拼）】")
-    print("=" * 65)
 
     # 1) 全市场映射命中（szse_stock.json）
     transport = FakeTransport(
@@ -310,12 +298,8 @@ def run_org_id_test():
     assert len([p for p in transport.posts if "topSearch" in p[0]]) == 1
     print("  -> 失败结果同样缓存，不重复打接口")
 
-
-def run_dedup_test():
+def test_dedup():
     """测试去重：同 announcementId 跨页 / 不同 id 同标题同日期"""
-    print("\n" + "=" * 65)
-    print("【阶段四：测试去重】")
-    print("=" * 65)
 
     # 同一 announcementId 出现在两页 -> 只留 1 条
     dup = _announcement("600519", "重复公告", MS_20260815, "same-id", "a.PDF")
@@ -342,12 +326,8 @@ def run_dedup_test():
     assert len(frame) == 29, len(frame)
     print("  -> 不同 announcementId 的同内容公告按 (ts_code, 日期, 标题) 去重")
 
-
-def run_failure_test():
+def test_failure():
     """测试网络异常与错误响应（fixture 注入，不依赖真实断网）"""
-    print("\n" + "=" * 65)
-    print("【阶段五：测试网络异常】")
-    print("=" * 65)
 
     # 连接异常 -> 空表，不抛出
     transport = FakeTransport(fail=True)
@@ -404,17 +384,6 @@ def run_failure_test():
     print("  -> clear_cache() 可清空模块级缓存（测试隔离）")
 
 
-def main():
-    """运行全部 CNINFO 客户端测试"""
-    run_field_parsing_test()
-    run_pagination_test()
-    run_org_id_test()
-    run_dedup_test()
-    run_failure_test()
-    print("\n" + "=" * 65)
-    print("CNINFO 客户端测试全部通过！")
-    print("=" * 65)
-
-
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))

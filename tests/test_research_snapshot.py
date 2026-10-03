@@ -22,14 +22,15 @@ StockLab - 研究快照测试 (tests/test_research_snapshot.py)
 
 import datetime
 import os
-import shutil
 import sys
-import tempfile
-
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
+import pytest
+
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stocklab.domain import (
     BALANCE_SHEET_COLUMNS,
@@ -72,7 +73,6 @@ AS_OF = datetime.date(2024, 6, 30)
 # 参与 as-of 股票池的四只（另有退市/后上市两只用于验证股票池推导）
 UNIVERSE_CODES = ["600519.SH", "000001.SZ", "300750.SZ", "600518.SH"]
 
-
 def _security_rows():
     """六只证券：四只在 as-of 存续，一只 as-of 前已退市，一只 as-of 后才上市"""
     def row(ts_code, name, industry, list_date, delist_date, status):
@@ -110,7 +110,6 @@ def _security_rows():
         ]
     )
 
-
 def _valuation_rows():
     """历史估值：旧值、可见值与 as-of 之后的未来值各一行，验证只取可见行"""
     def row(ts_code, trade_date, pe_ttm):
@@ -134,7 +133,6 @@ def _valuation_rows():
         rows.append(row(code, datetime.date(2024, 6, 28), visible))  # as-of 可见
         rows.append(row(code, datetime.date(2024, 7, 5), 999.0))    # as-of 之后（未来）
     return pd.DataFrame(rows, columns=VALUATION_HISTORY_COLUMNS)
-
 
 def _daily_valuation_rows():
     """每日估值快照：股息率与总市值（as-of 之后一行用于验证不被读到）"""
@@ -166,7 +164,6 @@ def _daily_valuation_rows():
         rows.append(row(code, datetime.date(2024, 6, 28), dv, mv))
         rows.append(row(code, datetime.date(2024, 7, 5), 99.0, 1.0e15))
     return pd.DataFrame(rows, columns=DAILY_VALUATION_COLUMNS)
-
 
 def _fundamental_rows():
     """基本面四表：as-of 可见的一期 + as-of 后才公告的一期 + 上年同期对照"""
@@ -257,7 +254,6 @@ def _fundamental_rows():
         pd.DataFrame(cashflow, columns=CASHFLOW_STATEMENT_COLUMNS),
     )
 
-
 def _price_rows():
     """日线：恒定 / 单调上行 / 中途腰斩三种形态，用于验证动量、波动率与回撤"""
     dates = pd.bdate_range(end=AS_OF, periods=400).date
@@ -287,7 +283,6 @@ def _price_rows():
             )
     return pd.DataFrame(rows, columns=DAILY_PRICE_COLUMNS)
 
-
 def _seed(database):
     """写入合成数据（一次到位，全部走 Repository 契约写入）"""
     securities = _security_rows()
@@ -305,6 +300,41 @@ def _seed(database):
 
     DailyPriceRepository(database).upsert(_price_rows())
 
+@pytest.fixture
+def seeded_db(fresh_db):
+    """已灌入合成数据的研究库（因子帧 / 筛选 / 快照三个阶段共用）"""
+    db_path, database = fresh_db
+    _seed(database)
+    return database
+
+@pytest.fixture
+def factor_frame(seeded_db):
+    """因子输入帧"""
+    return build_factor_frame(AS_OF, database=seeded_db)
+
+@pytest.fixture
+def screen_run(factor_frame):
+    """一次真实筛选（pe_ttm < 25 且roe > 0.10）
+
+    规则数必须是两条：快照阶段断言 passed_count == 1，而 1 条规则时通过数是 4，
+    两者对不上。原先这两个阶段靠 main() 里手工传参串联，写错规则数不会报错，
+    只会让快照断言莫名其妙地失败。
+    """
+    pipeline = ScreenPipeline.from_spec(
+        {
+            "rules": [
+                {"factor": "pe_ttm", "operator": "lt", "value": 25},
+                {"factor": "roe", "operator": "gt", "value": 0.10},
+            ]
+        }
+    )
+    return pipeline, pipeline.run(factor_frame)
+
+@pytest.fixture
+def snapshot_id(seeded_db, screen_run):
+    """写入一条研究快照，返回其编号"""
+    pipeline, result = screen_run
+    return create_snapshot(AS_OF, "A股全市场(测试)", pipeline, result.summary, seeded_db)
 
 def _row(frame, ts_code):
     """按 ts_code 取单行（Series）"""
@@ -312,14 +342,10 @@ def _row(frame, ts_code):
     assert len(matched) == 1, "%s 在帧里应恰好一行，实际 %d 行" % (ts_code, len(matched))
     return matched.iloc[0]
 
-
-def run_frame_test(database):
+def test_factor_frame(factor_frame, seeded_db):
     """测试因子输入帧：股票池、Point-in-Time、派生列与无数据源列"""
-    print("\n" + "=" * 65)
-    print("【阶段一：测试因子输入帧（Point-in-Time）】")
-    print("=" * 65)
-
-    frame = build_factor_frame(AS_OF, database=database)
+    frame = factor_frame
+    database = seeded_db
     codes = sorted(frame["ts_code"].tolist())
     assert codes == sorted(UNIVERSE_CODES), codes
     assert "600000.SH" not in codes, "as-of 前已退市的标的不得入池"
@@ -382,23 +408,10 @@ def run_frame_test(database):
     assert "not_a_factor" in message
     print("  -> 未登记因子拒绝: %s" % message)
 
-
-def run_screen_test(database):
+def test_screen(screen_run, factor_frame):
     """测试在真实帧上的筛选执行"""
-    print("\n" + "=" * 65)
-    print("【阶段二：测试筛选执行】")
-    print("=" * 65)
-
-    frame = build_factor_frame(AS_OF, database=database)
-    pipeline = ScreenPipeline.from_spec(
-        {
-            "rules": [
-                {"factor": "pe_ttm", "operator": "lt", "value": 25},
-                {"factor": "roe", "operator": "gt", "value": 0.10},
-            ]
-        }
-    )
-    result = pipeline.run(frame)
+    _, result = screen_run
+    frame = factor_frame
     # pe: 30 / 5 / 20 / 10；roe: 0.30 / 0.10(不满足 gt) / 0.15 / 0.05
     assert result.codes == ["300750.SZ"], result.codes
     assert result.counts == {"total": 4, "passed": 1}
@@ -426,15 +439,11 @@ def run_screen_test(database):
     reasons = missing.detail["reason"].tolist()
     assert reasons and all("无数据" in reason for reason in reasons), reasons
     print("  -> 无数据源因子（payout_ratio）全部报「无数据」，通过数为 0")
-    return pipeline, result, frame
 
-
-def run_snapshot_test(database, pipeline, result):
+def test_snapshot_write(seeded_db, screen_run):
     """测试快照写入与元数据"""
-    print("\n" + "=" * 65)
-    print("【阶段三：测试研究快照写入】")
-    print("=" * 65)
-
+    database = seeded_db
+    pipeline, result = screen_run
     snapshot_id = create_snapshot(
         AS_OF, "A股全市场(测试)", pipeline, result.summary, database
     )
@@ -483,18 +492,14 @@ def run_snapshot_test(database, pipeline, result):
     assert other_id != snapshot_id, "快照只增不改，重复执行必须是新编号"
     assert list_snapshots(database).shape[0] == 2
     print("  -> 再次执行生成新快照 %s（历史结论不被覆盖）" % other_id)
-    return snapshot_id
 
-
-def run_rerun_test(database, snapshot_id, original_counts):
+def test_rerun_reproducibility(seeded_db, snapshot_id, screen_run):
     """测试按 spec 重新生成并与存档比对"""
-    print("\n" + "=" * 65)
-    print("【阶段四：测试研究结果复现】")
-    print("=" * 65)
-
+    database = seeded_db
+    _, result = screen_run
     outcome = rerun_snapshot(snapshot_id, database)
     assert outcome["identical"] is True, outcome["differences"]
-    assert outcome["result"].counts == original_counts
+    assert outcome["result"].counts == result.counts
     print("  -> 重跑与存档逐行一致（%s）" % outcome["result"].counts)
 
     # 篡改存档：复现必须报出差异，而不是悄悄通过
@@ -524,80 +529,51 @@ def run_rerun_test(database, snapshot_id, original_counts):
         assert "不存在" in str(error)
     print("  -> 复现不存在的快照同样拒绝")
 
-
-def run_empty_database_test():
+def test_empty_database(tmp_path):
     """测试空库：帧为空、筛选为空、快照可写可复现"""
-    print("\n" + "=" * 65)
-    print("【阶段五：测试空库与非法输入】")
-    print("=" * 65)
+    database = Database(os.path.join(str(tmp_path), "empty.duckdb"))
+    frame = build_factor_frame(AS_OF, database=database)
+    assert len(frame) == 0
+    pipeline = ScreenPipeline.from_spec(
+        {"rules": [{"factor": "pe_ttm", "operator": "lt", "value": 25}]}
+    )
+    result = pipeline.run(frame)
+    assert result.counts == {"total": 0, "passed": 0}
 
-    temp_dir = tempfile.mkdtemp(prefix="sl_research_empty_")
+    snapshot_id = create_snapshot(
+        AS_OF, "空股票池", pipeline, result.summary, database
+    )
+    loaded = load_snapshot(snapshot_id, database)
+    assert loaded["universe_size"] == 0
+    assert len(loaded["results"]) == 0
+    assert rerun_snapshot(snapshot_id, database)["identical"] is True
+    print("  -> 空库：帧 0 行、筛选 0 行、快照可写可复现")
+
     try:
-        database = Database(os.path.join(temp_dir, "empty.duckdb"))
-        frame = build_factor_frame(AS_OF, database=database)
-        assert len(frame) == 0
-        pipeline = ScreenPipeline.from_spec(
-            {"rules": [{"factor": "pe_ttm", "operator": "lt", "value": 25}]}
+        create_snapshot(
+            AS_OF, "坏快照", pipeline,
+            pd.DataFrame({"passed": [True]}), database,
         )
-        result = pipeline.run(frame)
-        assert result.counts == {"total": 0, "passed": 0}
+        raise AssertionError("summary 缺 ts_code 必须拒绝")
+    except SnapshotError as error:
+        message = str(error)
+    assert "ts_code" in message
+    print("  -> summary 缺 ts_code 拒绝: %s" % message)
 
-        snapshot_id = create_snapshot(
-            AS_OF, "空股票池", pipeline, result.summary, database
-        )
-        loaded = load_snapshot(snapshot_id, database)
-        assert loaded["universe_size"] == 0
-        assert len(loaded["results"]) == 0
-        assert rerun_snapshot(snapshot_id, database)["identical"] is True
-        print("  -> 空库：帧 0 行、筛选 0 行、快照可写可复现")
-
-        try:
-            create_snapshot(
-                AS_OF, "坏快照", pipeline,
-                pd.DataFrame({"passed": [True]}), database,
-            )
-            raise AssertionError("summary 缺 ts_code 必须拒绝")
-        except SnapshotError as error:
-            message = str(error)
-        assert "ts_code" in message
-        print("  -> summary 缺 ts_code 拒绝: %s" % message)
-
-        # 迁移 004 必须已生效（表存在 + 版本已记录）
-        conn = database.get_connection()
-        tables = conn.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'research' ORDER BY table_name"
-        ).fetchall()
-        assert [table for table, in tables] == ["snapshot_results", "snapshots"]
-        versions = conn.execute(
-            "SELECT version FROM sys.schema_version ORDER BY version"
-        ).fetchall()
-        assert [version for version, in versions] == [1, 2, 3, 4, 5]
-        print("  -> 迁移 004 已应用（research 两表 + 版本 1/2/3/4）")
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-def main():
-    """运行全部研究快照测试"""
-    temp_dir = tempfile.mkdtemp(prefix="sl_research_")
-    try:
-        # 注意：库文件名会成为 DuckDB 的 catalog 名，不能与 research schema 同名
-        database = Database(os.path.join(temp_dir, "sl_research.duckdb"))
-        _seed(database)
-        run_frame_test(database)
-        pipeline, result, frame = run_screen_test(database)
-        snapshot_id = run_snapshot_test(database, pipeline, result)
-        run_rerun_test(database, snapshot_id, result.counts)
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-    run_empty_database_test()
-
-    print("\n" + "=" * 65)
-    print("研究快照测试全部通过！")
-    print("=" * 65)
+    # 迁移 004 必须已生效（表存在 + 版本已记录）
+    conn = database.get_connection()
+    tables = conn.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = 'research' ORDER BY table_name"
+    ).fetchall()
+    assert [table for table, in tables] == ["snapshot_results", "snapshots"]
+    versions = conn.execute(
+        "SELECT version FROM sys.schema_version ORDER BY version"
+    ).fetchall()
+    assert [version for version, in versions] == [1, 2, 3, 4, 5]
+    print("  -> 迁移 004 已应用（research 两表 + 版本 1/2/3/4）")
 
 
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))

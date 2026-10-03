@@ -25,10 +25,13 @@ import math
 import os
 import sys
 
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
+
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stocklab.backtest import (
     BacktestEngine,
@@ -40,6 +43,7 @@ from stocklab.backtest import (
     compute_metrics,
     universe_as_of,
 )
+import pytest
 from stocklab.backtest.metrics import cagr
 
 A = "000001.SZ"
@@ -56,7 +60,6 @@ FREE_COST = CostModel(
     commission_rate=0.0, min_commission=0.0, stamp_duty_rate=0.0, slippage_bps=0.0
 )
 
-
 def _close(actual, expected, tolerance=1e-6, note=""):
     """数值断言（带上下文，失败时能直接看到期望与实际）"""
     assert abs(actual - expected) <= tolerance, "%s 期望 %s，实际 %s" % (
@@ -65,32 +68,24 @@ def _close(actual, expected, tolerance=1e-6, note=""):
         actual,
     )
 
-
 def _price_frame(rows):
     """行情帧：[(ts_code, trade_date, close), ...]"""
     return pd.DataFrame(rows, columns=["ts_code", "trade_date", "close"])
-
 
 def _signal_frame(rows):
     """信号帧：[(ts_code, trade_date, weight), ...]"""
     return pd.DataFrame(rows, columns=["ts_code", "trade_date", "weight"])
 
-
 def _engine(cash=10000.0, cost=None, **kwargs):
     return BacktestEngine(initial_cash=cash, cost=cost, **kwargs)
-
 
 def _equity_list(result):
     return [round(value, 6) for value in result.equity["total_equity"]]
 
-
 # ==============================================================================
 # 阶段一：交易成本
 # ==============================================================================
-def run_cost_test():
-    print("\n" + "=" * 65)
-    print("【阶段一：测试交易成本模型】")
-    print("=" * 65)
+def test_cost():
 
     cost = CostModel()  # 佣金 0.025%（最低 5 元）、印花税 0.05%（卖出）
     fees = cost.apply("BUY", 10.0, 1000)  # 金额 1 万：佣金不足最低值 -> 5
@@ -133,14 +128,10 @@ def run_cost_test():
 
     print("  交易成本模型核对通过")
 
-
 # ==============================================================================
 # 阶段二：组合与 T+1
 # ==============================================================================
-def run_portfolio_test():
-    print("\n" + "=" * 65)
-    print("【阶段二：测试组合与 T+1】")
-    print("=" * 65)
+def test_portfolio():
 
     portfolio = Portfolio(2000.0)
     buy = Trade(A, pd.Timestamp(D1), "BUY", 100, 10.0, commission=5.0)
@@ -189,14 +180,10 @@ def run_portfolio_test():
     assert "负数" in message, "初始现金为负必须拒绝"
     print("  组合与 T+1 核对通过")
 
-
 # ==============================================================================
 # 阶段三：指标
 # ==============================================================================
-def run_metrics_test():
-    print("\n" + "=" * 65)
-    print("【阶段三：测试回测指标（§9.3）】")
-    print("=" * 65)
+def test_metrics():
 
     # 手算基准：100 -> 110 -> 104.5，收益率 [0.10, -0.05]
     equity = pd.Series([100.0, 110.0, 104.5])
@@ -262,14 +249,10 @@ def run_metrics_test():
     assert "DataFrame" in message, "指标入参必须是一维序列"
     print("  指标核对通过")
 
-
 # ==============================================================================
 # 阶段四：幸存者安全
 # ==============================================================================
-def run_survivorship_test():
-    print("\n" + "=" * 65)
-    print("【阶段四：测试幸存者安全股票池与退市持仓】")
-    print("=" * 65)
+def test_survivorship():
 
     securities = pd.DataFrame(
         [
@@ -327,14 +310,10 @@ def run_survivorship_test():
     print("  -> 退市持仓：权益保持 10000，stale_count=1，卖出被拒：%s" % rejected)
     print("  幸存者安全核对通过")
 
-
 # ==============================================================================
 # 阶段五：引擎正常路径（手算核对）
 # ==============================================================================
-def run_engine_test():
-    print("\n" + "=" * 65)
-    print("【阶段五：测试引擎正常路径（手算核对）】")
-    print("=" * 65)
+def test_engine():
 
     # (a) 现金只够买 900 股（1000 股要 1.1 万）-> 部分成交，权益先平后涨
     prices = _price_frame([(A, D1, 10.0), (A, D2, 11.0), (A, D3, 12.0), (A, D4, 13.0)])
@@ -413,14 +392,10 @@ def run_engine_test():
     )
     print("  引擎正常路径核对通过")
 
-
 # ==============================================================================
 # 阶段六：拒绝原因（涨跌停 / 停牌 / 现金不足）
 # ==============================================================================
-def run_rejection_test():
-    print("\n" + "=" * 65)
-    print("【阶段六：测试买不进 / 卖不出的拒绝原因】")
-    print("=" * 65)
+def test_rejection():
 
     # 涨停封板：收盘价买不进
     frame = pd.DataFrame(
@@ -499,14 +474,10 @@ def run_rejection_test():
     print("  -> pre_close × 1.10 推导涨停: %s" % reason)
     print("  拒绝原因核对通过")
 
-
 # ==============================================================================
 # 阶段七：非法输入
 # ==============================================================================
-def run_invalid_input_test():
-    print("\n" + "=" * 65)
-    print("【阶段七：测试非法输入全部拒绝】")
-    print("=" * 65)
+def test_invalid_input():
 
     engine = _engine(cost=FREE_COST)
     empty_signals = _signal_frame([])
@@ -648,19 +619,6 @@ def run_invalid_input_test():
     print("  非法输入核对通过")
 
 
-def main():
-    run_cost_test()
-    run_portfolio_test()
-    run_metrics_test()
-    run_survivorship_test()
-    run_engine_test()
-    run_rejection_test()
-    run_invalid_input_test()
-
-    print("\n" + "=" * 65)
-    print("回测引擎测试全部通过！")
-    print("=" * 65)
-
-
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))

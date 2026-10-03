@@ -23,9 +23,13 @@ StockLab - 新浪数据源测试 (tests/test_sina_source.py)
 import os
 import sys
 
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pytest
 from stocklab.datasource._sources.sina_source import (
     SinaDataSource,
     _parse_jsonp_array,
@@ -58,13 +62,11 @@ FACTOR_TEXT = (
     "]}\n"
 )
 
-
 def _stub_source(handler):
     """构造一个不联网的 SinaDataSource：用 handler 假装 HTTP 响应"""
     source = SinaDataSource()
     source._get_text = handler
     return source
-
 
 def _stub_by_url(kline_text=KLINE_TEXT, factor_text=FACTOR_TEXT, quote_text=QUOTE_TEXT):
     """按 URL 分发 fixture 的桩"""
@@ -78,12 +80,8 @@ def _stub_by_url(kline_text=KLINE_TEXT, factor_text=FACTOR_TEXT, quote_text=QUOT
         return ""
     return _stub_source(handler)
 
-
-def run_symbol_test():
+def test_symbol():
     """测试代码符号转换：标准代码 / 纯数字 / 带前缀 / 非法输入"""
-    print("\n" + "=" * 65)
-    print("【阶段一：测试股票代码符号转换】")
-    print("=" * 65)
 
     assert _to_sina_symbol("600519.SH") == "sh600519"
     assert _to_sina_symbol("000001.SZ") == "sz000001"
@@ -96,12 +94,8 @@ def run_symbol_test():
     assert _to_sina_symbol("") == ""
     print("  -> 10 组符号转换全部正确")
 
-
-def run_jsonp_test():
+def test_jsonp():
     """测试 JSONP 日线响应解析（正常 / 残缺 / 非 JSON）"""
-    print("\n" + "=" * 65)
-    print("【阶段二：测试 JSONP 解析】")
-    print("=" * 65)
 
     rows = _parse_jsonp_array(KLINE_TEXT)
     assert len(rows) == 3, len(rows)
@@ -112,12 +106,8 @@ def run_jsonp_test():
     assert _parse_jsonp_array('var x=(["a","b"])') == ["a", "b"]
     print("  -> JSONP 正常 / 空 / 非法 / 错误报文 全部按预期处理")
 
-
-def run_realtime_test():
+def test_realtime():
     """测试实时行情解析：价格、涨跌、量额、时间、简称"""
-    print("\n" + "=" * 65)
-    print("【阶段三：测试实时行情解析】")
-    print("=" * 65)
 
     source = _stub_by_url()
     quote = source.fetch_realtime_quote("600519.SH")
@@ -139,12 +129,8 @@ def run_realtime_test():
     assert quote.pe_ttm is None and quote.pb_ratio is None
     print("  -> 现价/昨收/开高低/量额/涨跌/时间/简称全部正确: %s" % quote)
 
-
-def run_stock_name_test():
+def test_stock_name():
     """测试股票简称查询（复用实时行情响应）"""
-    print("\n" + "=" * 65)
-    print("【阶段四：测试股票简称】")
-    print("=" * 65)
 
     source = _stub_by_url()
     assert source.fetch_stock_name("600519.SH") == "贵州茅台"
@@ -153,12 +139,8 @@ def run_stock_name_test():
     assert empty.fetch_stock_name("600519.SH") == ""
     print("  -> 简称解析与空响应降级正确")
 
-
-def run_monthly_test():
+def test_monthly():
     """测试日线 -> 月末重采样（不复权 / 前复权 / 后复权）"""
-    print("\n" + "=" * 65)
-    print("【阶段五：测试月线收盘价与复权】")
-    print("=" * 65)
 
     # 不复权：每月取最后一个交易日
     frame = _stub_by_url().fetch_monthly_close_prices("600519.SH", "")
@@ -182,12 +164,8 @@ def run_monthly_test():
     assert frame["close_price"].iloc[1] == 120.0, frame["close_price"].iloc[1]
     print("  -> 前复权 qfq = raw × f(d)/f(latest) 正确")
 
-
-def run_failure_test():
+def test_failure():
     """测试异常路径：空响应 / 错误报文 / 无效代码 / 非法复权类型 / 重试"""
-    print("\n" + "=" * 65)
-    print("【阶段六：测试异常与无效输入】")
-    print("=" * 65)
 
     # 空响应
     source = _stub_source(lambda url: "")
@@ -223,18 +201,6 @@ def run_failure_test():
     print("  -> 8 组异常场景均安全降级，无异常抛出")
 
 
-def main():
-    """运行全部新浪通道测试"""
-    run_symbol_test()
-    run_jsonp_test()
-    run_realtime_test()
-    run_stock_name_test()
-    run_monthly_test()
-    run_failure_test()
-    print("\n" + "=" * 65)
-    print("新浪数据源测试全部通过！")
-    print("=" * 65)
-
-
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))

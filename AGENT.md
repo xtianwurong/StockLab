@@ -282,6 +282,61 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - **与 V2 需求文档的命名对照**：V2 §4.2 所称 `AkShareAdapter` / `BaoStockAdapter` / `TencentAdapter` 即本项目的 `datasource/_sources/{akshare,baostock,tencent}_source`（三个数据源通道实现）；`domain/corporate_action.py` 对应**尚未接入的公司行为（分红/送转）数据**——Phase 2 因子层已按「因子库先行、数据后补」交付，分红相关输入（`dps` / `dps_prior_year` / `dividend_years_*`）在因子输入帧里按 NaN 落地，`domain/corporate_action.py` 依旧**不预置空文件**，等真正接入公司行为数据源时再建。
 - 顶层入口脚本只做「参数解析 + 调用库」，不含业务逻辑；自检脚本放在 tests/ 下。
 
+### 测试架构（tests/）
+
+- **三层装置，全在 `tests/conftest.py`**
+  - `tmp_db_path` / `fresh_db` —— 临时 DuckDB。迁移前 5 个文件各手写一遍
+    `tempfile.mkdtemp()` + `try/finally: shutil.rmtree()`，改一处漏一处就得手动排查。
+  - `app` / `ctx` / `client` —— 真实库上的 Flask 应用与测试客户端。`client` 自动带
+    应用上下文（`store` 的只读聚合依赖 `current_app`）。迁移前是模块级 `_APP` 全局
+    + `main()` 里手动 `create_app()`，app_context 边界只存在于 `main()` 里，
+    **单跑任何一个用例必然 `RuntimeError: Working outside of application context`**。
+  - `http_reachable` —— 外网探测。断网时整组 `integration` 用例 skip，
+    而不是逐个超时几十秒。
+  - `app` fixture 会**主动检测 `serve_web.py` 是否在跑**（DuckDB 同文件只允许一个写
+    连接），并给出可操作的报错，而不是抛一句看不懂的 `Could not set lock`。
+
+- **marker 分两类**（`pytest.ini` 里的 `--strict-markers` 会让拼错的 marker 直接报错）
+  - `integration` —— 打真实外部数据源。默认会被执行；只跑离线单元测试用 `-m "not integration"`。
+  - `real_db` —— 需要 `data/stocklab.duckdb` 的真实数据。
+
+- **用例与断言的纪律**
+  - **一个用例只验一件事**。迁移前 `test_web_api.py` 有 16 个「阶段」，每个几百行、
+    失败只能看到一个 `AssertionError`；现在拆成独立用例，`-k` 可单选、`--lf` 可只重跑失败项。
+  - **注释声称的不变量，断言必须真的在查**。这是本次迁移挖出来的最大问题，见下。
+  - 需要穷举而非举例时用 hypothesis（`tests/test_properties.py`），而不是多列几个例子。
+  - **阶段数不得减少**。机械改名（`run_x_test` → `test_x`）会漏掉带参数的函数 ——
+    迁移时 `test_research_snapshot.py` 的 5 个阶段里有 4 个靠手工传参串联，
+    重命名后 pytest 一个都不收集，覆盖率静默归零。对照方法是
+    `git show HEAD:tests/x.py | grep -c "^def run_"` 与 `--collect-only` 的条数比对。
+
+- **`tests/test_properties.py`：两个已证实的测试缺口**
+  迁移前用手工变异测试（故意改坏代码，看断言抓不抓得到）跑了 5 个变异，抓到 3 个、
+  **漏网 2 个**，且都不是框架能力问题，而是断言没在查它声称要查的东西：
+
+  | 漏网的变异 | 原断言为什么抓不到 | 现在怎么钉住 |
+  |---|---|---|
+  | `compare_api._align_history` 把缺失点改成**前向填充** | 只有 `assert gaps > 0`，而前置空档（上市前）就能满足它；上市后中途停牌被填成水平线完全看不出来 | 属性测试逐点核对「输出为 None 的位置，原始数据里也必须没有那一行」 |
+  | `/api/market/ranking` 的 `codes` 精确过滤退化成**子串匹配** | 只验「传 3 个完整代码返回 3 只」，而这 3 个代码之间本来就没有子串关系 | 参数化传 `60051` / `6005` / `00000` / `30075` / `519` 等**片段**，精确过滤必须 0 条 |
+
+  **教训**：`assert gaps > 0` 这类「看起来在查、其实只覆盖了一半」的断言最危险 ——
+  它给出「已覆盖」的错觉。写断言时要问：这段代码如果做错了，我的断言会不会红？
+  另一个高频错法是**假设错了的前提**：hypothesis 上线当天就抓出我自己写的
+  `len(dict)` 取到键数、以及「分位算的是序列最小值」（实际是**最新一日**那个值）。
+
+- **覆盖率基线**（`--cov=stocklab --cov=app`，离线用例 `-m "not integration"`）
+  - 总计 **65%**（6335 语句 / 2224 未覆盖）。离线跑不满的主要是 `datasource/` 下
+    五个真实通道（17%~35%），它们由 `integration` 用例覆盖。
+  - 纯计算与持久化层覆盖良好：`research/frame.py` 97%、`migrations/runner.py` 98%、
+    `factor/registry.py` 96%、`factor/rules.py` 94%、`fundamental/indicator.py` 94%、
+    `screener/pipeline.py` 86%、`research/snapshot.py` 83%。
+  - 明确偏低且值得补的：`facade/market_data.py` 46%（取数优先级回退路径）、
+    `persistence/repository/industry_valuation.py` 31%（行业表本地无数据，用例被跳过）。
+
+- **`live_check_sources.py` 不是 pytest 用例**：它的函数名是 `check_*`，
+  pytest 不会收集；有意保留为带退出码（0/1）的诊断脚本，供「上游疑似变更时
+  快速复查」用。不要把它改成 `test_*` —— 它要的是退出码语义与逐源打印，不是断言。
+
 ---
 
 ## 目录结构
@@ -452,8 +507,11 @@ StockLab/
 │       ├── verify_market_sql.py       #     抽样校验：全市场分位 SQL 与 analyzer 口径一致（退出码可进 CI）
 │       ├── analyze_pe_distribution.py #     命令行入口：全市场市盈率分布统计
 │       └── analyze_valuation_percentile.py # 命令行入口：个股历史估值分位计算
-├── tests/                              # ── 自检脚本（纯 assert，**无 pytest**，统一用 `./venv/bin/python tests/test_xxx.py` 运行）──
-│   ├── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
+├── pytest.ini                          # ── pytest 配置（pythonpath / markers / addopts）──
+├── tests/                              # ── 测试（pytest 9，统一用 `./venv/bin/python -m pytest` 运行）──
+│   ├── conftest.py                     #     共享装置：tmp_db_path / fresh_db 临时库、app·ctx·client 真实库、联网探测
+│   ├── test_properties.py              #     口径不变量属性测试（hypothesis 随机穷举 + 两个回归钉子）
+│   ├── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成），除类型转换外均联网
 │   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样 / 页面要素与导航高亮 / 选股器 / 多股对比 / 组合监控 / 横向位置）
 │   ├── test_migrations.py              #     迁移自检（新库 / 幂等 / 老库升级 / 失败不记版本 / 序号重复）
 │   ├── test_data_contract.py           #     数据契约自检（缺列拒绝 / 乱序写入不错位 / 契约与 DDL 一致）
@@ -466,7 +524,8 @@ StockLab/
 │   ├── test_tdx_source.py              #     通达信通道自检（市场编号 / 月线 category / 实时量额 / 6 组失败 / 简称空串），注入 fake client
 │   ├── test_cninfo_client.py           #     巨潮客户端自检（解析 / 分页 / orgId缓存+精确匹配 / 去重 / 5 组网络异常），离线 fixture
 │   ├── test_announcements.py           #     公告持久化与同步自检（迁移005 / Repo / 水位 / 过滤 / 去重 / 逐只 / 幂等），临时库
-│   └── live_check_sources.py           #     手工联网验证（实时/月线/公告/交叉校验，**不进 CI**，退出码 0/1）
+│   └── live_check_sources.py           #     手工联网验证脚本（**不是 pytest 用例**，函数名不匹配 test_*，pytest 不收集；
+│                                         #     有意保留为带退出码的诊断工具，供「上游疑似变更时快速复查」用）
 ├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
 │   └── stocklab.duckdb                 #     本地 DuckDB 单文件数据库
 ├── output/                             # ── 同上 ──
@@ -544,10 +603,19 @@ StockLab/
 ./venv/bin/python app/scripts/generate_sector_trend.py --config config.ini
 
 # 全链路自检（可选股票代码，默认 000001.SZ）
-./venv/bin/python tests/test_data_interfaces.py 000001.SZ
+./venv/bin/python -m pytest tests/test_data_interfaces.py -v -s   # 联网用例，看实时输出
 
-# Web 层自检（会打开本地 DuckDB，须先停止 serve_web.py）
-./venv/bin/python tests/test_web_api.py
+# ---- 测试 ----
+# Web 层用例会打开本地 DuckDB，须先停掉 serve_web.py（conftest 会主动检测并给出提示）
+pkill -f serve_web.py
+
+./venv/bin/python -m pytest                      # 全量（含联网，约 50s）
+./venv/bin/python -m pytest -m "not integration" # 只跑离线单元测试（约 30s）
+./venv/bin/python -m pytest tests/test_web_api.py -v        # 单文件
+./venv/bin/python -m pytest -k "codes" -v                   # 按名字筛
+./venv/bin/python -m pytest --lf                 # 只重跑上次失败的
+./venv/bin/python -m pytest -n 4                 # 4 进程并行
+./venv/bin/python -m pytest --cov=stocklab --cov=app --cov-report=term-missing
 
 # 全市场分位 SQL 与 analyzer 口径抽样比对（默认 300 只，非 0 退出码即为不一致）
 ./venv/bin/python app/scripts/verify_market_sql.py 300
@@ -585,14 +653,12 @@ StockLab/
 ./venv/bin/python app/scripts/run_research.py list
 ./venv/bin/python app/scripts/run_research.py factors
 
-# 数据质量自检（均用临时数据库，但 test_web_api / test_data_interfaces 会打开本地库）
-./venv/bin/python tests/test_migrations.py        # 迁移幂等与老库升级（期望版本数从迁移目录推导）
-./venv/bin/python tests/test_data_contract.py     # 契约对齐与显式列名写入
-./venv/bin/python tests/test_pit_universe.py      # Point-in-Time 与 as-of 股票池
-./venv/bin/python tests/test_factor_engine.py     # 因子登记契约、数学手算核对与预处理
-./venv/bin/python tests/test_screener.py          # 操作符、AND/OR 嵌套、缺失值与 spec 往返
-./venv/bin/python tests/test_research_snapshot.py # PIT 输入帧、快照写入与复现比对
-./venv/bin/python tests/test_backtest.py          # 回测：成本 / T+1 / 指标手算 / 幸存者安全 / 撮合与拒绝理由
+# 按主题挑测试（-k 支持布尔表达式；下面按被测对象分组）
+./venv/bin/python -m pytest -k "migration or contract"   # 迁移幂等/老库升级 + 契约与 DDL 对齐 + 乱序写入
+./venv/bin/python -m pytest -k "universe or point_in_time or survivorship"  # 幸存者偏差与 PIT 未来泄漏
+./venv/bin/python -m pytest -k "factor or preproces"      # 因子登记契约、数学手算、预处理、口径不变量
+./venv/bin/python -m pytest -k "screen or snapshot or rerun"  # 操作符嵌套、spec 往返、快照复现
+./venv/bin/python -m pytest tests/test_backtest.py         # 回测：成本 / T+1 / 指标手算 / 幸存者安全 / 撮合拒绝
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
 ./venv/bin/python app/scripts/sync_market_data.py --securities-only
@@ -738,6 +804,11 @@ pip install -r requirements.txt
         `verify_market_sql.py` 等）连**只读连接**都会被拒，报 `Could not set lock on file`。
       - 因此这些脚本**必须先停服务**再跑；相关脚本已对锁冲突给出可操作提示而非抛栈。
       - 反向也成立：外部进程持锁时服务启动即失败。
+      - pytest 侧已把这条约束自动化：`tests/conftest.py` 的 `app` fixture 会 `pgrep -f
+        serve_web.py`，命中就 `pytest.fail("serve_web.py 正在运行……请先 pkill -f serve_web.py")`，
+        而不是让人去猜 `Could not set lock` 是谁占的。
+        另注意 `pytest -n 4`（xdist）下 `test_web_api.py` 不能与任何其他用例并发跑 ——
+        真实库只允许一个写连接。
     - **同进程内不允许混合配置的连接**：门面是写连接时，同进程再开 `read_only=True` 会直接报
       `Can't open a connection to same database file with a different configuration than existing connections`。
       所以 `store` 的聚合连接也必须用默认写连接（初版踩过此坑，表现为「门面一打开，Dashboard 与指数接口全返回空」）。

@@ -23,12 +23,16 @@ import math
 import os
 import sys
 
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from stocklab.factor import FactorDataError
+import pytest
 from stocklab.screener import (
     OPERATORS,
     ScreenError,
@@ -38,7 +42,6 @@ from stocklab.screener import (
 )
 
 NAN = float("nan")
-
 
 def _frame():
     """4 只标的的合成因子输入帧（含 2 处缺失，用于验证缺失值语义）"""
@@ -55,12 +58,8 @@ def _frame():
         }
     )
 
-
-def run_rule_test():
+def test_rule():
     """测试单条规则：9 种操作符、缺失值语义、解释文本、非法输入"""
-    print("\n" + "=" * 65)
-    print("【阶段一：测试筛选规则与操作符】")
-    print("=" * 65)
 
     values = pd.DataFrame({"pe_ttm": [15.0, 25.0, NAN]})
     cases = [
@@ -111,12 +110,8 @@ def run_rule_test():
             assert str(error)
     print("  -> 6 类非法规则（缺阈值/未知操作符/未登记因子/取值类型）全部拒绝")
 
-
-def run_group_test():
+def test_group():
     """测试规则组：AND / OR / 嵌套、条件文本、序列化"""
-    print("\n" + "=" * 65)
-    print("【阶段二：测试规则组与整体条件】")
-    print("=" * 65)
 
     group = ScreenGroup(
         "and",
@@ -176,12 +171,8 @@ def run_group_test():
         assert str(error)
     print("  -> 非法组逻辑 / 空组 / 成员类型全部拒绝")
 
-
-def run_and_pipeline_test():
+def test_and_pipeline():
     """测试 AND 流水线：summary / detail 字段、通过数、逐只原因"""
-    print("\n" + "=" * 65)
-    print("【阶段三：测试筛选流水线（AND）】")
-    print("=" * 65)
 
     pipeline = ScreenPipeline.from_spec(
         {
@@ -232,12 +223,8 @@ def run_and_pipeline_test():
     assert isinstance(records[1]["failed_rules"], list)
     print("  -> to_records 可直接 JSON 化（failed_rules 保持列表）")
 
-
-def run_or_pipeline_test():
+def test_or_pipeline():
     """测试 OR 流水线：整体通过但仍有未满足条件时，failed_rules 如实记录"""
-    print("\n" + "=" * 65)
-    print("【阶段四：测试筛选流水线（OR 与缺失值）】")
-    print("=" * 65)
 
     pipeline = ScreenPipeline.from_spec(
         {
@@ -273,12 +260,8 @@ def run_or_pipeline_test():
     assert "ts_code" in empty.detail.columns
     print("  -> 空帧：结构完整、不崩溃")
 
-
-def run_preprocess_and_repro_test():
+def test_preprocess_and_repro():
     """测试预处理在判定前生效，以及 spec 往返可复现"""
-    print("\n" + "=" * 65)
-    print("【阶段五：测试预处理接入与 spec 复现】")
-    print("=" * 65)
 
     base_spec = {"rules": [{"factor": "pe_ttm", "operator": "lt", "value": 21}]}
     raw = ScreenPipeline.from_spec(base_spec).run(_frame())
@@ -327,12 +310,8 @@ def run_preprocess_and_repro_test():
     assert nested.run(_frame()).codes == ["A"]
     print("  -> 嵌套 OR spec 往返一致，判定 [A]")
 
-
-def run_invalid_spec_test():
+def test_invalid_spec():
     """测试非法 spec 一律在构造期拒绝"""
-    print("\n" + "=" * 65)
-    print("【阶段六：测试非法筛选配置】")
-    print("=" * 65)
 
     for bad_spec in [
         {},
@@ -385,18 +364,6 @@ def run_invalid_spec_test():
     print("  -> 因子输入列缺失（帧构造缺陷）抛 FactorDataError: %s" % message)
 
 
-def main():
-    """运行全部选股器测试"""
-    run_rule_test()
-    run_group_test()
-    run_and_pipeline_test()
-    run_or_pipeline_test()
-    run_preprocess_and_repro_test()
-    run_invalid_spec_test()
-    print("\n" + "=" * 65)
-    print("选股器测试全部通过！")
-    print("=" * 65)
-
-
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))

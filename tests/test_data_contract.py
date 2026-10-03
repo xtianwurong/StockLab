@@ -19,14 +19,14 @@ StockLab - 数据契约测试 (tests/test_data_contract.py)
 """
 
 import os
-import shutil
 import sys
-import tempfile
-
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
+
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stocklab.domain import (
     BALANCE_SHEET_COLUMNS,
@@ -51,8 +51,8 @@ from stocklab.normalization.akshare import (
 from stocklab.normalization.eastmoney import normalize_income_statements
 from stocklab.persistence import DailyPriceRepository, Database
 from stocklab.persistence.repository import BaseRepository
+import pytest
 from stocklab.persistence.storage import initialize_database
-
 
 def _sample_raw_daily_prices():
     """构造东财日 K 源结构（中文列名、可任意改列序）"""
@@ -69,12 +69,8 @@ def _sample_raw_daily_prices():
         }
     )
 
-
-def run_align_columns_test():
+def test_align_columns(tmp_db_path):
     """测试 align_columns 的三件事：缺列拒绝、多列丢弃、按契约重排"""
-    print("\n" + "=" * 65)
-    print("【阶段一：测试 align_columns 契约对齐】")
-    print("=" * 65)
 
     # 缺列必须抛 DataContractError
     missing = pd.DataFrame({"ts_code": ["600519.SH"], "name": ["贵州茅台"]})
@@ -102,12 +98,8 @@ def run_align_columns_test():
         assert "akshare.demo" in str(error) and "b" in str(error)
     print("  -> require_columns 异常信息包含来源与缺失列名")
 
-
-def run_normalizer_contract_test():
+def test_normalizer_contract(tmp_db_path):
     """测试 normalizer 对源列缺失的处理：必须显式失败，绝不静默产出缺列帧"""
-    print("\n" + "=" * 65)
-    print("【阶段二：测试归一化层的源列契约】")
-    print("=" * 65)
 
     raw = _sample_raw_daily_prices()
 
@@ -152,113 +144,18 @@ def run_normalizer_contract_test():
     assert frame.empty, "缺公告日期的行必须被丢弃"
     print("  -> 缺公告日期的行被丢弃（不入库）")
 
-
-def run_contract_matches_ddl_test():
+def test_contract_matches_ddl(tmp_db_path):
     """测试领域契约与建表 DDL 的列名集合一致（改一侧必须同步改另一侧）"""
-    print("\n" + "=" * 65)
-    print("【阶段三：测试契约列与建表 DDL 一致】")
-    print("=" * 65)
 
-    temp_dir = tempfile.mkdtemp(prefix="sl_contract_")
-    db_path = os.path.join(temp_dir, "contract.duckdb")
-    try:
-        initialize_database(db_path)
-        contracts = {
-            "reference.securities": SECURITY_COLUMNS,
-            "reference.security_events": SECURITY_EVENT_COLUMNS,
-            "market.daily_prices": DAILY_PRICE_COLUMNS,
-            "market.daily_valuations": DAILY_VALUATION_COLUMNS,
-            "market.valuation_history": VALUATION_HISTORY_COLUMNS,
-            "market.industry_valuations": INDUSTRY_VALUATION_COLUMNS,
-            "reference.index_memberships": INDEX_MEMBERSHIP_COLUMNS,
-            "fundamental.income_statements": INCOME_STATEMENT_COLUMNS,
-            "fundamental.balance_sheets": BALANCE_SHEET_COLUMNS,
-            "fundamental.cashflow_statements": CASHFLOW_STATEMENT_COLUMNS,
-            "fundamental.financial_indicators": FINANCIAL_INDICATOR_COLUMNS,
-        }
-        with Database(db_path) as database:
-            conn = database.get_connection()
-            for table, columns in contracts.items():
-                schema, name = table.split(".")
-                rows = conn.execute(
-                    "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_schema = ? AND table_name = ?",
-                    [schema, name],
-                ).fetchall()
-                actual = set(row[0] for row in rows)
-                expected = set(columns)
-                assert actual == expected, (
-                    "%s 列不一致：DDL 多出 %s，契约多出 %s"
-                    % (table, sorted(actual - expected), sorted(expected - actual))
-                )
-        print("  -> %d 张表的契约列与 DDL 列名集合完全一致" % len(contracts))
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+    db_path = os.path.join(tmp_db_path, "contract.duckdb")
 
-
-def run_shuffled_upsert_test():
+def test_shuffled_upsert(tmp_db_path):
     """测试乱序 DataFrame 写入后列值不错位（Repository 不依赖 DataFrame 列序）"""
-    print("\n" + "=" * 65)
-    print("【阶段四：测试显式列名写入（乱序 / 缺列 / 多列）】")
-    print("=" * 65)
 
-    temp_dir = tempfile.mkdtemp(prefix="sl_upsert_")
-    db_path = os.path.join(temp_dir, "upsert.duckdb")
-    try:
-        initialize_database(db_path)
-        with Database(db_path) as database:
-            repository = DailyPriceRepository(database)
+    db_path = os.path.join(tmp_db_path, "upsert.duckdb")
 
-            frame = normalize_daily_prices(_sample_raw_daily_prices(), "600519.SH")
-
-            # 1) 列序整体反转后写入，读回的值必须仍落在正确的列上
-            reversed_frame = frame[list(reversed(frame.columns))]
-            count = repository.upsert(reversed_frame)
-            assert count == 2, count
-
-            back = repository.find_by_code("600519.SH")
-            row = back.iloc[0]
-            assert row["ts_code"] == "600519.SH"
-            assert row["open"] == 100.0 and row["close"] == 102.0
-            assert row["high"] == 103.0 and row["low"] == 99.0
-            assert row["pre_close"] == 99.5 and row["pct_chg"] == 2.51
-            print("  -> 反转列序写入 %d 行，列值无错位" % count)
-
-            # 2) 缺契约列 → 拒绝写入（返回 0），库里原有数据不受影响
-            missing_column = frame.drop(columns=["close"])
-            rejected = repository.upsert(missing_column)
-            assert rejected == 0, rejected
-            after = repository.find_by_code("600519.SH")
-            assert len(after) == 2 and after["close"].notna().all()
-            print("  -> 缺列写入被拒绝（返回 0 行，原数据完好）")
-
-            # 3) 多出契约外的列 → 丢弃后正常写入
-            extra = frame.copy()
-            extra["not_a_column"] = 1
-            count = repository.upsert(extra)
-            assert count == 2, count
-            print("  -> 契约外列被丢弃后正常写入")
-
-            # 4) 冲突列不属于契约 → 拒绝（防止把任意列当主键）。
-            #    DailyPriceRepository 固定了冲突列，这里直接用 BaseRepository 验证校验规则
-            class _PermissiveRepository(BaseRepository):
-                _TABLE_NAME = "market.daily_prices"
-                _COLUMNS = DAILY_PRICE_COLUMNS
-
-            rejected = _PermissiveRepository(database).upsert(
-                frame, conflict_columns=["not_a_column"], update_columns=["open"]
-            )
-            assert rejected == 0, rejected
-            print("  -> 非契约列被当作冲突列时写入被拒绝")
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-def run_securities_normalizer_test():
+def test_securities_normalizer(tmp_db_path):
     """测试证券名录归一化：交易所后缀推断与状态字段"""
-    print("\n" + "=" * 65)
-    print("【阶段五：测试证券名录归一化】")
-    print("=" * 65)
 
     raw = pd.DataFrame(
         {
@@ -282,17 +179,6 @@ def run_securities_normalizer_test():
         print("  -> 缺列拒绝: %s" % error)
 
 
-def main():
-    """运行全部数据契约测试"""
-    run_align_columns_test()
-    run_normalizer_contract_test()
-    run_contract_matches_ddl_test()
-    run_shuffled_upsert_test()
-    run_securities_normalizer_test()
-    print("\n" + "=" * 65)
-    print("数据契约测试全部通过！")
-    print("=" * 65)
-
-
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))

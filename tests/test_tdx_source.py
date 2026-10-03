@@ -22,15 +22,18 @@ StockLab - 通达信数据源测试 (tests/test_tdx_source.py)
 import os
 import sys
 
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pytest
 from stocklab.datasource._sources.tdx_source import (
     TdxDataSource,
     _market_of,
     _pure_code,
 )
-
 
 class FakeTdxClient:
     """可编程的 TDX 客户端桩：记录调用，可注入连接异常与返回数据"""
@@ -59,7 +62,6 @@ class FakeTdxClient:
         self.closed = True
         self.calls.append("close")
 
-
 def _make_source(client):
     """用固定桩构造 TdxDataSource（每次取数新建一个同款桩，方便断言调用）"""
     created = []
@@ -70,12 +72,8 @@ def _make_source(client):
 
     return TdxDataSource(client_factory=factory), created
 
-
-def run_market_and_code_test():
+def test_market_and_code():
     """测试市场编号与纯代码提取（沪 / 深 / 北交所 / 非法输入）"""
-    print("\n" + "=" * 65)
-    print("【阶段一：测试代码与市场编号转换】")
-    print("=" * 65)
 
     assert _market_of("600519.SH") == 1
     assert _market_of("688981.SH") == 1
@@ -92,12 +90,8 @@ def run_market_and_code_test():
     assert _pure_code("000001.SZ") == "000001"
     print("  -> 沪/深/北交所市场编号与纯代码提取全部正确")
 
-
-def run_monthly_test():
+def test_monthly():
     """测试月线：category=6、升序、列契约、市场编号透传"""
-    print("\n" + "=" * 65)
-    print("【阶段二：测试月线收盘价】")
-    print("=" * 65)
 
     bars = [
         {"datetime": "2026-08-31 00:00", "close": 1299.52},
@@ -131,12 +125,8 @@ def run_monthly_test():
     assert bj_call[5] == 2, bj_call
     print("  -> 北交所（920819.BJ）使用 market=2")
 
-
-def run_realtime_test():
+def test_realtime():
     """测试实时行情：价格、涨跌、量额（手 -> 股）、代码一致性校验"""
-    print("\n" + "=" * 65)
-    print("【阶段三：测试实时行情】")
-    print("=" * 65)
 
     client = FakeTdxClient(quotes=[{
         "market": 1, "code": "600519",
@@ -164,12 +154,8 @@ def run_realtime_test():
     assert client.closed
     print("  -> 现价/昨收/开高低/量额/涨跌全部正确: %s" % quote)
 
-
-def run_failure_test():
+def test_failure():
     """测试失败路径：连接失败 / 空结果 / 代码重定向 / 价格非法 / 非法输入"""
-    print("\n" + "=" * 65)
-    print("【阶段四：测试连接失败与异常数据】")
-    print("=" * 65)
 
     # 1) 连接异常 -> None / 空表，且不抛出
     class BoomClient(FakeTdxClient):
@@ -220,16 +206,6 @@ def run_failure_test():
     print("  -> fetch_stock_name 返回空串（通达信协议无名称字段）")
 
 
-def main():
-    """运行全部通达信通道测试"""
-    run_market_and_code_test()
-    run_monthly_test()
-    run_realtime_test()
-    run_failure_test()
-    print("\n" + "=" * 65)
-    print("通达信数据源测试全部通过！")
-    print("=" * 65)
-
-
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))

@@ -20,17 +20,18 @@ StockLab - Point-in-Time 与股票池测试 (tests/test_pit_universe.py)
 ==============================================================================
 """
 
+
 import os
-import shutil
 import sys
-import tempfile
-
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import math
 
 import pandas as pd
+import pytest
+
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stocklab.domain import (
     BALANCE_SHEET_COLUMNS,
@@ -59,7 +60,6 @@ from stocklab.persistence import (
 _LISTED_CODES = ["600519.SH", "000001.SZ", "300750.SZ"]
 _DELISTED_CODE = "601234.SH"
 
-
 def _listing_raw():
     """构造上交所/深交所上市日历源表（列名为交易所口径）"""
     return pd.DataFrame(
@@ -69,7 +69,6 @@ def _listing_raw():
             "A股上市日期": ["1990-12-19", "1991-04-03", "2018-06-11"],
         }
     )
-
 
 def _delisting_raw():
     """构造退市日历源表（含上市日期列，退市股的唯一上市日来源）"""
@@ -81,7 +80,6 @@ def _delisting_raw():
             "终止上市日期": ["2024-11-29", "2016-07-25"],
         }
     )
-
 
 def _securities_catalog():
     """构造名录帧（东财口径：只有当前在市证券，且不含任何日期）"""
@@ -100,7 +98,6 @@ def _securities_catalog():
             "is_hs": ["", "", ""],
         }
     )
-
 
 def _income_row(ts_code, report_period, announce_date, revenue, net_profit, eps):
     """构造利润表契约帧（单行，列序取自契约）"""
@@ -125,7 +122,6 @@ def _income_row(ts_code, report_period, announce_date, revenue, net_profit, eps)
     )
     return pd.DataFrame(values)
 
-
 def _balance_row(ts_code, report_period, announce_date, equity, total_assets, debt):
     """构造资产负债表契约帧（单行，列序取自契约）"""
     values = {column: [None] for column in BALANCE_SHEET_COLUMNS}
@@ -144,12 +140,10 @@ def _balance_row(ts_code, report_period, announce_date, equity, total_assets, de
     )
     return pd.DataFrame(values)
 
-
 def _universe_codes(database, as_of_date):
     """取某历史时点的股票池（返回排序后的代码列表）"""
     frame = SecurityRepository(database).universe(as_of_date)
     return sorted(frame["ts_code"].tolist())
-
 
 def _as_text(value):
     """把库内读回的日期统一成 YYYY-MM-DD 文本（DuckDB DATE 读回为 Timestamp）"""
@@ -157,43 +151,50 @@ def _as_text(value):
         return ""
     return str(pd.to_datetime(value).date())
 
+@pytest.fixture
+def listing_calendar():
+    """归一化后的上市日历（后续合并 / 事件 / 幸存者偏差用例共用）"""
+    return normalize_listing_calendar([_listing_raw()])
 
-def run_lifecycle_normalization_test():
-    """测试日历归一化：列名匹配、缺失关键列必须显式失败"""
-    print("\n" + "=" * 65)
-    print("【阶段一：测试上市/退市日历归一化】")
-    print("=" * 65)
+@pytest.fixture
+def delisting_calendar():
+    """归一化后的退市日历（自带上市日期回填来源）"""
+    return normalize_delisting_calendar([_delisting_raw()])
 
-    listing = normalize_listing_calendar([_listing_raw()])
+@pytest.fixture
+def merged_lifecycle(listing_calendar, delisting_calendar):
+    """合并后的证券名录（日期回填 + 状态推导 + 补入名录外的退市股）"""
+    return merge_lifecycle(_securities_catalog(), listing_calendar, delisting_calendar)
+
+@pytest.fixture
+def lifecycle_events(listing_calendar, delisting_calendar):
+    return build_lifecycle_events(listing_calendar, delisting_calendar)
+
+def test_listing_calendar_normalization(listing_calendar):
+    """上市日历归一化：列名匹配交易所口径"""
+    listing = listing_calendar
     assert list(listing.columns) == ["ts_code", "name", "list_date"]
     assert sorted(listing["ts_code"]) == sorted(_LISTED_CODES)
     listing_dates = dict(zip(listing["ts_code"], listing["list_date"]))
     assert str(listing_dates["600519.SH"]) == "1990-12-19"
     print("  -> 上市日历归一化 %d 条（列名自动匹配交易所口径）" % len(listing))
 
-    delisting = normalize_delisting_calendar([_delisting_raw()])
+def test_delisting_calendar_normalization(delisting_calendar):
+    """退市日历归一化，并回填上市日期来源"""
+    delisting = delisting_calendar
     delisting_rows = delisting.set_index("ts_code")
     assert sorted(delisting["ts_code"]) == ["600519.SH", _DELISTED_CODE]
     assert str(delisting_rows.loc[_DELISTED_CODE, "delist_date"]) == "2016-07-25"
     assert str(delisting_rows.loc[_DELISTED_CODE, "list_date"]) == "2010-05-20"
-    print("  -> 退市日历归一化 %d 条（含上市日期回填来源）" % len(delisting))
 
-    try:
+def test_listing_calendar_rejects_missing_column():
+    """缺关键源列必须显式失败"""
+    with pytest.raises(DataContractError):
         normalize_listing_calendar([_listing_raw().drop(columns=["A股上市日期"])])
-        raise AssertionError("缺上市日期列必须抛 DataContractError")
-    except DataContractError as error:
-        print("  -> 缺关键源列拒绝: %s" % error)
 
-    return listing, delisting
-
-
-def run_lifecycle_merge_test(listing, delisting):
-    """测试生命周期合并：回填日期、推导状态、补入不在名录中的退市股"""
-    print("\n" + "=" * 65)
-    print("【阶段二：测试生命周期合并与状态推导】")
-    print("=" * 65)
-
-    merged = merge_lifecycle(_securities_catalog(), listing, delisting)
+def test_lifecycle_merge(merged_lifecycle):
+    """生命周期合并：日期回填、状态推导、补入不在名录中的退市股"""
+    merged = merged_lifecycle
     assert list(merged.columns) == list(SECURITY_COLUMNS)
 
     rows = merged.set_index("ts_code")
@@ -208,9 +209,10 @@ def run_lifecycle_merge_test(listing, delisting):
     assert rows.loc["300750.SZ", "status"] == "LISTED"
     assert str(rows.loc["300750.SZ", "list_date"]) == "2018-06-11"
     assert set(merged["status"]) <= set(SECURITY_STATUSES)
-    print("  -> 日期回填 + 状态推导正确，退市股 %s 已补入（%d 只）" % (_DELISTED_CODE, len(merged)))
 
-    events = build_lifecycle_events(listing, delisting)
+def test_lifecycle_events(lifecycle_events):
+    """生命周期事件帧：上市 / 退市事件与来源"""
+    events = lifecycle_events
     assert list(events.columns) == ["ts_code", "event_date", "event_type", "detail", "source"]
     listed_events = set(events[events["event_type"] == "LISTED"]["ts_code"])
     delisted_events = set(events[events["event_type"] == "DELISTED"]["ts_code"])
@@ -219,139 +221,115 @@ def run_lifecycle_merge_test(listing, delisting):
     assert delisted_events == {"600519.SH", _DELISTED_CODE}
     print("  -> 事件帧 %d 条：LISTED %d、DELISTED %d"
           % (len(events), len(listed_events), len(delisted_events)))
-    return merged, events
 
+def test_survivorship_universe(merged_lifecycle, lifecycle_events, fresh_db):
+    """幸存者偏差防线：universe(as_of) 还原历史时点的证券集合"""
+    merged, events = merged_lifecycle, lifecycle_events
+    db_path, _ = fresh_db
+    with Database(db_path) as database:
+        assert SecurityRepository(database).upsert_lifecycle(merged) == len(merged)
+        assert SecurityEventRepository(database).upsert(events) == len(events)
 
-def run_survivorship_test(merged, events):
-    """测试幸存者偏差防线：universe(as_of) 还原历史时点的证券集合"""
-    print("\n" + "=" * 65)
-    print("【阶段三：测试 as-of 股票池（幸存者偏差防线）】")
-    print("=" * 65)
+        # 退市股（不在当前名录中）在退市前必须在池内，退市后必须出池
+        assert _universe_codes(database, "1989-01-01") == []
+        universe_2012 = _universe_codes(database, "2012-01-01")
+        assert universe_2012 == ["000001.SZ", "600519.SH", _DELISTED_CODE], universe_2012
+        assert "300750.SZ" not in universe_2012  # 2018 年才上市
 
-    temp_dir = tempfile.mkdtemp(prefix="sl_universe_")
-    db_path = os.path.join(temp_dir, "universe.duckdb")
-    try:
-        initialize_database(db_path)
-        with Database(db_path) as database:
-            assert SecurityRepository(database).upsert_lifecycle(merged) == len(merged)
-            assert SecurityEventRepository(database).upsert(events) == len(events)
+        # 2016-07-25 当天已退市：不得再进入池子
+        universe_2016 = _universe_codes(database, "2016-07-25")
+        assert universe_2016 == ["000001.SZ", "600519.SH"], universe_2016
 
-            # 退市股（不在当前名录中）在退市前必须在池内，退市后必须出池
-            assert _universe_codes(database, "1989-01-01") == []
-            universe_2012 = _universe_codes(database, "2012-01-01")
-            assert universe_2012 == ["000001.SZ", "600519.SH", _DELISTED_CODE], universe_2012
-            assert "300750.SZ" not in universe_2012  # 2018 年才上市
+        # 当前时点 = 名录规模（退市股全部出池，历史样本仍可还原）
+        assert _universe_codes(database, "2030-01-01") == ["000001.SZ", "300750.SZ"]
+        print("  -> as-of 股票池按上市/退市日正确进出池（退市股不出样本）")
 
-            # 2016-07-25 当天已退市：不得再进入池子
-            universe_2016 = _universe_codes(database, "2016-07-25")
-            assert universe_2016 == ["000001.SZ", "600519.SH"], universe_2016
+        # 事件按 as-of 可见
+        event_repo = SecurityEventRepository(database)
+        early = event_repo.find(as_of_date="1991-12-31")
+        assert _DELISTED_CODE not in set(early["ts_code"])
+        assert set(early["ts_code"]) == {"600519.SH", "000001.SZ"}
+        late = event_repo.find(event_type="DELISTED", as_of_date="2030-01-01")
+        assert len(late) == 2
+        print("  -> 生命周期事件可按 as-of 复核（%d → %d 条）" % (len(early), len(late)))
 
-            # 当前时点 = 名录规模（退市股全部出池，历史样本仍可还原）
-            assert _universe_codes(database, "2030-01-01") == ["000001.SZ", "300750.SZ"]
-            print("  -> as-of 股票池按上市/退市日正确进出池（退市股不出样本）")
+        # 字段归属：名录同步（不带日期）不得抹掉生命周期阶段回填的日期
+        SecurityRepository(database).upsert(_securities_catalog())
+        repo = SecurityRepository(database)
+        refreshed = repo.find_by_code("600519.SH").iloc[0]
+        assert _as_text(refreshed["list_date"]) == "1990-12-19"
+        assert _as_text(refreshed["delist_date"]) == "2024-11-29"
+        assert refreshed["status"] == "DELISTED"
+        assert _universe_codes(database, "2012-01-01") == universe_2012
+        print("  -> 名录同步不会清空已回填的上市日/退市日/状态")
 
-            # 事件按 as-of 可见
-            event_repo = SecurityEventRepository(database)
-            early = event_repo.find(as_of_date="1991-12-31")
-            assert _DELISTED_CODE not in set(early["ts_code"])
-            assert set(early["ts_code"]) == {"600519.SH", "000001.SZ"}
-            late = event_repo.find(event_type="DELISTED", as_of_date="2030-01-01")
-            assert len(late) == 2
-            print("  -> 生命周期事件可按 as-of 复核（%d → %d 条）" % (len(early), len(late)))
-
-            # 字段归属：名录同步（不带日期）不得抹掉生命周期阶段回填的日期
-            SecurityRepository(database).upsert(_securities_catalog())
-            repo = SecurityRepository(database)
-            refreshed = repo.find_by_code("600519.SH").iloc[0]
-            assert _as_text(refreshed["list_date"]) == "1990-12-19"
-            assert _as_text(refreshed["delist_date"]) == "2024-11-29"
-            assert refreshed["status"] == "DELISTED"
-            assert _universe_codes(database, "2012-01-01") == universe_2012
-            print("  -> 名录同步不会清空已回填的上市日/退市日/状态")
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-def run_point_in_time_test():
+def test_point_in_time(fresh_db):
     """测试 Point-in-Time 查询：可见性判据必须是公告日而非报告期"""
-    print("\n" + "=" * 65)
-    print("【阶段四：测试 Point-in-Time（未来信息泄漏防线）】")
-    print("=" * 65)
+    db_path, _ = fresh_db
+    with Database(db_path) as database:
+        repository = IncomeStatementRepository(database)
+        income = pd.concat(
+            [
+                _income_row("600519.SH", "2024-12-31", "2025-04-01", 170.9, 86.2, 6.87),
+                _income_row("600519.SH", "2025-06-30", "2025-08-15", 90.7, 46.0, 3.66),
+                _income_row("000001.SZ", "2024-12-31", "2025-03-25", 160.0, 44.0, 2.25),
+            ],
+            ignore_index=True,
+        )
+        assert repository.upsert(income) == 3
 
-    temp_dir = tempfile.mkdtemp(prefix="sl_pit_")
-    db_path = os.path.join(temp_dir, "pit.duckdb")
-    try:
-        initialize_database(db_path)
-        with Database(db_path) as database:
-            repository = IncomeStatementRepository(database)
-            income = pd.concat(
-                [
-                    _income_row("600519.SH", "2024-12-31", "2025-04-01", 170.9, 86.2, 6.87),
-                    _income_row("600519.SH", "2025-06-30", "2025-08-15", 90.7, 46.0, 3.66),
-                    _income_row("000001.SZ", "2024-12-31", "2025-03-25", 160.0, 44.0, 2.25),
-                ],
-                ignore_index=True,
-            )
-            assert repository.upsert(income) == 3
+        # 幂等：重复写入不产生重复行
+        assert repository.upsert(income) == 3
+        assert len(repository.find_by_code("600519.SH")) == 2
 
-            # 幂等：重复写入不产生重复行
-            assert repository.upsert(income) == 3
-            assert len(repository.find_by_code("600519.SH")) == 2
+        # 报告期早于 as-of，但 4 月才公告 → 3 月底不可见（look-ahead 防线）
+        hidden = repository.find_as_of("600519.SH", "2025-03-31")
+        assert len(hidden) == 0, hidden
+        assert repository.latest_as_of("600519.SH", "2025-03-31").empty
+        print("  -> as-of 2025-03-31 不可见年报（4 月才公告），无未来泄漏")
 
-            # 报告期早于 as-of，但 4 月才公告 → 3 月底不可见（look-ahead 防线）
-            hidden = repository.find_as_of("600519.SH", "2025-03-31")
-            assert len(hidden) == 0, hidden
-            assert repository.latest_as_of("600519.SH", "2025-03-31").empty
-            print("  -> as-of 2025-03-31 不可见年报（4 月才公告），无未来泄漏")
+        # 公告当日可见；半年报要到 8 月才可见
+        visible = repository.find_as_of("600519.SH", "2025-05-01")
+        assert list(visible["report_period"].dt.strftime("%Y-%m-%d")) == ["2024-12-31"]
+        latest = repository.latest_as_of("600519.SH", "2025-05-01")
+        assert len(latest) == 1
+        assert str(pd.to_datetime(latest["report_period"].iloc[0]).date()) == "2024-12-31"
+        assert len(repository.find_as_of("600519.SH", "2025-08-15")) == 2
+        print("  -> as-of 2025-05-01 最新可见期 = 2024 年报；公告当日即可见")
 
-            # 公告当日可见；半年报要到 8 月才可见
-            visible = repository.find_as_of("600519.SH", "2025-05-01")
-            assert list(visible["report_period"].dt.strftime("%Y-%m-%d")) == ["2024-12-31"]
-            latest = repository.latest_as_of("600519.SH", "2025-05-01")
-            assert len(latest) == 1
-            assert str(pd.to_datetime(latest["report_period"].iloc[0]).date()) == "2024-12-31"
-            assert len(repository.find_as_of("600519.SH", "2025-08-15")) == 2
-            print("  -> as-of 2025-05-01 最新可见期 = 2024 年报；公告当日即可见")
+        # 横截面：只含当时已公告的证券
+        cross_before = repository.cross_section_as_of("2025-03-31")
+        assert sorted(cross_before["ts_code"]) == ["000001.SZ"]
+        cross_after = repository.cross_section_as_of("2025-04-01")
+        assert sorted(cross_after["ts_code"]) == ["000001.SZ", "600519.SH"]
+        cross_period = repository.cross_section_as_of(
+            "2025-08-31", report_period="2025-06-30"
+        )
+        assert list(cross_period["ts_code"]) == ["600519.SH"]
+        print("  -> 横截面按 available_date 过滤（%d → %d 只，可限定报告期）"
+              % (len(cross_before), len(cross_after)))
 
-            # 横截面：只含当时已公告的证券
-            cross_before = repository.cross_section_as_of("2025-03-31")
-            assert sorted(cross_before["ts_code"]) == ["000001.SZ"]
-            cross_after = repository.cross_section_as_of("2025-04-01")
-            assert sorted(cross_after["ts_code"]) == ["000001.SZ", "600519.SH"]
-            cross_period = repository.cross_section_as_of(
-                "2025-08-31", report_period="2025-06-30"
-            )
-            assert list(cross_period["ts_code"]) == ["600519.SH"]
-            print("  -> 横截面按 available_date 过滤（%d → %d 只，可限定报告期）"
-                  % (len(cross_before), len(cross_after)))
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-def run_indicator_derivation_test():
+def test_indicator_derivation():
     """测试财务指标派生：公式、同比方向、除零语义、公告日取较晚者"""
-    print("\n" + "=" * 65)
-    print("【阶段五：测试财务指标派生（纯计算）】")
-    print("=" * 65)
 
     income = pd.concat(
-        [
-            _income_row("600519.SH", "2024-12-31", "2025-04-01", 100.0, 50.0, 4.0),
-            _income_row("600519.SH", "2025-12-31", "2026-04-02", 120.0, 60.0, 4.8),
-            # 与 2025-12-31 同比：收入 -50%，验证同比方向不是「与明年比」
-            _income_row("000001.SZ", "2024-12-31", "2025-03-25", 200.0, 80.0, 2.0),
-            _income_row("000001.SZ", "2025-12-31", "2026-03-20", 100.0, 40.0, 1.0),
-        ],
-        ignore_index=True,
+    [
+        _income_row("600519.SH", "2024-12-31", "2025-04-01", 100.0, 50.0, 4.0),
+        _income_row("600519.SH", "2025-12-31", "2026-04-02", 120.0, 60.0, 4.8),
+        # 与 2025-12-31 同比：收入 -50%，验证同比方向不是「与明年比」
+        _income_row("000001.SZ", "2024-12-31", "2025-03-25", 200.0, 80.0, 2.0),
+        _income_row("000001.SZ", "2025-12-31", "2026-03-20", 100.0, 40.0, 1.0),
+    ],
+    ignore_index=True,
     )
     balance = pd.concat(
-        [
-            _balance_row("600519.SH", "2024-12-31", "2025-03-30", 500.0, 900.0, 100.0),
-            _balance_row("600519.SH", "2025-12-31", "2026-04-01", 550.0, 950.0, 0.0),
-            _balance_row("000001.SZ", "2024-12-31", "2025-03-25", 400.0, 800.0, 0.0),
-            _balance_row("000001.SZ", "2025-12-31", "2026-03-18", 420.0, 820.0, 0.0),
-        ],
-        ignore_index=True,
+    [
+        _balance_row("600519.SH", "2024-12-31", "2025-03-30", 500.0, 900.0, 100.0),
+        _balance_row("600519.SH", "2025-12-31", "2026-04-01", 550.0, 950.0, 0.0),
+        _balance_row("000001.SZ", "2024-12-31", "2025-03-25", 400.0, 800.0, 0.0),
+        _balance_row("000001.SZ", "2025-12-31", "2026-03-18", 420.0, 820.0, 0.0),
+    ],
+    ignore_index=True,
     )
 
     indicators = build_financial_indicators(income, balance)
@@ -390,14 +368,14 @@ def run_indicator_derivation_test():
 
     # 除零与缺表 → NaN，不产生 inf
     zero_balance = pd.concat(
-        [
-            _balance_row("000001.SZ", "2024-12-31", "2025-03-25", 0.0, 0.0, 0.0),
-            _balance_row("000001.SZ", "2025-12-31", "2026-03-18", 0.0, 0.0, 0.0),
-        ],
-        ignore_index=True,
+    [
+        _balance_row("000001.SZ", "2024-12-31", "2025-03-25", 0.0, 0.0, 0.0),
+        _balance_row("000001.SZ", "2025-12-31", "2026-03-18", 0.0, 0.0, 0.0),
+    ],
+    ignore_index=True,
     )
     zero_case = build_financial_indicators(
-        income[income["ts_code"] == "000001.SZ"], zero_balance
+    income[income["ts_code"] == "000001.SZ"], zero_balance
     )
     assert zero_case["roe"].isna().all() and zero_case["roa"].isna().all()
 
@@ -410,22 +388,11 @@ def run_indicator_derivation_test():
 
     # 利润表为空 → 返回契约列序空表（调用方据此跳过写入）
     empty = build_financial_indicators(pd.DataFrame(columns=list(INCOME_STATEMENT_COLUMNS)),
-                                       no_balance)
+                                   no_balance)
     assert empty.empty and list(empty.columns) == list(FINANCIAL_INDICATOR_COLUMNS)
     print("  -> 空利润表返回契约列序空表")
 
 
-def main():
-    """运行全部 Point-in-Time 与股票池测试"""
-    listing, delisting = run_lifecycle_normalization_test()
-    merged, events = run_lifecycle_merge_test(listing, delisting)
-    run_survivorship_test(merged, events)
-    run_point_in_time_test()
-    run_indicator_derivation_test()
-    print("\n" + "=" * 65)
-    print("Point-in-Time 与股票池测试全部通过！")
-    print("=" * 65)
-
-
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))

@@ -35,14 +35,18 @@ import shutil
 import subprocess
 import sys
 
-# 将项目根目录加入模块搜索路径，保证直接运行本脚本时能 import stocklab
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 允许直接执行本文件（./venv/bin/python tests/xxx.py）；走 pytest 时由
+# pytest.ini 的 `pythonpath = .` 统一负责，不会重复插入。
+if "stocklab" not in sys.modules:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.web import create_app
 from app.web import store
 from stocklab.analytics import ValuationPercentileAnalyzer
 from stocklab.facade import MarketDataFacade
 
+import pytest
 import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -60,27 +64,19 @@ CONSENSUS_SAMPLE_SIZE = 20
 # 比对口径用的指标
 CONSENSUS_INDICATOR = "pe_ttm"
 
-# 整个测试过程共用一个应用实例（store 的查询需要 app context）
-_APP = None
-
-
-def _client():
-    """创建测试客户端（复用全局应用，避免重复装配路由）"""
-    return _APP.test_client()
-
+# 应用实例与测试客户端由 tests/conftest.py 的 app / ctx / client fixture 提供：
+#   client —— 已带应用上下文的 Flask 测试客户端
+#   ctx    —— 只带上下文、不发请求（直接调 store / analyzer 的用例用它）
+# 迁移前这里是模块级 _APP 全局 + main() 里手动 create_app()，省事但代价是
+# app_context 的边界只存在于 main() 里，单跑任何一个用例必然 RuntimeError。
 
 def _json(response):
     """读取 JSON 应答体"""
     return response.get_json()
 
-
-def run_route_tests():
+def test_route(client):
     """阶段一：页面与图标路由可达"""
-    print("\n" + "=" * 65)
-    print("【阶段一：页面与图标路由】")
-    print("=" * 65)
 
-    client = _client()
     for path in ("/", "/market", "/indices", "/industries", "/screener", "/favicon.ico"):
         response = client.get(path)
         assert response.status_code == 200, "%s 返回 %s" % (path, response.status_code)
@@ -93,14 +89,9 @@ def run_route_tests():
     print("  -> /api/health  status=%s db=%s as_of=%s" % (
         health["status"], health["db_path"], health["data_as_of"]))
 
-
-def run_validation_tests():
+def test_validation(client):
     """阶段二：参数校验（400）与未知路径（404）"""
-    print("\n" + "=" * 65)
-    print("【阶段二：参数校验与 404】")
-    print("=" * 65)
 
-    client = _client()
     bad_requests = [
         "/api/percentile?code=",
         "/api/percentile?code=600519.SH&period=近三年",
@@ -129,14 +120,9 @@ def run_validation_tests():
     assert page_not_found.status_code == 404
     print("  -> 404 /api/* 与 / 页面路径均正确兜底")
 
-
-def run_missing_data_tests():
+def test_missing_data(client):
     """阶段三：数据缺失分支必须是 200 + 空结果，而不是 500"""
-    print("\n" + "=" * 65)
-    print("【阶段三：数据缺失分支】")
-    print("=" * 65)
 
-    client = _client()
 
     unknown = _json(client.get("/api/percentile?code=4048"))
     assert unknown["results"] == [], "未知代码应返回空 results"
@@ -153,14 +139,9 @@ def run_missing_data_tests():
     assert empty_query["items"] == []
     print("  -> 空联想关键词返回空列表")
 
-
-def run_suggest_tests():
+def test_suggest(client):
     """阶段四：证券联想的大小写、排序与多命中提示"""
-    print("\n" + "=" * 65)
-    print("【阶段四：证券联想】")
-    print("=" * 65)
 
-    client = _client()
 
     lower = _json(client.get("/api/securities?q=tcl"))["items"]
     upper = _json(client.get("/api/securities?q=TCL"))["items"]
@@ -180,14 +161,9 @@ def run_suggest_tests():
     assert len(chinese) == 1 and chinese[0]["code"] == "600519.SH"
     print("  -> 中文联想 茅台 -> %s %s" % (chinese[0]["code"], chinese[0]["name"]))
 
-
-def run_name_resolve_tests():
+def test_name_resolve(client):
     """阶段五：中文名 -> 代码解析"""
-    print("\n" + "=" * 65)
-    print("【阶段五：中文名解析】")
-    print("=" * 65)
 
-    client = _client()
 
     maotai = _json(client.get("/api/percentile?code=%E8%8C%85%E5%8F%B0"))
     assert maotai["code"] == "600519.SH", "茅台应解析为 600519.SH"
@@ -206,12 +182,8 @@ def run_name_resolve_tests():
     assert missing.status_code == 400
     print("  -> 未命中名称 400: %s" % _json(missing)["error"][:40])
 
-
-def run_level_consistency_tests():
+def test_level_consistency(ctx):
     """阶段六：七档评级后端与前端口径一致"""
-    print("\n" + "=" * 65)
-    print("【阶段六：七档评级前后端一致】")
-    print("=" * 65)
 
     source = open(COMMON_JS, encoding="utf-8").read()
     matches = re.findall(r'name:\s*"([^"]+)",\s*max:\s*(\d+)', source)
@@ -237,12 +209,8 @@ def run_level_consistency_tests():
     print("  -> %d 个边界探针全部一致，档位顺序: %s" % (
         len(probes), " / ".join(name for name, _ in front_levels)))
 
-
-def run_frontend_level_tests():
+def test_frontend_level(ctx):
     """阶段六之二：用 node 真实执行前端 levelOf，与后端逐点比对"""
-    print("\n" + "=" * 65)
-    print("【阶段六之二：前端 levelOf 实际执行比对】")
-    print("=" * 65)
 
     node = shutil.which("node")
     if not node:
@@ -282,7 +250,6 @@ def run_frontend_level_tests():
     print("  -> node 实际执行 %d 个探针，前后端档位完全一致" % len(probes))
     print("  -> 分位 100 前端=%s（应为末档，不可为 null）" % front_results[-2])
 
-
 def _fetch_history(code):
     """读取单只股票估值历史并做 analyzer 要求的日期类型转换"""
     with MarketDataFacade() as facade:
@@ -293,12 +260,9 @@ def _fetch_history(code):
     frame["trade_date"] = pd.to_datetime(frame["trade_date"]).dt.date
     return frame
 
-
-def run_consensus_tests():
+def test_consensus(ctx):
     """阶段七：全市场 SQL 分位与 analyzer 抽样口径一致"""
-    print("\n" + "=" * 65)
     print("【阶段七：全市场分位口径抽样比对 (%d 只)】" % CONSENSUS_SAMPLE_SIZE)
-    print("=" * 65)
 
     rows = [
         row for row in store.load_market_percentile(CONSENSUS_INDICATOR)
@@ -329,14 +293,9 @@ def run_consensus_tests():
 
     print("  -> %d/%d 只口径一致（分位与样本数双重校验）" % (matched, len(picks)))
 
-
-def run_market_ranking_tests():
+def test_market_ranking(client):
     """阶段八：全市场排行的排序 / 过滤 / 分页"""
-    print("\n" + "=" * 65)
-    print("【阶段八：全市场排行】")
-    print("=" * 65)
 
-    client = _client()
 
     first = _json(client.get("/api/market/ranking?limit=20"))
     summary = first["summary"]
@@ -405,14 +364,9 @@ def run_market_ranking_tests():
     assert bad_level.status_code == 400, "非法评级应返回 400"
     print("  -> 非法评级参数正确拒绝")
 
-
-def run_industry_tests():
+def test_industry(client):
     """阶段九：行业估值横截面（层级切换 / 汇总 / 排序）"""
-    print("\n" + "=" * 65)
-    print("【阶段九：行业估值】")
-    print("=" * 65)
 
-    client = _client()
 
     body = _json(client.get("/api/industries?level=1"))
     assert body["items"], "一级行业不应为空"
@@ -441,14 +395,9 @@ def run_industry_tests():
     assert bad2.status_code == 400, "level=abc 应返回 400"
     print("  -> 非法层级参数正确拒绝")
 
-
-def run_index_tests():
+def test_index(client):
     """阶段九：指数列表与单指数详情"""
-    print("\n" + "=" * 65)
-    print("【阶段九：指数估值】")
-    print("=" * 65)
 
-    client = _client()
     listing = _json(client.get("/api/indices"))
     assert listing["items"], "指数列表不应为空"
     codes = [item["index_code"] for item in listing["items"]]
@@ -477,14 +426,9 @@ def run_index_tests():
     assert pb["results"], "沪深300 PB 序列应有结果"
     print("  -> 沪深300 PB 分位 %s" % pb["results"][0]["percentile"])
 
-
-def run_percentile_detail_tests():
+def test_percentile_detail(client):
     """阶段十：个股分位详情、走势图与多窗口"""
-    print("\n" + "=" * 65)
-    print("【阶段十：个股分位详情与多窗口】")
-    print("=" * 65)
 
-    client = _client()
     payload = _json(client.get("/api/percentile?code=600519.SH"))
 
     assert payload["code"] == "600519.SH"
@@ -543,14 +487,9 @@ def run_percentile_detail_tests():
     assert pe_item["current_value"] == 100, "pe_ttm 覆盖未生效"
     print("  -> 覆盖当前值 pe_ttm=100 生效，分位 %s" % pe_item["percentile"])
 
-
-def run_screener_tests():
+def test_screener(client):
     """阶段十二：选股器元数据与执行接口"""
-    print("\n" + "=" * 65)
-    print("【阶段十二：选股器】")
-    print("=" * 65)
 
-    client = _client()
 
     # 元数据：因子覆盖率 / 算子 / 模板 / 时点
     meta = _json(client.get("/api/screener/meta"))
@@ -697,14 +636,9 @@ def run_screener_tests():
     assert 'class="nav-item active"' in page, "选股器页面导航未高亮"
     print("  -> 页面要素与导航高亮齐备")
 
-
-def run_compare_tests():
+def test_compare(client):
     """阶段十三：多股对比接口"""
-    print("\n" + "=" * 65)
-    print("【阶段十三：多股对比】")
-    print("=" * 65)
 
-    client = _client()
 
     # 三只标的 + 近十年
     codes = "600519.SH,000001.SZ,300750.SZ"
@@ -814,14 +748,9 @@ def run_compare_tests():
     assert 'class="nav-item active"' in page, "对比页导航未高亮"
     print("  -> 页面要素与导航高亮齐备")
 
-
-def run_portfolio_tests():
+def test_portfolio(client):
     """阶段十四：组合监控（自选股 codes 精确过滤 + 分位口径一致性）"""
-    print("\n" + "=" * 65)
-    print("【阶段十四：组合监控】")
-    print("=" * 65)
 
-    client = _client()
     codes = "600519.SH,000001.SZ,300750.SZ"
 
     # codes 精确过滤：只返回点名的三只
@@ -849,6 +778,18 @@ def run_portfolio_tests():
     names_in_fuzzy = set(item["name"] for item in fuzzy["items"])
     assert "平安银行" in names_in_fuzzy
     assert len(names_in_fuzzy) > 1, "q 的结果应包含多只，证明它不是精确集合"
+
+    # 【补漏】上面那几条只验了「传 3 个完整代码返回 3 只」，而这3 个代码之间
+    # 本来就没有子串关系 —— 把 codes 退化成「子串匹配 in ts_code」照样能过。
+    # 真正能区分两种语义的是「传一个真实代码的前缀」：精确过滤必须0 条。
+    # 这个用例是针对该变异补的，缺了它codes 语义退化不会被任何人发现。
+    for prefix in ("60051", "6005", "00000", "30075", "519"):
+        got = _json(client.get(
+            "/api/market/ranking?codes=%s&indicator=pe_ttm&limit=100" % prefix))
+        assert got["total"] == 0, (
+            "codes=%s 是代码片段而非完整 ts_code，精确过滤应 0 条，实际 %d 条"
+            % (prefix, got["total"])
+        )
     print("  -> q 名称模糊命中 %d 只（多只），codes 精确命中 %d 只（唯一）" % (
         fuzzy["total"], exact_code["total"]))
 
@@ -907,14 +848,9 @@ def run_portfolio_tests():
     assert "localStorage" in page, "页面应说明自选列表存在浏览器本地"
     print("  -> 页面要素齐备；自选存储逻辑仅在 portfolio.js（内联脚本只有主题防闪烁）")
 
-
-def run_market_context_tests():
+def test_market_context(client):
     """阶段十五：个股页全市场横向位置"""
-    print("\n" + "=" * 65)
-    print("【阶段十五：个股页横向位置】")
-    print("=" * 65)
 
-    client = _client()
     data = _json(client.get("/api/percentile?code=600519.SH"))
     context = data.get("market_context")
     assert context, "应答应带 market_context"
@@ -992,35 +928,6 @@ def run_market_context_tests():
     print("  -> 页面要素齐备")
 
 
-def main():
-    """按阶段顺序执行全部用例"""
-    global _APP
-    logging.basicConfig(level=logging.ERROR)
-
-    _APP = create_app()
-    # store 的只读聚合与证券表查询依赖 current_app，必须在应用上下文内跑
-    with _APP.app_context():
-        run_route_tests()
-        run_validation_tests()
-        run_missing_data_tests()
-        run_suggest_tests()
-        run_name_resolve_tests()
-        run_level_consistency_tests()
-        run_frontend_level_tests()
-        run_consensus_tests()
-        run_market_ranking_tests()
-        run_industry_tests()
-        run_index_tests()
-        run_percentile_detail_tests()
-        run_screener_tests()
-        run_compare_tests()
-        run_portfolio_tests()
-        run_market_context_tests()
-
-    print("\n" + "=" * 65)
-    print("全部测试通过")
-    print("=" * 65)
-
-
 if __name__ == "__main__":
-    main()
+    # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
+    raise SystemExit(pytest.main([__file__, "-v"]))
