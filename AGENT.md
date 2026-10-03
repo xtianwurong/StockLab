@@ -121,9 +121,22 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
          │
          ├──►  stocklab.fundamental      （财务指标纯派生：不取数、不落库）
          │
+         ├──►  stocklab.factor ──►  stocklab.screener
+         │        （因子与筛选纯计算：只吃 DataFrame，不碰网络/数据库）
+         │
+         ├──►  stocklab.research ──┬──►  stocklab.persistence（查数 + 写研究快照）
+         │        （研究编排层）      ├──►  stocklab.factor    （算因子）
+         │                          └──►  stocklab.screener   （判条件）
+         │
          └──►  stocklab.persistence  ──►  stocklab.persistence.storage
                 （只对本地落库）                └──►  stocklab.persistence.migrations
 ```
+
+> `stocklab.factor`（27 个因子 + 预处理）与 `stocklab.screener`（规则/分组/流水线）
+> **只接收调用方传入的 DataFrame**：因子算什么、条件怎么判都与网络和数据库无关，可离线单测；
+> 「取数」这一件事只由 `stocklab.research.frame` 承担，它按 Point-in-Time 拼出因子输入帧
+> （每只股票一行），再交给因子层与筛选层。`stocklab.research` 是**编排层**：
+> 允许同时依赖 persistence 与两个纯计算包，与 facade 同属「取数 / 编排」这一侧。
 
 > `stocklab.analytics` **不 import `facade` / `datasource` / `persistence`**：它只接收调用方传入的
 > DataFrame 做统计聚合，因此可脱离网络与数据库独立单测。取数仍由入口脚本经 facade 完成。
@@ -142,6 +155,9 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 | `stocklab.facade` | `common` `datasource` `persistence` | `pandas` | `logging` |
 | `stocklab.analytics` | 无（层内互引 `analytics`） | `pandas` | `logging` `os` `unicodedata` |
 | `stocklab.fundamental` | `domain` | `pandas` | 无 |
+| `stocklab.factor` | 无（层内互引 `factor`） | `pandas` | `math` |
+| `stocklab.screener` | `factor` | `pandas` | 无 |
+| `stocklab.research` | `domain` `factor` `screener` `persistence` | `pandas` | `datetime` `hashlib` `json` `logging` |
 | `app.dashboard` | `common` `facade`（层内互引 `dashboard`） | 无 | `datetime` `json` `logging` `os` |
 | `app.web` | `facade` `analytics`（层内互引 `web`） | `flask` | `logging` `os` `threading` |
 
@@ -171,6 +187,36 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   > 标量列会广播成全 NaN（曾导致日 K 的 `ts_code` 全 NaN、DuckDB 主键拒绝、整批静默写 0 行）。
 - `stocklab/fundamental`：**财务指标纯派生**，由利润表 + 资产负债表算 ROE / ROA / ROIC / 毛利率 /
   净利率 / 同比，公告日取两表较晚者；不取数、不落库，可离线单测。
+- `stocklab/factor`：**因子引擎（V2 §7），纯计算**，只吃 DataFrame。
+  - `base.py`：`Factor(name, categories, columns, compute, description)` + `FactorDataError` +
+    `divide` / `log_positive`；`categories` 是**元组**，`dividend_yield` 同时挂在 `value` 与 `dividend` 两个分类下（§7.1 与 §7.5 都列了它）。
+  - `registry.py`：**显式 `register()` 登记（不用装饰器）**，`get` / `list_factors` / `compute`；
+    本模块**不 import 分类包**（否则循环），登记动作由 `factor/__init__.py` 导入六个分类包完成；
+    `FACTOR_VERSION = "factor_v1"`（快照里的因子版本号）。
+  - `value/` `quality/` `growth/` `momentum/` `dividend/` `risk/`：六个分类包共 **27 个因子**；
+    `preprocessing/`：winsorize / zscore / rank / missing / industry_neutralize / market_cap_neutralize（§7.6）。
+  - **两种失败模式严格区分**：输入列缺失 = 帧构造方的缺陷 → 抛 `FactorDataError`；
+    数据为 NaN = 「无数据」→ 筛选一律判不通过并在 `failed_rules` 里写明原因，绝不静默放行。
+- `stocklab/screener`：**结构化筛选（V2 §8），纯计算**，不取数、不落库。
+  - `rules.py`：`ScreenRule`（9 种操作符 `lt/le/gt/ge/eq/ne/in/isna/notna` 表驱动，除 `isna` 外
+    缺失值一律判不通过；`explain()` 给出「满足 / 未满足 / 无数据」的逐行原因）、
+    `ScreenGroup`（AND/OR 可嵌套；每条规则只评估一次，`evaluate` 算完再 `combine` 组合）、
+    `ScreenError`（未知因子 / 非法阈值 / 非法组逻辑统一转成它，便于 CLI 一次报清）。
+  - `pipeline.py`：`ScreenPipeline.from_spec(spec)` 与 `.spec()` **往返一致**（spec 与 §8.1 的 YAML
+    结构同构；本项目收 JSON，因为环境未装 PyYAML）；执行顺序 = 算因子 → 并入工作帧 →
+    **预处理(§7.6) → 判定**，所以阈值作用在处理后的值上；`ScreenResult.summary`（每只股票一行：
+    ts_code / name / passed / failed_rules / 各因子值）+ `detail`（股票 × 规则长表：
+    factor_value / threshold / passed / reason），正是 §8.2 要求的输出。
+- `stocklab/research`：**研究编排层（V2 §6）**，因子与筛选唯一「查库 / 落库」的入口。
+  - `frame.py`：`build_factor_frame(as_of_date, ts_codes, factor_names, extra_columns, database)` ——
+    as-of 股票池（含 as-of 之后才退市的、排除已退市与后上市）、估值与基本面只读
+    `available_date <= as-of` 的可见期、上年同期对照列、日线派生动量 / 波动率 / 最大回撤、
+    `EV = 市值 + 有息负债 - 现金`；**没有数据源的输入列（ebitda / dps / dps_prior_year /
+    dividend_years_*）一律按 NaN 落地并记 WARNING**，筛选命中时报「无数据」，绝不伪造。
+  - `snapshot.py`：`create_snapshot` / `load_snapshot` / `list_snapshots` / `rerun_snapshot`
+    （按快照 spec 重新生成结果并逐行比对，不一致时返回差异列表），以及 `config_version`
+    （条件内容哈希）、`data_version`（`schema_vN@真实数据截止日`）、`factor_version`；
+    **快照只写不改**，重复执行同一研究产生新的 `snapshot_id`，历史结论不被覆盖。
 - `stocklab/persistence`：**只负责本地落库**，既不依赖 `common`，也不依赖任何外部数据源（AkShare / BaoStock / 腾讯）。
   - `storage/`：DuckDB 连接管理；`schema.py` 只做「委托迁移器」，**DDL 全部写在 `migrations/`**。
   - `migrations/`：`NNN_*.sql` 迁移文件 + `SchemaMigrator`（引导 `sys.schema_version`、按序补跑未应用迁移）。
@@ -194,7 +240,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - **分层命名契约**：
   - `datasource`（data source，只出不进）与 `persistence`（data sink，只进不出）是两个平行关注点，取数与落库的调用方是 `facade` 或入口脚本，**两层之间不得互相 import**；
   - `facade` 可依赖两者，但 **`datasource` 与 `persistence` 绝不可反向 import `facade`**，否则形成循环依赖。
-- **与 V2 需求文档的命名对照**：V2 §4.2 所称 `AkShareAdapter` / `BaoStockAdapter` / `TencentAdapter` 即本项目的 `datasource/_sources/{akshare,baostock,tencent}_source`（三个数据源通道实现）；`domain/corporate_action.py` 对应**尚未接入的公司行为（分红/送转）数据**，等 Phase 2 因子层真正需要时再建，不预置空文件。
+- **与 V2 需求文档的命名对照**：V2 §4.2 所称 `AkShareAdapter` / `BaoStockAdapter` / `TencentAdapter` 即本项目的 `datasource/_sources/{akshare,baostock,tencent}_source`（三个数据源通道实现）；`domain/corporate_action.py` 对应**尚未接入的公司行为（分红/送转）数据**——Phase 2 因子层已按「因子库先行、数据后补」交付，分红相关输入（`dps` / `dps_prior_year` / `dividend_years_*`）在因子输入帧里按 NaN 落地，`domain/corporate_action.py` 依旧**不预置空文件**，等真正接入公司行为数据源时再建。
 - 顶层入口脚本只做「参数解析 + 调用库」，不含业务逻辑；自检脚本放在 tests/ 下。
 
 ---
@@ -206,6 +252,7 @@ StockLab/
 ├── .gitignore                          # Git 忽略规则（__pycache__ / venv / output / data / .workbuddy）
 ├── AGENT.md                            # 本文档（项目永久上下文与设计契约）
 ├── config.ini                          # 运行配置：月数、输出路径、超时、基准与板块清单
+├── configs/                            # 结构化筛选条件示例（JSON，供 run_research.py --config 使用）
 ├── requirements.txt                    # 运行依赖（版本用 == 锁定）
 ├── docs/                               # ── 详细设计文档 ──
 │   ├── ARCHITECTURE.html               #   数据源容错策略、Facade 路由机制
@@ -238,7 +285,8 @@ StockLab/
 │   │   ├── security.py                 #     SECURITY_COLUMNS / SECURITY_EVENT_COLUMNS / INDEX_MEMBERSHIP_COLUMNS + 枚举
 │   │   ├── market_data.py              #     DAILY_PRICE_COLUMNS
 │   │   ├── valuation.py                #     DAILY_VALUATION / VALUATION_HISTORY / INDUSTRY_VALUATION 列契约
-│   │   └── fundamental.py              #     FUNDAMENTAL_PIT_COLUMNS（报告期 + 公告日 + 可见日）与四表契约
+│   │   ├── fundamental.py              #     FUNDAMENTAL_PIT_COLUMNS（报告期 + 公告日 + 可见日）与四表契约
+│   │   └── research.py                 #     SNAPSHOT_COLUMNS / SNAPSHOT_RESULT_COLUMNS（研究快照两表，与 004 同序）
 │   ├── normalization/                  #   归一化层（叶子包：源表 → 契约帧，不取数不落库）
 │   │   ├── __init__.py                 #     导出三层归一化入口
 │   │   ├── base.py                     #     原子原语：代码 / 选列 / 数值 / 日期 / 文本清洗
@@ -248,8 +296,23 @@ StockLab/
 │   ├── fundamental/                    #   基本面派生层（纯计算，不取数不落库）
 │   │   ├── __init__.py                 #     导出 build_financial_indicators + 与 V2 文档 §3.1 目录的对应关系
 │   │   └── indicator.py                #     ROE / ROA / ROIC / 毛利率 / 净利率 / 同比；公告日取两表较晚者
+│   ├── factor/                         #   因子引擎（V2 §7，纯计算：只吃 DataFrame，零 StockLab 依赖）
+│   │   ├── __init__.py                 #     导出 Factor / registry / 预处理入口，并**触发六个分类包的因子登记**
+│   │   ├── base.py                     #     Factor 定义 + FactorDataError + divide / log_positive（categories 为元组）
+│   │   ├── registry.py                 #     显式 register() 登记（无装饰器）、get / list_factors / compute、FACTOR_VERSION
+│   │   ├── preprocessing/              #     §7.6 预处理：winsorize / zscore / rank / missing / 行业·市值中性化
+│   │   ├── value/                      #     估值类（pe_ttm / pb / ps / ev_ebitda / fcf_yield / dividend_yield…）
+│   │   ├── quality/                    #     质量类（roe / roic / 毛利·营业净利率 / cfo_to_net_profit…）
+│   │   ├── growth/                     #     成长类（营收·利润·EPS·FCF 同比、roe_trend…）
+│   │   ├── momentum/                   #     动量类（1/3/6/12M 收益率）
+│   │   ├── dividend/                   #     分红类（dividend_yield / payout_ratio / 分红稳定性与增速）
+│   │   └── risk/                       #     风险类（6/12M 波动率、12M 最大回撤）
+│   ├── screener/                       #   结构化筛选（V2 §8，纯计算，不取数不落库）
+│   │   ├── __init__.py                 #     导出 ScreenRule / ScreenGroup / ScreenPipeline / ScreenResult / ScreenError
+│   │   ├── rules.py                    #     9 种操作符表驱动 + AND/OR 组嵌套 + 逐行 explain（满足/未满足/无数据）
+│   │   └── pipeline.py                 #     from_spec / spec 往返、执行顺序（算因子→预处理→判定→组合）、summary + detail
 │   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
-│   │   ├── __init__.py                 #     本层统一出口（Database + 11 个 Repository）
+│   │   ├── __init__.py                 #     本层统一出口（Database + 13 个 Repository）
 │   │   ├── storage/                    #     数据存储基础设施
 │   │   │   ├── __init__.py             #       导出 Database / initialize_database
 │   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with，打开时校验版本）
@@ -259,18 +322,24 @@ StockLab/
 │   │   │   ├── runner.py               #       SchemaMigrator：引导 sys.schema_version、按序补跑、失败不记版本
 │   │   │   ├── 001_initial.sql         #       基线迁移（机制上线前的既有结构，全部 IF NOT EXISTS）
 │   │   │   ├── 002_fundamental.sql     #       fundamental 域四张表
-│   │   │   └── 003_security_events.sql #       list_status → status + reference.security_events
+│   │   │   ├── 003_security_events.sql #       list_status → status + reference.security_events
+│   │   │   └── 004_research.sql        #       research.snapshots + research.snapshot_results（研究快照，只写不改）
 │   │   └── repository/                 #     数据访问层（表级 SQL 封装）
-│   │       ├── __init__.py             #       导出 BaseRepository 与 11 个 Repository
+│   │       ├── __init__.py             #       导出 BaseRepository 与 13 个 Repository
 │   │       ├── base.py                 #       BaseRepository：契约对齐 + 显式列名 UPSERT / 异常处理 / 日志模板
 │   │       ├── security.py             #       reference.securities（名录 upsert / 生命周期 upsert_lifecycle / universe(as_of)）
 │   │       ├── security_event.py       #       reference.security_events（生命周期事件按 as-of 查询）
-│   │       ├── daily_price.py          #       market.daily_prices 读写
-│   │       ├── daily_valuation.py      #       market.daily_valuations 读写
-│   │       ├── valuation_history.py    #       market.valuation_history 读写
+│   │       ├── daily_price.py          #       market.daily_prices 读写 + find_window（只回原始收盘价）
+│   │       ├── daily_valuation.py      #       market.daily_valuations 读写 + cross_section_as_of
+│   │       ├── valuation_history.py    #       market.valuation_history 读写 + cross_section_as_of（<= as-of 最近一条）
 │   │       ├── index_membership.py     #       reference.index_memberships 读写
 │   │       ├── industry_valuation.py   #       market.industry_valuations 读写
-│   │       └── fundamental.py          #       fundamental 四表 + find_as_of / latest_as_of / cross_section_as_of
+│   │       ├── fundamental.py          #       fundamental 四表 + find_as_of / latest_as_of / cross_section_as_of
+│   │       └── research_snapshot.py    #       研究快照两表（只 INSERT，重复 snapshot_id 拒绝覆盖）
+│   ├── research/                       #   研究编排层（V2 §6：取数 + 算因子 + 筛选 + 落快照的唯一编排方）
+│   │   ├── __init__.py                 #     导出 build_factor_frame / create_snapshot / load_snapshot / rerun_snapshot
+│   │   ├── frame.py                    #     build_factor_frame：按 Point-in-Time 拼因子输入帧，无数据源的列 NaN 落地并告警
+│   │   └── snapshot.py                 #     快照读写与复现比对 + config_version / data_version（库版本@真实数据截止日）
 │   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
 │   │   ├── __init__.py                 #     导出 MarketDataFacade
 │   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
@@ -312,6 +381,7 @@ StockLab/
 │   └── scripts/                       #   CLI 入口
 │       ├── generate_sector_trend.py   #     命令行入口：生成板块走势网页
 │       ├── sync_market_data.py        #     命令行入口：全市场数据同步到本地 DuckDB（八个阶段）
+│       ├── run_research.py            #     命令行入口：研究筛选（screen / rerun / list / factors 四个子命令）
 │       ├── serve_web.py               #     命令行入口：启动本地 Web 分析服务（仅监听 127.0.0.1）
 │       ├── verify_market_sql.py       #     抽样校验：全市场分位 SQL 与 analyzer 口径一致（退出码可进 CI）
 │       ├── analyze_pe_distribution.py #     命令行入口：全市场市盈率分布统计
@@ -321,6 +391,9 @@ StockLab/
 │   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样）
 │   ├── test_migrations.py              #     迁移自检（新库 / 幂等 / 老库升级 / 失败不记版本 / 序号重复）
 │   ├── test_data_contract.py           #     数据契约自检（缺列拒绝 / 乱序写入不错位 / 契约与 DDL 一致）
+│   ├── test_factor_engine.py           #     因子引擎自检（登记契约 / 六分类 / 数学手算核对 / 预处理与非法配置）
+│   ├── test_screener.py                #     选股器自检（操作符 / AND·OR 嵌套 / 缺失值 / 预处理生效 / spec 往返）
+│   ├── test_research_snapshot.py       #     研究快照自检（PIT 帧 / 筛选 / 快照写入 / 复现比对 / 空库），全部用临时库
 │   └── test_pit_universe.py            #     PIT 与股票池自检（未来泄漏 / 幸存者偏差 / 指标派生）
 ├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
 │   └── stocklab.duckdb                 #     本地 DuckDB 单文件数据库
@@ -348,6 +421,12 @@ StockLab/
 | **归一化** | `stocklab.normalization.base` | 源表原子原语：代码归一、选列、数值/日期/文本清洗 |
 | | `stocklab.normalization.akshare` / `exchange` / `eastmoney` | 7 类 akshare 源表、交易所上市退市日历（含 `merge_lifecycle`）、东财三大报表 → 契约帧 |
 | **派生** | `stocklab.fundamental.indicator` | 财务指标纯派生：ROE / ROA / ROIC / 毛利率 / 净利率 / 同比，公告日取两表较晚者 |
+| **因子** | `stocklab.factor.registry` | **因子登记与批量计算**：显式 `register()`（**无装饰器**）、`get` / `list_factors` / `compute`、`FACTOR_VERSION = "factor_v1"`；本模块不 import 分类包（由包入口触发登记） |
+| | `stocklab.factor.base` / `preprocessing` | `Factor` 定义（`categories` 为元组，一个因子可挂多个分类）+ `FactorDataError`；§7.6 预处理 winsorize / zscore / rank / missing / 行业·市值中性化（非法配置一律拒绝） |
+| **筛选** | `stocklab.screener.rules` | 9 种操作符表驱动 + AND/OR 可嵌套组；除 `isna` 外缺失值一律判不通过，`explain()` 逐行给出「满足 / 未满足 / 无数据」 |
+| | `stocklab.screener.pipeline` | `from_spec` / `spec` 往返（与 §8.1 YAML 同构）；执行顺序 = 算因子 → 预处理 → **判定** → 组合；输出 `summary` + `detail`（§8.2） |
+| **研究** | `stocklab.research.frame` | `build_factor_frame`：Point-in-Time 拼因子输入帧（as-of 股票池 / `available_date <= as-of` / 上年同期 / 日线派生动量·波动率·回撤）；无数据源的列 NaN 落地并告警 |
+| | `stocklab.research.snapshot` | `create_snapshot` / `load_snapshot` / `list_snapshots` / `rerun_snapshot`（按 spec 重新生成并逐行比对）+ `config_version` / `data_version` / `factor_version`；快照只写不改 |
 | **外观** | `stocklab.facade.market_data` | **统一取数门面**：本地优先/远端优先策略、Cache-Aside 回写 |
 | **持久化** | `stocklab.persistence.migrations` | **迁移执行器 `SchemaMigrator`**：`NNN_*.sql` 为 DDL 唯一真相，`sys.schema_version` 记录版本、失败不记版本 |
 | | `stocklab.persistence.storage.schema` | `initialize_database()`：委托迁移器（**本文件不含 DDL**） |
@@ -365,6 +444,7 @@ StockLab/
 | | `app.web.api` | 个股接口：`/api/percentile` 分位 + 多窗口、`/api/securities` 联想（排序 + 大小写不敏感）、代码与中文名解析 |
 | | `app.web.market_api` | 全市场接口：`/api/market/ranking`（过滤/排序/分页 + 七档分布与直方图）、`/api/indices`、`/api/index/detail` |
 | **脚本** | `app/scripts/sync_market_data.py` | 8 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分/行业估值/生命周期/基本面（默认全跑一、二、三、五、七） |
+| | `app/scripts/run_research.py` | 研究筛选 CLI：`screen`（取数 → 因子 → 筛选 → 写研究快照）/ `rerun`（复现比对，不一致退出码 1）/ `list` / `factors` |
 | | `app/scripts/generate_sector_trend.py` | 可视化生成 CLI：月数/输出路径/配置文件可配 |
 | | `app/scripts/serve_web.py` | 本地分析服务 CLI：端口/优先级/数据库路径可配，仅监听 127.0.0.1 |
 
@@ -417,10 +497,26 @@ StockLab/
 ./venv/bin/python app/scripts/sync_market_data.py fundamentals --ts-code 600519.SH
 ./venv/bin/python app/scripts/sync_market_data.py fundamentals --workers 8
 
+# ── 研究筛选（V2 §6 / §8）──
+# screen：按 JSON 条件筛选并写入研究快照（重跑历史必须显式给 --as-of）
+./venv/bin/python app/scripts/run_research.py screen --as-of 2026-10-02 --config configs/screen_value.json
+# 只看结果不落快照；限定股票池与打印行数
+./venv/bin/python app/scripts/run_research.py screen --as-of 2026-10-02 --config configs/screen_value.json --no-snapshot
+./venv/bin/python app/scripts/run_research.py screen --as-of 2026-10-02 --config configs/screen_value.json \
+    --ts-codes 600519.SH,000001.SZ --top 5
+# rerun：按快照编号重新生成并与存档逐行比对（不一致时退出码 1，可进 CI）
+./venv/bin/python app/scripts/run_research.py rerun --snapshot-id RS20261003155523-5180f2
+# list：全部研究快照；factors：已登记因子（分类 / 输入列 / 口径）
+./venv/bin/python app/scripts/run_research.py list
+./venv/bin/python app/scripts/run_research.py factors
+
 # 数据质量自检（均用临时数据库，但 test_web_api / test_data_interfaces 会打开本地库）
-./venv/bin/python tests/test_migrations.py        # 迁移幂等与老库升级
+./venv/bin/python tests/test_migrations.py        # 迁移幂等与老库升级（期望版本数从迁移目录推导）
 ./venv/bin/python tests/test_data_contract.py     # 契约对齐与显式列名写入
 ./venv/bin/python tests/test_pit_universe.py      # Point-in-Time 与 as-of 股票池
+./venv/bin/python tests/test_factor_engine.py     # 因子登记契约、数学手算核对与预处理
+./venv/bin/python tests/test_screener.py          # 操作符、AND/OR 嵌套、缺失值与 spec 往返
+./venv/bin/python tests/test_research_snapshot.py # PIT 输入帧、快照写入与复现比对
 
 # 仅同步股票基础信息（兼容旧用法，等价于 securities 子命令）
 ./venv/bin/python app/scripts/sync_market_data.py --securities-only
@@ -556,7 +652,7 @@ pip install -r requirements.txt
       - `_STORE_LOCK`：包住全市场 / 指数聚合连接的全部查询。
       - 两把锁**互不嵌套**，纯内存统计（analyzer）在锁外并行。实测混合 36 个并发请求全部 200。
     - **DuckDB 对数据库文件是进程级独占锁，服务会长期持有**：
-      - 服务运行期间，**任何**外部进程（`sync_market_data.py`、`tests/test_web_api.py`、
+      - 服务运行期间，**任何**外部进程（`sync_market_data.py`、`run_research.py`、`tests/test_web_api.py`、
         `verify_market_sql.py` 等）连**只读连接**都会被拒，报 `Could not set lock on file`。
       - 因此这些脚本**必须先停服务**再跑；相关脚本已对锁冲突给出可操作提示而非抛栈。
       - 反向也成立：外部进程持锁时服务启动即失败。
@@ -614,6 +710,34 @@ pip install -r requirements.txt
 23. **行业估值接口的日期参数是 `YYYYMMDD`**：巨潮按 `date[:4]+date[4:6]+date[6:]` 拼接，
     传 `2026-09-30` 会拼成非法日期并抛 `KeyError 'records'`（表现为整阶段无数据）。
     `fetch_industry_valuation` 内部已统一转换，CLI 的 `--stat-date` 两种格式都能用。
+24. **因子与筛选是纯计算，取数只在 `stocklab.research.frame`**：
+    - 因子输入帧的契约是「**一行一标的** + 所选因子的全部输入列」：`build_factor_frame`
+      先按 as-of 拼数、补齐缺数据源的列，最后检查重复 `ts_code`（出现即抛 `FactorDataError`）。
+    - **两种失败必须严格区分**：帧里缺列（构造方漏了列）→ `FactorDataError`，属编程错误；
+      帧里是 NaN（当时确实没有数据）→ 筛选一律判不通过，`failed_rules` 写明「无数据」，
+      **绝不静默放行，也绝不拿近似值顶替**。
+    - 预处理引用的非因子列（如 `market_cap_neutralize` 要的 `total_mv`、行业列）
+      由 `ScreenPipeline.input_columns()` 报出，取数方必须一并放进帧，否则执行期直接报缺列。
+25. **Phase 2 按「因子库先行、数据后补」交付，当前数据缺口必须知道**：
+    - 可用的：`market.valuation_history` 440 万行（pe_ttm / pb / ps）→ 估值类因子有数；
+      `fundamental` 四表只有 600519.SH；`market.daily_prices` 只有 3 行、
+      `market.daily_valuations` 只有 3 行 → 动量 / 波动 / 回撤、股息率 / 市值、
+      质量 / 成长 / 现金流类因子在全市场筛选里几乎全部报「无数据」
+      （`configs/screen_value.json` 实跑就是 0 通过，原因逐只写在 `failed_rules`）。
+    - **没有数据源、一律按 NaN 落地的输入列**：`ebitda`、`dps`、`dps_prior_year`、
+      `dividend_years_paid`、`dividend_years_total`（公司行为数据 `domain/corporate_action.py`
+      尚未接入）；构造帧时会记 WARNING。
+    - 补数据路径：`sync_market_data.py prices / valuations / fundamentals`；
+      当前环境下 `push2.eastmoney.com` 与 `push2his.eastmoney.com` 经 Proxy 被拒
+      （`ProxyError`），`prices` / `valuations` 两阶段跑不通；可用的替代通道是
+      腾讯 `fetch_kline(period="day")`（约 800 根 ≈ 3.3 年）与 baostock。
+26. **研究快照的复现约定**：
+    - 快照**只写不改**：重复执行同一研究产生新的 `snapshot_id`，历史结论不被覆盖；
+      `spec_json` 同时存了**展开后的 ts_code 列表**与筛选条件，重跑按它逐只对齐。
+    - `rerun` = 按 spec 重新生成 → 与存档逐行比对，库里的数据一旦变化就如实报差异
+      （退出码 1，可进 CI）；`data_version` = `schema_v{N}@{as-of 前最近一个估值交易日}`，
+      `factor_version` = `stocklab.factor.FACTOR_VERSION`，`config_version` = 条件内容哈希。
+    - `run_research.py` 要写库，**必须先停 `serve_web.py`**（见第 14 条的 DuckDB 写锁）。
 
 ---
 

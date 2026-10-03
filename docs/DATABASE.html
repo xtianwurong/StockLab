@@ -497,7 +497,16 @@
       <code>reference.security_events</code> 生命周期事件表。<br>
       ③ <code>list_date</code> / <code>delist_date</code> 由「证券生命周期」阶段从沪深北交易所
       上市/退市日历回填，历史时点股票池用
-      <code>SecurityRepository.universe(as_of)</code> 推导（防幸存者偏差）。
+      <code>SecurityRepository.universe(as_of)</code> 推导（防幸存者偏差）。<br>
+      ④ <code>004_research.sql</code> 新增 <code>research</code> 域两张表：
+      <code>research.snapshots</code>（研究快照元数据 + 可复现 <code>spec_json</code>，
+      主键 <code>snapshot_id</code>，<strong>只写不改</strong>）与
+      <code>research.snapshot_results</code>（逐股 <code>passed</code> /
+      <code>failed_rules</code> JSON / <code>factor_values</code> JSON，主键
+      <code>(snapshot_id, ts_code)</code>），用于按 <code>snapshot_id</code>
+      重新生成筛选结果并逐行比对（<code>app/scripts/run_research.py rerun</code>）。
+      快照记录 <code>data_version</code>（库版本 @ 真实数据截止日）、
+      <code>factor_version</code> 与 <code>config_version</code> 三个版本号，缺一无法复现。
     </div>
 
     <!-- Navigation -->

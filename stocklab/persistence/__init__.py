@@ -19,8 +19,10 @@ from .repository import (
     IndexMembershipRepository,
     IncomeStatementRepository,
     IndustryValuationRepository,
+    ResearchSnapshotRepository,
     SecurityEventRepository,
     SecurityRepository,
+    SnapshotResultRepository,
     ValuationHistoryRepository,
 )
 from .storage import DEFAULT_DB_PATH, Database, initialize_database
@@ -40,4 +42,6 @@ __all__ = [
     "BalanceSheetRepository",
     "CashflowStatementRepository",
     "FinancialIndicatorRepository",
+    "ResearchSnapshotRepository",
+    "SnapshotResultRepository",
 ]
