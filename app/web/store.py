@@ -55,6 +55,9 @@ __all__ = [
     "load_market_percentile",
     "load_index_list",
     "load_index_percentile",
+    "load_industry_valuation",
+    "industry_stat_dates",
+    "market_data_as_of",
     "invalidate_cache",
     "percentile_level",
 ]
@@ -527,6 +530,113 @@ def load_index_percentile(index_code, indicator):
 
     _cache_put(cache_key, {"frame": frame, "results": results})
     return frame, results
+
+
+def industry_stat_dates():
+    """
+    列出本地已有的行业估值统计日期（最新在前），供行业页显示数据截止日期
+
+    Returns:
+        list[str]: YYYY-MM-DD 文本列表；无数据时为空列表
+    """
+    cached = _cache_get("industry_dates")
+    if cached is not None:
+        return cached
+
+    frame = _query(
+        "SELECT DISTINCT stat_date FROM market.industry_valuations "
+        "ORDER BY stat_date DESC"
+    )
+    if frame is None or frame.empty:
+        return []
+
+    dates = []
+    for value in frame["stat_date"].tolist():
+        dates.append(value.isoformat() if hasattr(value, "isoformat") else str(value))
+    _cache_put("industry_dates", dates)
+    return dates
+
+
+def load_industry_valuation(industry_level, stat_date=None):
+    """
+    读取指定层级的行业估值横截面（行业估值页的数据源）
+
+    【口径说明】
+      每行是某行业在某统计日的横截面：pe_weighted 为总市值加权 PE，
+      pe_median 为成分 PE 中位数，pe_arithmetic 为算术平均 PE。
+      行业层由国证行业分类给出（1 = 一级 ~ 4 = 细分），不是由个股聚合而来。
+
+    Args:
+        industry_level (int): 行业层级，1~4（1 最粗、4 最细）
+        stat_date (str | None): 统计日期 YYYY-MM-DD；None 取本地最新一期
+
+    Returns:
+        tuple: (list[dict], str) —— 每行含 industry_code / industry_name /
+                company_count / priced_company_count / pe_weighted /
+                pe_median / pe_arithmetic / total_market_value / net_profit，
+                按 pe_median 升序（缺失排最后）；第二个元素为实际使用的统计日期
+    """
+    dates = industry_stat_dates()
+    if not dates:
+        return [], ""
+    if stat_date is None:
+        stat_date = dates[0]
+    elif stat_date not in dates:
+        return [], ""
+
+    cache_key = "industry:%d:%s" % (industry_level, stat_date)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached, stat_date
+
+    frame = _query(
+        "SELECT industry_code, industry_name, company_count, priced_company_count, "
+        "       pe_weighted, pe_median, pe_arithmetic, total_market_value, net_profit "
+        "FROM market.industry_valuations "
+        "WHERE stat_date = ? AND industry_level = ? "
+        "ORDER BY pe_median ASC NULLS LAST, industry_code",
+        [stat_date, industry_level],
+    )
+    if frame is None or frame.empty:
+        return [], stat_date
+
+    results = []
+    for row in frame.itertuples(index=False):
+        results.append({
+            "industry_code": _text(row.industry_code),
+            "industry_name": _text(row.industry_name),
+            "company_count": int(row.company_count or 0),
+            "priced_company_count": int(row.priced_company_count or 0),
+            "pe_weighted": _round4(_num(row.pe_weighted)),
+            "pe_median": _round4(_num(row.pe_median)),
+            "pe_arithmetic": _round4(_num(row.pe_arithmetic)),
+            "total_market_value": _round4(_num(row.total_market_value)),
+            "net_profit": _round4(_num(row.net_profit)),
+        })
+
+    _cache_put(cache_key, results)
+    return results, stat_date
+
+
+def market_data_as_of():
+    """
+    本地估值序列的最新交易日（页面显示「数据截止」用）
+
+    Returns:
+        str: YYYY-MM-DD；无数据时为空串
+    """
+    cached = _cache_get("market_as_of")
+    if cached is not None:
+        return cached
+
+    frame = _query("SELECT MAX(trade_date) AS d FROM market.valuation_history")
+    value = ""
+    if frame is not None and not frame.empty:
+        raw = frame["d"].iloc[0]
+        if raw is not None and raw == raw:  # None / NaT 排除
+            value = raw.isoformat() if hasattr(raw, "isoformat") else str(raw)
+    _cache_put("market_as_of", value)
+    return value
 
 
 # ---------------------------------------------------------------------------

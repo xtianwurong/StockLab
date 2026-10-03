@@ -41,6 +41,7 @@ __all__ = [
     "handle_index",
     "handle_market_page",
     "handle_indices_page",
+    "handle_industries_page",
     "handle_favicon",
     "handle_health",
     "handle_percentile",
@@ -375,6 +376,16 @@ def handle_indices_page():
     return render_template("indices.html")
 
 
+def handle_industries_page():
+    """
+    行业估值页面
+
+    Returns:
+        str: HTML 页面
+    """
+    return render_template("industries.html")
+
+
 def handle_favicon():
     """
     站点图标：内联 SVG，避免浏览器默认请求 /favicon.ico 产生 404 噪音
@@ -404,6 +415,7 @@ def handle_health():
         "status": "ok",
         "priority": current_app.config.get("STOCKLAB_PRIORITY") or "配置文件默认值",
         "db_path": store.current_db_path(),
+        "data_as_of": store.market_data_as_of(),
     })
 
 

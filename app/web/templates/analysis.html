@@ -158,19 +158,19 @@
   </style>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/"><span class="brand-mark">S</span>StockLab</a>
-    <nav class="nav">
-      <a class="nav-link active" href="/">个股分析</a>
-      <a class="nav-link" href="/market">全市场</a>
-      <a class="nav-link" href="/indices">指数估值</a>
-    </nav>
-    <div class="topbar-right">
-      <span><span class="status-dot" id="status-dot"></span><span id="status-text">检测中</span></span>
-    </div>
-  </header>
+  {% set active_page = "analysis" %}
+  {% include "_topbar.html" %}
 
   <main class="container container-narrow">
+    <div class="page-head">
+      <div class="page-title">个股估值分位</div>
+      <div class="page-desc">
+        当前估值在该股自身历史中所处的百分位——
+        <span class="term" data-tip="分位 = 历史有效样本中严格小于当前值的条数占比。亏损期（PE/PB ≤ 0）剔除，故样本数少于交易日数。">分位越低越便宜</span>，
+        结果保留 7 档评级与多窗口对照。
+      </div>
+    </div>
+
     <!-- 查询区 -->
     <section class="card card-pad">
       <div class="query-row">
@@ -246,9 +246,9 @@
         </section>
 
         <section class="card card-pad">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
-            <div class="card-title">多窗口分位对比</div>
-            <div class="card-hint">同一指标在不同回溯窗口下的分位，窗口差异反映趋势</div>
+          <div class="section-head">
+            <div class="section-title">多窗口分位对比</div>
+            <div class="section-desc">同一指标在不同回溯窗口下的分位，窗口差异反映趋势</div>
           </div>
           <div class="windows" id="windows"></div>
         </section>
@@ -256,11 +256,15 @@
 
       <!-- 指标卡 -->
       <section class="section">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px">
+        <div class="section-head">
           <div class="tabs" id="indicator-tabs"></div>
-          <div class="card-hint">点卡片或标签切换主指标（参考线与分位带跟随）</div>
+          <div class="section-desc">点卡片或标签切换主指标（参考线与分位带跟随）</div>
         </div>
         <div class="metric-grid" id="metric-grid"></div>
+        <div class="meta-strip" style="margin-top:12px">
+          <span class="section-desc">七档评级图例：</span>
+          <span id="metric-legend"></span>
+        </div>
       </section>
 
       <!-- 走势图 -->
@@ -268,7 +272,7 @@
         <div class="card-head">
           <div>
             <div class="card-title">历史估值走势</div>
-            <div class="card-hint" id="chart-hint">实线为估值序列，阴影为 25%~75% 分位带，虚线为 10% / 90% 分位参考线</div>
+            <div class="card-hint">实线为估值序列，<span class="term" data-tip="阴影带的上下边界分别是该窗口内序列的 25% 与 75% 分位值，覆盖中间一半的历史样本。">25%~75% 分位带</span>，虚线为 10% / 90% 分位参考线</div>
           </div>
           <div class="chart-toolbar">
             <button class="btn btn-sm btn-ghost" id="btn-reset-zoom">重置缩放</button>
@@ -281,7 +285,7 @@
       <section class="card section">
         <div class="card-head">
           <div class="card-title">指标明细</div>
-          <div class="card-hint">分位 = 历史样本中低于当前值的占比（仅统计正值样本）</div>
+          <div class="card-hint">五项估值指标横向对照，点上方卡片切换主指标</div>
         </div>
         <div class="table-wrap">
           <table class="table">
@@ -311,6 +315,8 @@
       </div>
     </div>
   </main>
+
+  {% include "_footer.html" %}
 
   <script src="/static/common.js"></script>
   <script src="/static/app.js"></script>

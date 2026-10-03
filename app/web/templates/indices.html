@@ -58,25 +58,22 @@
   </style>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/"><span class="brand-mark">S</span>StockLab</a>
-    <nav class="nav">
-      <a class="nav-link" href="/">个股分析</a>
-      <a class="nav-link" href="/market">全市场</a>
-      <a class="nav-link active" href="/indices">指数估值</a>
-    </nav>
-    <div class="topbar-right">
-      <span><span class="status-dot" id="status-dot"></span><span id="status-text">检测中</span></span>
-    </div>
-  </header>
+  {% set active_page = "indices" %}
+  {% include "_topbar.html" %}
 
   <main class="container">
     <div class="page-head">
       <div class="page-title">指数估值</div>
       <div class="page-desc">
-        指数估值 = 成分股估值的中位数（剔除亏损样本），再套用与个股一致的分位口径。
+        指数估值 = 成分股估值的<span class="term" data-tip="剔除 PE/PB ≤ 0 的亏损成分后取中位数，避免个别极端值拉高整体。">中位数</span>（剔除亏损样本），
+        再套用与个股一致的<span class="term" data-tip="分位 = 当前估值在该指数自身历史有效样本中低于当前值的占比，越低越便宜。">分位口径</span>。
         点击卡片查看该指数的历史走势与分位参考线。
       </div>
+    </div>
+
+    <div class="meta-strip" style="margin-bottom:12px">
+      <span>七档评级：</span>
+      <span id="index-legend"></span>
     </div>
 
     <section class="card card-pad">
@@ -114,6 +111,8 @@
       </div>
     </section>
   </main>
+
+  {% include "_footer.html" %}
 
   <script src="/static/common.js"></script>
   <script src="/static/indices.js"></script>

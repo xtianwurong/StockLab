@@ -29,12 +29,14 @@
   var tableHint = document.getElementById("table-hint");
   var resultHint = document.getElementById("result-hint");
   var distDom = document.getElementById("dist-chart");
+  var marketLegend = document.getElementById("market-legend");
 
   // ---------- 状态 ----------
   var state = {
     indicator: "pe_ttm",
     market: "",
     q: "",
+    level: "",
     sort: "percentile",
     order: "asc",
     offset: 0,
@@ -81,6 +83,9 @@
     if (state.market) {
       parts.push("market=" + state.market);
     }
+    if (state.level) {
+      parts.push("level=" + encodeURIComponent(state.level));
+    }
     if (state.q) {
       parts.push("q=" + encodeURIComponent(state.q));
     }
@@ -112,6 +117,7 @@
         renderDistribution(data.summary);
         renderTable(data.items || []);
         renderPager();
+        renderFilterHint();
       })
       .catch(function (error) {
         clearTable();
@@ -121,6 +127,25 @@
         busy = false;
         btnReload.disabled = false;
       });
+  }
+
+  /**
+   * 渲染当前生效的筛选条件提示
+   */
+  function renderFilterHint() {
+    var parts = [];
+    if (state.market) {
+      parts.push("市场 " + state.market);
+    }
+    if (state.q) {
+      parts.push("搜索「" + state.q + "」");
+    }
+    if (state.level) {
+      parts.push("评级 " + state.level);
+    }
+    resultHint.textContent = parts.length
+      ? ("当前筛选：" + parts.join(" · ") + "（命中 " + SL.formatInt(total) + " 条）")
+      : "";
   }
 
   /**
@@ -254,18 +279,34 @@
       }]
     });
 
-    // 七档评级分布
+    // 七档评级分布（可点击过滤；当前档高亮）
     levelList.textContent = "";
     var counts = summary.level_counts || {};
     var maxCount = 1;
     SL.LEVEL7.forEach(function (level) {
       maxCount = Math.max(maxCount, counts[level.name] || 0);
     });
+
+    if (state.level) {
+      var clearRow = SL.el("button", "level-row level-clear", "清除评级筛选：" + state.level);
+      clearRow.type = "button";
+      clearRow.addEventListener("click", function () {
+        state.level = "";
+        state.offset = 0;
+        load();
+      });
+      levelList.appendChild(clearRow);
+    }
+
     SL.LEVEL7.forEach(function (level) {
       var count = counts[level.name] || 0;
-      var row = SL.el("div", "level-row");
-      row.appendChild(SL.el("span", "level-name", level.name));
-      row.firstChild.style.color = level.color;
+      var row = SL.el("button",
+        "level-row level-clickable" + (state.level === level.name ? " level-active" : ""));
+      row.type = "button";
+
+      var name = SL.el("span", "level-name", level.name);
+      name.style.color = level.color;
+      row.appendChild(name);
 
       var bar = SL.el("div", "level-bar");
       var fill = SL.el("div", "level-fill");
@@ -275,6 +316,17 @@
       row.appendChild(bar);
 
       row.appendChild(SL.el("span", "level-count", SL.formatInt(count)));
+
+      row.addEventListener("click", function () {
+        if (state.level === level.name) {
+          state.level = "";
+        } else {
+          state.level = level.name;
+        }
+        state.offset = 0;
+        load();
+      });
+
       levelList.appendChild(row);
     });
   }
@@ -428,24 +480,7 @@
     }
   });
 
-  /**
-   * 拉取健康检查，点亮顶栏状态
-   */
-  function checkHealth() {
-    var dot = document.getElementById("status-dot");
-    var text = document.getElementById("status-text");
-    SL.fetchJson("/api/health", 6000)
-      .then(function (data) {
-        dot.className = "status-dot ok";
-        text.textContent = "服务正常 · " + data.priority;
-      })
-      .catch(function () {
-        dot.className = "status-dot bad";
-        text.textContent = "服务不可用";
-      });
-  }
-
-  checkHealth();
+  SL.checkHealth();
   renderTabs();
   load();
 })();

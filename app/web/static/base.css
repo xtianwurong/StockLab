@@ -34,6 +34,7 @@
 
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
   --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.07);
+  --shadow-lg: 0 10px 28px rgba(15, 23, 42, 0.10);
   --radius: 10px;
   --radius-sm: 7px;
   --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -95,6 +96,10 @@ a:hover { text-decoration: underline; }
 
 .nav { display: flex; gap: 4px; flex: 1; }
 .nav-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 7px 14px;
   border-radius: 7px;
   font-size: 14px;
@@ -102,7 +107,32 @@ a:hover { text-decoration: underline; }
   font-weight: 500;
 }
 .nav-link:hover { background: var(--bg-hover); text-decoration: none; }
-.nav-link.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-link.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.nav-link.active::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -15px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.nav-idx {
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+.nav-link.active .nav-idx { background: var(--accent); color: #fff; }
 
 .topbar-right { display: flex; align-items: center; gap: 12px; font-size: 12.5px; color: var(--text-muted); }
 .status-dot {
@@ -122,7 +152,66 @@ a:hover { text-decoration: underline; }
 
 .page-head { margin-bottom: 16px; }
 .page-title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
-.page-desc { font-size: 13px; color: var(--text-muted); margin-top: 3px; }
+.page-desc { font-size: 13px; color: var(--text-muted); margin-top: 3px; max-width: 780px; }
+
+/* 区块标题：小标题 + 说明，替代模板里手写的 inline flex 容器 */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.section-title {
+  font-size: 15px;
+  font-weight: 680;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title::before {
+  content: "";
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.section-desc { font-size: 12.5px; color: var(--text-muted); }
+
+/* 名词解释标记：hover 出气泡，解决「口径看不懂」 */
+.term {
+  border-bottom: 1px dashed var(--border-strong);
+  cursor: help;
+  position: relative;
+}
+.term:hover { border-bottom-color: var(--accent); color: var(--accent); }
+.term::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 300px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: #1e293b;
+  color: #f1f5f9;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  text-align: left;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s;
+  z-index: 60;
+  pointer-events: none;
+}
+.term:hover::after { opacity: 1; visibility: visible; }
 
 /* ---------- 卡片 ---------- */
 .card {
@@ -345,6 +434,56 @@ a:hover { text-decoration: underline; }
   border-color: var(--accent);
   color: #fff;
 }
+
+/* ---------- 七档图例（统一口径可视化，各页复用） ---------- */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+.legend-range {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ---------- 统一提示条 / 数据截止 ---------- */
+.meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.meta-strip b { color: var(--text-sub); font-weight: 620; font-family: var(--mono); }
+
+/* ---------- 页脚 ---------- */
+.footer {
+  border-top: 1px solid var(--border-color);
+  margin-top: 34px;
+  padding: 18px 20px 30px;
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.7;
+}
+.footer-inner { max-width: 1240px; margin: 0 auto; }
+.footer a { color: var(--text-muted); }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 860px) {

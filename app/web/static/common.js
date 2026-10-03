@@ -251,6 +251,70 @@
     return null;
   }
 
+  // ---------- 七档图例 ----------
+
+  /**
+   * 生成七档评级图例 HTML（各页统一口径展示）
+   *
+   * @returns {string} HTML 字符串
+   */
+  function levelLegend() {
+    var html = '<div class="legend">';
+    var low = 0;
+    for (var i = 0; i < LEVEL7.length; i++) {
+      var item = LEVEL7[i];
+      html +=
+        '<span class="legend-item"><span class="legend-swatch" style="background:' +
+        item.color + '"></span>' + item.name +
+        '<span class="legend-range">' + low + "~" + item.max + "%</span></span>";
+      low = item.max;
+    }
+    return html + "</div>";
+  }
+
+  // ---------- 顶栏状态 ----------
+
+  /**
+   * 拉取健康检查，点亮顶栏状态并填充数据截止日期
+   *
+   * @returns {Promise<object|null>} 健康检查应答；失败返回 null
+   */
+  function checkHealth() {
+    var dot = document.getElementById("status-dot");
+    var text = document.getElementById("status-text");
+    return fetchJson("/api/health", 6000)
+      .then(function (data) {
+        if (dot) {
+          dot.className = "status-dot ok";
+        }
+        if (text) {
+          text.textContent = "服务正常 · " + data.priority;
+        }
+        var asOf = data.data_as_of || "";
+        var strip = document.getElementById("data-as-of");
+        if (strip) {
+          if (asOf) {
+            strip.textContent = "数据截止 " + asOf;
+            strip.className = "";
+          }
+        }
+        var footer = document.getElementById("footer-as-of");
+        if (footer && asOf) {
+          footer.textContent = "数据截止 " + asOf;
+        }
+        return data;
+      })
+      .catch(function () {
+        if (dot) {
+          dot.className = "status-dot bad";
+        }
+        if (text) {
+          text.textContent = "服务不可用";
+        }
+        return null;
+      });
+  }
+
   // ---------- ECharts 走势图 ----------
 
   /**
@@ -535,6 +599,8 @@
     buildTrendOption: buildTrendOption,
     renderChart: renderChart,
     hexA: hexA,
+    levelLegend: levelLegend,
+    checkHealth: checkHealth,
     LEVEL7: LEVEL7
   };
 })();

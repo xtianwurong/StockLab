@@ -20,6 +20,7 @@ StockLab - 全市场与指数接口处理模块 (app.web.market_api)
 """
 
 import logging
+import statistics
 
 from flask import jsonify, request
 
@@ -30,6 +31,7 @@ _logger = logging.getLogger("StockLab.Web.MarketApi")
 
 __all__ = [
     "handle_market_ranking",
+    "handle_industry_valuation",
     "handle_index_list",
     "handle_index_detail",
 ]
@@ -37,6 +39,14 @@ __all__ = [
 
 # 可用的估值指标（与 store 支持的列名一致）
 _INDICATORS = ("pe_ttm", "pe_static", "pb", "ps", "pcf")
+
+# 行业层级取值（国证行业分类：1 一级 ~ 4 细分）
+_INDUSTRY_LEVELS = (1, 2, 3, 4)
+
+# 七档评级名（过滤参数合法值，与 store.percentile_level 完全一致）
+_LEVEL_NAMES = (
+    "极度低估", "低估", "正常偏低", "正常", "正常偏高", "高估", "极度高估", "-",
+)
 
 # 分页上限：Dashboard 一次最多回 200 行，其余靠翻页
 _MAX_PAGE_SIZE = 200
@@ -147,6 +157,7 @@ def handle_market_ranking():
         order (str): asc 或 desc，默认 asc（低估在前）
         q (str): 按代码或名称过滤，可空
         market (str): 按市场过滤（SH/SZ/BJ），可空
+        level (str): 按七档评级过滤（如 极度低估），可空；"-" 表示分位不可用
         offset (int): 分页偏移，默认 0
         limit (int): 每页条数，默认 50，上限 200
 
@@ -174,6 +185,12 @@ def handle_market_ranking():
 
     keyword = request.args.get("q", "").strip().lower()
     market = request.args.get("market", "").strip().upper()
+    level = request.args.get("level", "").strip()
+
+    if level and level not in _LEVEL_NAMES:
+        return jsonify({
+            "error": "参数 [level] 非法，合法值: %s" % " / ".join(_LEVEL_NAMES)
+        }), 400
 
     rows = store.load_market_percentile(indicator)
     if not rows:
@@ -188,7 +205,8 @@ def handle_market_ranking():
             "message": "全市场估值数据不可用，请先运行数据同步",
         })
 
-    # 过滤（在全量上做，保证 summary 与过滤后的列表同口径）
+    # 过滤（市场与关键词先做，summary 用这个口径统计，
+    # 保证评级面板在按档筛选时仍显示全貌而不是塌缩成单档）
     filtered = []
     for row in rows:
         if market and row["market"] != market:
@@ -197,6 +215,12 @@ def handle_market_ranking():
             if keyword not in row["ts_code"].lower() and keyword not in row["name"].lower():
                 continue
         filtered.append(row)
+
+    summary = _build_summary(filtered)
+
+    # 评级过滤只作用于列表与 total（点击七档面板钻取单一档位）
+    if level:
+        filtered = [row for row in filtered if row["level"] == level]
 
     # 排序：分位为 null 的恒排最后（升序降序都要在末尾），避免 null 抢占首屏
     reverse = order == "desc"
@@ -211,11 +235,72 @@ def handle_market_ranking():
         "indicator": indicator,
         "indicator_label": _reporter.indicator_label(indicator),
         "indicator_labels": _indicator_labels(),
-        "summary": _build_summary(filtered),
+        "summary": summary,
         "items": page,
         "total": len(filtered),
         "offset": offset,
         "limit": limit,
+        "message": "",
+    })
+
+
+def handle_industry_valuation():
+    """
+    行业估值横截面：按层级列出各行业的 PE 三种口径与规模数据
+
+    Query:
+        level (str): 行业层级 1~4，默认 1（一级行业）
+        stat_date (str): 统计日期 YYYY-MM-DD，缺省取本地最新一期
+
+    Returns:
+        Response: 200 时含 items / stat_date / stat_dates / summary；
+                  参数非法 400；本地无数据 200 + 空 items + message
+    """
+    level_text = request.args.get("level", "1").strip()
+    try:
+        level = int(level_text)
+    except ValueError:
+        return jsonify({"error": "参数 [level] 必须是整数 1~4"}), 400
+    if level not in _INDUSTRY_LEVELS:
+        return jsonify({"error": "参数 [level] 非法，合法值: 1 / 2 / 3 / 4"}), 400
+
+    stat_date = request.args.get("stat_date", "").strip() or None
+    if stat_date and len(stat_date) > 10:
+        return jsonify({"error": "参数 [stat_date] 非法，格式应为 YYYY-MM-DD"}), 400
+
+    stat_dates = store.industry_stat_dates()
+    rows, used_date = store.load_industry_valuation(level, stat_date)
+
+    if not rows:
+        message = ("本地没有行业估值数据，请先运行 "
+                   "sync_market_data.py industries")
+        if stat_date and stat_dates:
+            message = "统计日期 %s 本地无数据，可选日期: %s" % (
+                stat_date, " / ".join(stat_dates[:5]))
+        return jsonify({
+            "level": level,
+            "stat_date": used_date,
+            "stat_dates": stat_dates,
+            "items": [],
+            "summary": {},
+            "message": message,
+        })
+
+    medians = [row["pe_median"] for row in rows if row["pe_median"] is not None]
+    summary = {
+        "industry_count": len(rows),
+        "priced_count": sum(1 for row in rows if row["pe_median"] is not None),
+        "median_pe": round(statistics.median(medians), 4) if medians else None,
+        "company_count": sum(row["company_count"] for row in rows),
+        "priced_company_count": sum(row["priced_company_count"] for row in rows),
+    }
+
+    return jsonify({
+        "level": level,
+        "stat_date": used_date,
+        "stat_dates": stat_dates,
+        "items": rows,
+        "summary": summary,
         "message": "",
     })
 

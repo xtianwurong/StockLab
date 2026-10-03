@@ -50,6 +50,30 @@
     .level-bar { height: 9px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; }
     .level-fill { height: 100%; border-radius: 999px; }
     .level-count { font-size: 12px; color: var(--text-muted); text-align: right; font-family: var(--mono); }
+    button.level-row {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      padding: 5px 7px;
+      margin: -5px -7px;
+      border-radius: 7px;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    button.level-row:hover { background: var(--bg-hover); border-color: var(--border-color); }
+    button.level-row.level-active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+    }
+    .level-clear {
+      grid-template-columns: 1fr;
+      font-size: 12.5px;
+      color: var(--accent);
+      font-weight: 600;
+      justify-content: center;
+    }
 
     /* ---------- 排行表 ---------- */
     .rank { font-family: var(--mono); color: var(--text-faint); font-size: 12px; width: 34px; }
@@ -70,24 +94,15 @@
   </style>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/"><span class="brand-mark">S</span>StockLab</a>
-    <nav class="nav">
-      <a class="nav-link" href="/">个股分析</a>
-      <a class="nav-link active" href="/market">全市场</a>
-      <a class="nav-link" href="/indices">指数估值</a>
-    </nav>
-    <div class="topbar-right">
-      <span><span class="status-dot" id="status-dot"></span><span id="status-text">检测中</span></span>
-    </div>
-  </header>
+  {% set active_page = "market" %}
+  {% include "_topbar.html" %}
 
   <main class="container">
     <div class="page-head">
       <div class="page-title">全市场估值分位</div>
       <div class="page-desc">
-        每只股票的当前估值在其自身历史中的百分位；分位越低代表相对自身历史越便宜。
-        点击任意行进入该股的详细分析。
+        每只股票的当前估值在其自身历史中的<span class="term" data-tip="分位 = 历史有效样本中严格小于当前值的条数占比；亏损期样本剔除，分位不可用时显示「-」。">百分位</span>，
+        分位越低代表相对自身历史越便宜。点击任意行进入该股的详细分析。
       </div>
     </div>
 
@@ -142,14 +157,20 @@
       <div class="card">
         <div class="card-head">
           <div class="card-title">分位分布</div>
-          <div class="card-hint" id="hist-hint">按 10% 分档统计标的数量</div>
+          <div class="card-hint" id="hist-hint">按 10% 分档统计标的数量，柱色对应下方七档评级</div>
         </div>
-        <div class="card-pad"><div id="dist-chart"></div></div>
+        <div class="card-pad">
+          <div id="dist-chart"></div>
+          <div class="meta-strip" style="margin-top:6px">
+            <span id="market-legend"></span>
+          </div>
+        </div>
       </div>
 
       <div class="card">
         <div class="card-head">
           <div class="card-title">七档评级分布</div>
+          <div class="card-hint">点击任一档可只看该档标的</div>
         </div>
         <div class="card-pad"><div class="level-list" id="level-list"></div></div>
       </div>
@@ -188,6 +209,8 @@
       </div>
     </section>
   </main>
+
+  {% include "_footer.html" %}
 
   <script src="/static/common.js"></script>
   <script src="/static/market.js"></script>

@@ -346,6 +346,11 @@
     renderIndicatorTabs(data);
     renderDetailTable(data);
     renderTrendChart();
+
+    var legendBox = document.getElementById("metric-legend");
+    if (legendBox) {
+      legendBox.innerHTML = SL.levelLegend();
+    }
   }
 
   /**
@@ -642,23 +647,6 @@
     analyze();
   }
 
-  /**
-   * 拉取健康检查，点亮顶栏状态
-   */
-  function checkHealth() {
-    var dot = document.getElementById("status-dot");
-    var text = document.getElementById("status-text");
-    SL.fetchJson("/api/health", 6000)
-      .then(function (data) {
-        dot.className = "status-dot ok";
-        text.textContent = "服务正常 · " + data.priority;
-      })
-      .catch(function () {
-        dot.className = "status-dot bad";
-        text.textContent = "服务不可用";
-      });
-  }
-
   // 事件绑定（普通函数引用，不用装饰器式写法）
   codeInput.addEventListener("input", requestSuggest);
   codeInput.addEventListener("keydown", onCodeKeydown);
@@ -689,6 +677,6 @@
     }
   });
 
-  checkHealth();
+  SL.checkHealth();
   restoreFromUrl();
 })();

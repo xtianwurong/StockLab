@@ -1,0 +1,22 @@
+{# 共享顶栏：调用前先 set active_page = "analysis" | "market" | "indices" | "industries" #}
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark">S</span>StockLab</a>
+  <nav class="nav">
+    <a class="nav-link{{ ' active' if active_page == 'analysis' else '' }}" href="/">
+      <span class="nav-idx">01</span>个股分析
+    </a>
+    <a class="nav-link{{ ' active' if active_page == 'market' else '' }}" href="/market">
+      <span class="nav-idx">02</span>全市场
+    </a>
+    <a class="nav-link{{ ' active' if active_page == 'indices' else '' }}" href="/indices">
+      <span class="nav-idx">03</span>指数估值
+    </a>
+    <a class="nav-link{{ ' active' if active_page == 'industries' else '' }}" href="/industries">
+      <span class="nav-idx">04</span>行业估值
+    </a>
+  </nav>
+  <div class="topbar-right">
+    <span id="data-as-of" class="hidden"></span>
+    <span><span class="status-dot" id="status-dot"></span><span id="status-text">检测中</span></span>
+  </div>
+</header>

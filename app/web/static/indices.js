@@ -265,24 +265,7 @@
     }
   });
 
-  /**
-   * 拉取健康检查，点亮顶栏状态
-   */
-  function checkHealth() {
-    var dot = document.getElementById("status-dot");
-    var text = document.getElementById("status-text");
-    SL.fetchJson("/api/health", 6000)
-      .then(function (data) {
-        dot.className = "status-dot ok";
-        text.textContent = "服务正常 · " + data.priority;
-      })
-      .catch(function () {
-        dot.className = "status-dot bad";
-        text.textContent = "服务不可用";
-      });
-  }
-
-  checkHealth();
+  SL.checkHealth();
   renderTabs();
   loadList();
 })();
