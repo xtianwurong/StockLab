@@ -25,6 +25,7 @@ from .contract import (
     check_columns,
     require_columns,
 )
+from .disclosure import ANNOUNCEMENT_COLUMNS
 from .fundamental import (
     BALANCE_SHEET_COLUMNS,
     CASHFLOW_STATEMENT_COLUMNS,
@@ -68,4 +69,5 @@ __all__ = [
     "FINANCIAL_INDICATOR_COLUMNS",
     "SNAPSHOT_COLUMNS",
     "SNAPSHOT_RESULT_COLUMNS",
+    "ANNOUNCEMENT_COLUMNS",
 ]

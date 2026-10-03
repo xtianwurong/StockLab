@@ -173,12 +173,13 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - `stocklab/common`：无业务依赖的通用工具（配置解析、类型转换、HTTP 全局配置）。
   - `http_client.py`：浏览器 UA 补丁，**由入口脚本显式调用**，导入本包不产生任何全局副作用。
 - `stocklab/datasource`：**只负责对外取数**，不感知本地存储。内部按用途分三块：
-  - **分析/行情取数**（单股维度、三级降级）：`quote_service.py`（`StockQuoteService`：月线价格 / PE-TTM / 简称 / 实时行情；价格通道 AkShare → BaoStock → 腾讯，估值通道 AkShare → BaoStock）→ `_sources/`（三个通道的私有实现，外部勿依赖）。
+  - **分析/行情取数**（单股维度、五级降级）：`quote_service.py`（`StockQuoteService`：月线价格 / PE-TTM / 简称 / 实时行情；价格通道 AkShare → BaoStock → 腾讯 → 新浪 → 通达信，估值通道 AkShare → BaoStock，实时通道 腾讯 → 新浪 → 通达信，简称通道 腾讯 → AkShare → BaoStock）→ `_sources/`（五个通道的私有实现，外部勿依赖）。
   - **入库取数**（多粒度、单源直连）：`market_service.py`（`MarketService`：7 个 `fetch_*` 方法与 7 张库表一一对应，输出**领域契约列**（`stocklab.domain`）而非「与表同序的 DataFrame」；粒度含全市场快照 / 单股序列 / 行业横截面 / 指数成分四种，直连各 akshare 接口（自带重试与限流），**不做通道降级**。归一化一律委托 `stocklab.normalization`，源表缺列时抛 `DataContractError` 并返回空表（绝不产出缺列帧）。调用方仅两个：`app/scripts/sync_market_data.py` 与 facade 远端分支（Cache-Aside 回写本地库）。
   - **逐只深度取数**：`fundamental_service.py`（`FundamentalService`：东财三大报表 + 财务指标，单只约 60 次请求，按报告期分批）、`lifecycle_service.py`（`LifecycleService`：沪深北上市日历与退市日历，只读交易所官网）。两者同样经 `stocklab.normalization` 产出契约帧，只被 `sync_market_data.py` 调用。
   - **公共基础**：
     - `data_contract.py`：行情数据契约（3 个列名常量 + `StockRealtimeQuote`），`quote_service` 与 `_sources` 共用；单独成文件是为避免「通道 import 服务、服务又 import 通道」的循环导入（类比 C++ 只含 struct + constexpr 的公共头文件）。
     - `tencent_client.py`：腾讯 HTTP 传输网关（`TencentMarketClient` + `normalize_symbol`），抹平股票/ETF/指数代码差异，提供 K 线 / 简称 / 盘口原始字段与多标的**并发**抓取。独立于 `_sources` 之外的原因：能力超出单股 `StockDataSource` 契约（ETF/指数 + 并发），且被两个上层独立复用——`_sources/tencent_source`（单股降级第三级）与 `facade.fetch_multi_monthly_close`（dashboard 板块走势 10 标的并发月线），故置于通道之下单独一层。
+    - `cninfo_client.py`：巨潮资讯公告 Gateway（独立于行情链路），提供 `resolve_org_id()`、`get_announcements()`、`fetch_announcements()`，支持分页 / UTC+8 日期 / PDF 拼接 / 去重；**不继承 StockDataSource**。
 - `stocklab/domain`：**列契约层（叶子包）**，只放「列名 + 列序元组」与 `DataContractError`，
   被 `datasource`、`persistence`、`normalization` 共同引用，自己不依赖任何 StockLab 包。
   - `contract.py`：`check_columns` / `require_columns` / `align_columns`（缺列抛异常、多余列丢弃并告警、按契约重排）。
@@ -298,11 +299,13 @@ StockLab/
 │   │   ├── fundamental_service.py        #     【逐只基本面】FundamentalService：东财三大报表（单只约 60 次请求）
 │   │   ├── lifecycle_service.py          #     【生命周期】LifecycleService：沪深北上市日历 + 退市日历
 │   │   └── _sources/                   #     单股通道实现包（下划线前缀 = 私有，外部勿依赖）
-│   │       ├── __init__.py             #       导出抽象基类与三个通道实现
+│   │       ├── __init__.py             #       导出抽象基类与五个通道实现
 │   │       ├── base.py                 #       StockDataSource 抽象基类（纯虚接口 + 标准化/降采样工具）
 │   │       ├── akshare_source.py       #       东方财富主通道（akshare，含重试与列名防御）
 │   │       ├── baostock_source.py      #       证券宝备用通道（专有 Socket + login/logout 会话管理）
-│   │       └── tencent_source.py       #       腾讯直连通道（实时行情/简称/备用日线降采样）
+│   │       ├── tencent_source.py       #       腾讯直连通道（实时行情/简称/备用日线降采样）
+│   │       ├── sina_source.py          #       新浪财经通道（实时/月线/qfq+hfq，HTTPS+Referer+GBK，约 4 年日线）
+│   │       └── tdx_source.py           #       通达信通道（tdxdata 新协议，category=6 月线，market=2 北交所，仅不复权）
 │   ├── domain/                         #   列契约层（叶子包，零 StockLab 依赖）
 │   │   ├── __init__.py                 #     导出契约元组、状态/事件枚举与 DataContractError
 │   │   ├── contract.py                 #     check_columns / require_columns / align_columns（缺列即拒绝）
@@ -419,7 +422,7 @@ StockLab/
 │       ├── verify_market_sql.py       #     抽样校验：全市场分位 SQL 与 analyzer 口径一致（退出码可进 CI）
 │       ├── analyze_pe_distribution.py #     命令行入口：全市场市盈率分布统计
 │       └── analyze_valuation_percentile.py # 命令行入口：个股历史估值分位计算
-├── tests/                              # ── 自检脚本 ──
+├── tests/                              # ── 自检脚本（纯 assert，**无 pytest**，统一用 `./venv/bin/python tests/test_xxx.py` 运行）──
 │   ├── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成）
 │   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样）
 │   ├── test_migrations.py              #     迁移自检（新库 / 幂等 / 老库升级 / 失败不记版本 / 序号重复）
@@ -428,7 +431,12 @@ StockLab/
 │   ├── test_screener.py                #     选股器自检（操作符 / AND·OR 嵌套 / 缺失值 / 预处理生效 / spec 往返）
 │   ├── test_research_snapshot.py       #     研究快照自检（PIT 帧 / 筛选 / 快照写入 / 复现比对 / 空库），全部用临时库
 │   ├── test_backtest.py                #     回测自检（成本 / T+1 / 指标手算 / 幸存者安全 / 撮合与拒绝理由 / 非法输入）
-│   └── test_pit_universe.py            #     PIT 与股票池自检（未来泄漏 / 幸存者偏差 / 指标派生）
+│   ├── test_pit_universe.py            #     PIT 与股票池自检（未来泄漏 / 幸存者偏差 / 指标派生）
+│   ├── test_sina_source.py             #     新浪通道自检（符号转换 / JSONP / 实时 / 简称 / 月线复权 / 8 组异常），离线 fixture
+│   ├── test_tdx_source.py              #     通达信通道自检（市场编号 / 月线 category / 实时量额 / 6 组失败 / 简称空串），注入 fake client
+│   ├── test_cninfo_client.py           #     巨潮客户端自检（解析 / 分页 / orgId缓存+精确匹配 / 去重 / 5 组网络异常），离线 fixture
+│   ├── test_announcements.py           #     公告持久化与同步自检（迁移005 / Repo / 水位 / 过滤 / 去重 / 逐只 / 幂等），临时库
+│   └── live_check_sources.py           #     手工联网验证（实时/月线/公告/交叉校验，**不进 CI**，退出码 0/1）
 ├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
 │   └── stocklab.duckdb                 #     本地 DuckDB 单文件数据库
 ├── output/                             # ── 同上 ──

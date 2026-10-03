@@ -572,7 +572,7 @@ def run_empty_database_test():
         versions = conn.execute(
             "SELECT version FROM sys.schema_version ORDER BY version"
         ).fetchall()
-        assert [version for version, in versions] == [1, 2, 3, 4]
+        assert [version for version, in versions] == [1, 2, 3, 4, 5]
         print("  -> 迁移 004 已应用（research 两表 + 版本 1/2/3/4）")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

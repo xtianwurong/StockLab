@@ -9,6 +9,8 @@ StockLab 数据源通道实现包 (stocklab.datasource._sources)
 from .akshare_source import AkShareDataSource
 from .baostock_source import BaoStockDataSource
 from .base import StockDataSource
+from .sina_source import SinaDataSource
+from .tdx_source import TdxDataSource
 from .tencent_source import TencentDataSource
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "AkShareDataSource",
     "BaoStockDataSource",
     "TencentDataSource",
+    "SinaDataSource",
+    "TdxDataSource",
 ]

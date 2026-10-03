@@ -17,6 +17,10 @@ pandas==3.0.6
 # 腾讯直连 HTTP（实时行情 / 公司名称 / 板块 K 线）
 requests==2.34.2
 
+# 通达信公开行情服务器客户端（2026-09 新协议；行情链路第 5 级兜底）
+# 选型依据见 docs/DATA_SOURCES.md：老 pytdx 协议已被服务端拒绝，pytdx3 未发布到 PyPI
+tdxdata==0.1.1
+
 # 本地分析型数据仓库
 duckdb==1.4.3
 

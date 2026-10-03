@@ -6,11 +6,11 @@ StockLab - A 股市场数据同步 CLI (app/scripts/sync_market_data.py)
 
 【功能用途】
    独立的数据同步入口，负责将全市场 A 股数据从公开数据源同步到本地 DuckDB。
-   八个阶段通过子命令分开操作；不带子命令一键全跑阶段一 / 二 / 三 / 五 / 七，
-   阶段四（历史估值）、六（行业估值）、八（基本面）按需显式触发。
+   九个阶段通过子命令分开操作；不带子命令一键全跑阶段一 / 二 / 三 / 五 / 七，
+   阶段四（历史估值）、六（行业估值）、八（基本面）、九（公告）按需显式触发。
 
 【运行方式】
-   # 一键全跑（阶段一 -> 二 -> 三 -> 五 -> 七；四 / 六 / 八需显式子命令）
+   # 一键全跑（阶段一 -> 二 -> 三 -> 五 -> 七；四 / 六 / 八 / 九需显式子命令）
    python app/scripts/sync_market_data.py --start-date 2025-01-01 --end-date 2026-09-30
    python app/scripts/sync_market_data.py --incremental
 
@@ -39,12 +39,18 @@ StockLab - A 股市场数据同步 CLI (app/scripts/sync_market_data.py)
    # 阶段八：同步 Point-in-Time 基本面（三大报表 + 财务指标，耗时较长）
    python app/scripts/sync_market_data.py fundamentals --ts-code 600519.SH
    python app/scripts/sync_market_data.py fundamentals --workers 8
+
+   # 阶段九：同步巨潮公告索引（增量；不参与一键全跑）
+   python app/scripts/sync_market_data.py announcements --ts-code 600519.SH --start-date 2026-01-01
+   python app/scripts/sync_market_data.py announcements --start-date 2015-01-01   # 首次初始化（耗时长）
+   python app/scripts/sync_market_data.py announcements                            # 增量（自动取水位）
 """
 
 import argparse
 import logging
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -54,12 +60,14 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from stocklab.common.http_client import install_browser_user_agent
+from stocklab.datasource.cninfo_client import CninfoClient
 from stocklab.datasource.fundamental_service import FundamentalService
 from stocklab.datasource.lifecycle_service import LifecycleService
 from stocklab.datasource.market_service import MarketService
 from stocklab.fundamental import build_financial_indicators
 from stocklab.normalization.exchange import build_lifecycle_events, merge_lifecycle
 from stocklab.persistence import (
+    AnnouncementRepository,
     BalanceSheetRepository,
     CashflowStatementRepository,
     DailyPriceRepository,
@@ -108,7 +116,8 @@ def parse_args():
             "  indexes             阶段五：同步主流宽基指数成分（同业分组维度；约 6 次请求，数秒）\n"
             "  industries          阶段六：同步行业估值横截面（板块洼地判断依据；默认不参与全跑）\n"
             "  lifecycle           阶段七：同步证券生命周期（上市/退市日历 -> status 与事件）\n"
-            "  fundamentals        阶段八：同步 Point-in-Time 基本面（逐只抓取；默认不参与全跑）"
+            "  fundamentals        阶段八：同步 Point-in-Time 基本面（逐只抓取；默认不参与全跑）\n"
+            "  announcements       阶段九：同步巨潮公告索引（增量；默认不参与全跑）"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -118,6 +127,7 @@ def parse_args():
         choices=[
             "securities", "prices", "valuations", "valuation-history",
             "indexes", "industries", "lifecycle", "fundamentals",
+            "announcements",
         ],
         default=None,
         help="要执行的同步阶段（不传则按顺序全跑）",
@@ -150,13 +160,13 @@ def parse_args():
         "--ts-code",
         type=str,
         default=None,
-        help="fundamentals 阶段限定的证券代码，逗号分隔（如 600519.SH,000001.SZ）；缺省为全市场",
+        help="fundamentals / announcements 阶段限定的证券代码，逗号分隔（如 600519.SH,000001.SZ）；缺省为全市场",
     )
     parser.add_argument(
         "--start-date",
         type=str,
         default=None,
-        help="同步起始日期，格式 YYYY-MM-DD（默认近 30 天）",
+        help="同步起始日期，格式 YYYY-MM-DD（价格阶段默认近 30 天；公告阶段为空时取表内水位）",
     )
     parser.add_argument(
         "--end-date",
@@ -619,6 +629,131 @@ def sync_fundamentals(database, ts_code_list=None, max_workers=8):
     return True
 
 
+# 公告翻页与逐股之间的固定等待秒数（限流；禁止高并发压测）
+_ANNOUNCEMENT_SLEEP_SECONDS = 0.8
+
+
+def _filter_a_share_universe(frame, database):
+    """全市场模式下剔除非 A 股标的（债券/基金/ETF/B 股等以股票代码形态混入的公告）"""
+    if frame is None or frame.empty:
+        return frame
+    conn = database.get_connection()
+    rows = conn.execute("SELECT ts_code FROM reference.securities").fetchall()
+    universe = {row[0] for row in rows}
+    filtered = frame[frame["ts_code"].isin(universe)]
+    dropped = len(frame) - len(filtered)
+    if dropped:
+        _logger.info("剔除不在 A 股股票池内的公告 %d 条", dropped)
+    return filtered
+
+
+def _write_announcements(repository, frame, existing_keys):
+    """
+    公告落库：补齐抓取元数据 -> 跨 announcement_id 二次去重 -> 只插入
+
+    Returns:
+        int: 实际提交写入的行数
+    """
+    if frame is None or frame.empty:
+        return 0
+
+    frame = frame.copy()
+    # DuckDB DATE 列统一收口为 datetime.date（避免 dtype 漂移导致类型不匹配）
+    frame["announcement_date"] = pd.to_datetime(frame["announcement_date"]).dt.date
+    frame["crawl_time"] = datetime.now()
+    frame["content_hash"] = None  # 预留：PDF 正文哈希（第二阶段能力）
+
+    keep_mask = [
+        (ts_code, day, title) not in existing_keys
+        for ts_code, day, title in zip(
+            frame["ts_code"], frame["announcement_date"], frame["title"]
+        )
+    ]
+    duplicate_count = len(frame) - sum(keep_mask)
+    if duplicate_count:
+        _logger.info("跨 announcement_id 的同内容公告去重 %d 条", duplicate_count)
+        frame = frame[keep_mask]
+        if frame.empty:
+            return 0
+
+    written = repository.insert(frame)
+    for ts_code, day, title in zip(
+        frame["ts_code"], frame["announcement_date"], frame["title"]
+    ):
+        existing_keys.add((ts_code, day, title))
+    return written
+
+
+def sync_announcements(database, start_date=None, end_date=None, ts_codes=None,
+                       client=None):
+    """
+    阶段九：同步巨潮公告索引（corporate.announcements；不参与一键全跑）
+
+    【增量策略（需求 §49 / §51）】
+      - 未指定 --start-date 时取表内水位 MAX(announcement_date) 作为起点；
+      - 表为空时拒绝执行，必须显式给出起始日期（如 2015-01-01），
+        禁止默认从远古日期无限回溯；
+      - 全市场模式按日期区间翻页抓取（适合日常增量），--ts-code 指定时
+        逐只抓取（每只都走 orgId 精确查询）。
+
+    Args:
+        client: 公告客户端（默认 CninfoClient；测试注入离线桩）
+
+    Returns:
+        bool: 是否成功
+    """
+    _logger.info("=" * 60)
+    _logger.info("阶段九：同步巨潮公告索引")
+    _logger.info("=" * 60)
+
+    repository = AnnouncementRepository(database)
+    if client is None:
+        client = CninfoClient(sleep_seconds=_ANNOUNCEMENT_SLEEP_SECONDS)
+
+    end = end_date or datetime.now().strftime("%Y-%m-%d")
+    if start_date:
+        start = start_date
+    else:
+        watermark = repository.latest_date()
+        if watermark is None:
+            _logger.error(
+                "公告表为空：首次同步必须用 --start-date 指定起始日期"
+                "（如 2015-01-01），禁止默认无限回溯"
+            )
+            return False
+        start = watermark.strftime("%Y-%m-%d")
+
+    if start > end:
+        _logger.error("起始日期 %s 晚于结束日期 %s", start, end)
+        return False
+
+    existing_keys = repository.existing_keys(start, end)
+    _logger.info(
+        "同步区间 %s ~ %s | 区间内已有 %d 条（将做二次去重）", start, end, len(existing_keys)
+    )
+
+    written_total = 0
+    if ts_codes:
+        # 逐只模式：走 orgId 精确查询，适合定点补齐
+        targets = [str(code).strip() for code in ts_codes if str(code).strip()]
+        for index, ts_code in enumerate(targets):
+            frame = client.fetch_announcements(ts_code, start, end, max_pages=1000)
+            written = _write_announcements(repository, frame, existing_keys)
+            written_total += written
+            _logger.info(
+                "进度 %d/%d | %s 新增 %d 条", index + 1, len(targets), ts_code, written
+            )
+            time.sleep(_ANNOUNCEMENT_SLEEP_SECONDS)
+    else:
+        # 全市场模式：按日期区间翻页抓取（不传 stock 参数）
+        frame = client.fetch_announcements(None, start, end, max_pages=10000)
+        frame = _filter_a_share_universe(frame, database)
+        written_total = _write_announcements(repository, frame, existing_keys)
+
+    _logger.info("公告同步完成: 新增 %d 条", written_total)
+    return True
+
+
 def run_prices_stage(args, database):
     """执行阶段二：确定日期范围并同步日 K 行情，返回是否成功"""
     start_date, end_date, skip = resolve_price_dates(args, database)
@@ -716,6 +851,18 @@ def main():
                 ]
             if not sync_fundamentals(database, ts_codes, max_workers=args.workers):
                 _logger.error("基本面同步失败")
+                sys.exit(1)
+            return
+
+        # 阶段九：同步公告索引（默认不参与一键全跑：区间翻页抓取，需显式触发）
+        if command == "announcements":
+            ts_codes = None
+            if args.ts_code:
+                ts_codes = [
+                    item.strip() for item in args.ts_code.split(",") if item.strip()
+                ]
+            if not sync_announcements(database, args.start_date, args.end_date, ts_codes):
+                _logger.error("公告索引同步失败")
                 sys.exit(1)
             return
 

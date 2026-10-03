@@ -10,6 +10,7 @@ StockLab 数据访问层 (stocklab.persistence.repository)
    不依赖 DataFrame 列序（见 V2 需求 §4.3）。
 """
 
+from .announcement import AnnouncementRepository
 from .base import BaseRepository
 from .daily_price import DailyPriceRepository
 from .daily_valuation import DailyValuationRepository
@@ -28,6 +29,7 @@ from .valuation_history import ValuationHistoryRepository
 
 __all__ = [
     "BaseRepository",
+    "AnnouncementRepository",
     "SecurityRepository",
     "SecurityEventRepository",
     "DailyPriceRepository",

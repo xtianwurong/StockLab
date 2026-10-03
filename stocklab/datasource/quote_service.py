@@ -42,6 +42,8 @@ import pandas as pd
 from stocklab.datasource._sources import (
     AkShareDataSource,
     BaoStockDataSource,
+    SinaDataSource,
+    TdxDataSource,
     TencentDataSource,
 )
 from stocklab.datasource.data_contract import (
@@ -119,19 +121,23 @@ class StockQuoteService:
     股票市场数据服务类 (Market Data Service)
 
     【职责划分】
-      统筹调度 AkShare、BaoStock 与 腾讯财经 三大数据源通道：
-        1. 价格通道三级降级：优先主源 AkShare -> 降级 BaoStock -> 降级腾讯财经（近 3 年日线重采样）。
+      统筹调度五个异构数据源通道：
+        1. 价格通道五级降级：主源 AkShare -> BaoStock -> 腾讯财经（近 3 年日线重采样）
+           -> 新浪（日线重采样，约 4 年）-> 通达信（不复权月线，最后兜底）。
         2. PE 估值通道独立降级：AkShare（百度股市通）-> 降级 BaoStock（日线重采样）。
-        3. 公司简称查询优化：优先直连腾讯（最轻最快，<100ms 且无风控）-> 降级 AkShare -> 降级 BaoStock。
-        4. 实时盘口行情直通：直连腾讯获取最新现价、涨跌幅、量比、换手率、动态 PE/PB 及市值。
+        3. 公司简称查询优化：优先直连腾讯（最轻最快，<100ms 且无风控）-> 降级 AkShare -> 降级 BaoStock
+           （新浪 / 通达信不加入简称主链，避免行为变化）。
+        4. 实时盘口行情三级降级：腾讯 -> 新浪 -> 通达信。
         5. 状态追踪：记录价格生效源标识 `used_source_name`，供上层日志展示。
     """
 
     def __init__(self):
-        # 实例化三大异构数据源
+        # 实例化五个异构数据源（TdxDataSource 构造不建立连接，取数时才短连接）
         self._akshare_source = AkShareDataSource()
         self._baostock_source = BaoStockDataSource()
         self._tencent_source = TencentDataSource()
+        self._sina_source = SinaDataSource()
+        self._tdx_source = TdxDataSource()
         # 记录本次价格查询实际命中并生效的数据源名称
         self.used_source_name = ""
 
@@ -187,8 +193,36 @@ class StockQuoteService:
             self.used_source_name = self._tencent_source.SOURCE_NAME
             return price_data
 
+        _logger.info(
+            "备用数据源 2 %s 不可用，切换备用数据源 3: %s",
+            self._tencent_source.SOURCE_NAME,
+            self._sina_source.SOURCE_NAME,
+        )
+
+        # 4. 自动降级尝试备用数据源 3: 新浪财经 (约 4 年日线降采样，独立上游)
+        price_data = self._sina_source.fetch_monthly_close_prices(
+            stock_code, adjust_type
+        )
+        if not price_data.empty:
+            self.used_source_name = self._sina_source.SOURCE_NAME
+            return price_data
+
+        _logger.info(
+            "备用数据源 3 %s 不可用，切换备用数据源 4: %s",
+            self._sina_source.SOURCE_NAME,
+            self._tdx_source.SOURCE_NAME,
+        )
+
+        # 5. 最后兜底: 通达信公开行情服务器 (仅不复权月线；无复权因子能力)
+        price_data = self._tdx_source.fetch_monthly_close_prices(
+            stock_code, adjust_type
+        )
+        if not price_data.empty:
+            self.used_source_name = self._tdx_source.SOURCE_NAME
+            return price_data
+
         _logger.error(
-            "三个数据源均获取失败。建议：检查 VPN/代理软件；稍后重试；或检查网络连接"
+            "五个数据源均获取失败。建议：检查 VPN/代理软件；稍后重试；或检查网络连接"
         )
         return pd.DataFrame()
 
@@ -252,11 +286,15 @@ class StockQuoteService:
 
     def fetch_realtime_quote(self, stock_code):
         """
-        统一获取单只股票的实时行情快照
+        统一获取单只股票的实时行情快照（三级降级：腾讯 -> 新浪 -> 通达信）
 
         【设计说明】
-          利用腾讯财经极速行情通道，单次请求即可获取最新成交价、昨收、今开、
-          涨跌幅、盘口五档、成交量/额、换手率、动态 PE/PB 及市值。
+          1. 首选腾讯财经极速通道，单次请求即可获取最新成交价、昨收、今开、
+             涨跌幅、盘口五档、成交量/额、换手率、动态 PE/PB 及市值；
+          2. 腾讯失败时降级新浪（需 HTTPS + Referer，只提供价格/量额核心字段，
+             换手率与 PE/PB/市值保持默认值）；
+          3. 再失败降级通达信（TCP 直连，同样只提供核心字段）；
+          4. 全部失败返回 None（保持既有行为，不返回错误默认数据）。
 
         Args:
             stock_code (str): 标准股票代码，如 "000001.SZ", "600519.SH"
@@ -265,6 +303,24 @@ class StockQuoteService:
             StockRealtimeQuote | None: 填充后的实时行情对象；获取失败返回 None
         """
         quote = self._tencent_source.fetch_realtime_quote(stock_code)
+        if quote is not None:
+            return quote
+
+        _logger.info(
+            "腾讯实时行情不可用，降级尝试 %s: %s",
+            self._sina_source.SOURCE_NAME,
+            stock_code,
+        )
+        quote = self._sina_source.fetch_realtime_quote(stock_code)
+        if quote is not None:
+            return quote
+
+        _logger.info(
+            "新浪实时行情不可用，降级尝试 %s: %s",
+            self._tdx_source.SOURCE_NAME,
+            stock_code,
+        )
+        quote = self._tdx_source.fetch_realtime_quote(stock_code)
         if quote is not None:
             return quote
 
