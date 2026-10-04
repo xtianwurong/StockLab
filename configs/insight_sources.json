@@ -1,0 +1,102 @@
+{
+  "_README": [
+    "投资人观点采集登记表（stocklab.domain.insight 的 investors + investor_accounts 源数据）。",
+    "由 app/scripts/sync_investor_insight.py --load-sources 载入数据库（只插入，不更新）。",
+    "",
+    "【account_uid 必须自己确认，不要照抄网上的二手信息】",
+    "  平台用户 ID 是抓取的必要参数，写错了会抓到别人的内容，而页面上",
+    "  看起来完全正常 —— 这是本域最危险的错误类型。",
+    "  确认方法：浏览器打开该账号主页，URL 里的最后一个数字就是 UID。",
+    "    雪球 https://xueqiu.com/u/<UID>",
+    "    股吧 https://guba.eastmoney.com/user/<UID>",
+    "  本文件里留空的 UID 会让采集器在同步时报「缺少 account_uid」并跳过，",
+    "  这是有意为之：宁可明确报错，也不要抓一个看起来很像的账号。",
+    "",
+    "【is_enabled = false 的含义】",
+    "  平台账号被封/改名/需要重新找 UID 时，把它改成 false，",
+    "  同步会跳过但保留历史数据。不要直接删行 —— 账号表是历史记录。",
+    "",
+    "【凭证不在这里配】",
+    "  登录态（雪球 cookie）走环境变量 STOCKLAB_XUEQIU_COOKIE，",
+    "  原因见 stocklab/datasource/insight/base.py 的 require_credentials。"
+  ],
+
+  "investors": [
+    {
+      "investor_code": "dyp_0001",
+      "name": "段永平",
+      "aliases": ["大道无形我有型", "苹果公司", "雪球用户1240335488"],
+      "role": "投资人（原网易高管，现个人投资者）",
+      "organization": null,
+      "style_tags": ["value"],
+      "profile_url": "https://xueqiu.com/u/1240335488",
+      "is_active": true,
+      "_note": [
+        "国内唯一可长期、公开、可溯源表达完整价值投资方法论的一手来源。",
+        "他的雪球发言是本库 verification 有机会升到 verified 的主要依据。"
+      ]
+    },
+    {
+      "investor_code": "linyuan_0001",
+      "name": "林园",
+      "aliases": ["林园投资", "林园"],
+      "role": "私募基金经理",
+      "organization": "深圳市林园投资管理有限公司",
+      "style_tags": ["value", "macro"],
+      "profile_url": null,
+      "is_active": true,
+      "_note": [
+        "网上流传的「林园语录」绝大多数无法溯源到访谈原文，",
+        "请优先走 manual 通道录入访谈/电视节目的原始出处，不要抓股吧。",
+        "profile_url 留空表示「暂无可确认的公开主页」，不是「没有」。"
+      ]
+    },
+    {
+      "investor_code": "danbin_0001",
+      "name": "但斌",
+      "aliases": ["但斌", "东方港湾"],
+      "role": "私募基金经理",
+      "organization": "上海东方港湾管理股份有限公司",
+      "style_tags": ["growth", "value_growth", "macro"],
+      "profile_url": null,
+      "is_active": true,
+      "_note": [
+        "但斌的公开表达主要在微博与私募路演。微博抓取未实现（见 collectors.py 注册表）。",
+        "网上「但斌语录」的伪造/张冠李戴案例极多，一律先按 unverified 处理。"
+      ]
+    }
+  ],
+
+  "accounts": [
+    {
+      "account_id": "xueqiu:dyp-1240335488",
+      "investor_code": "dyp_0001",
+      "platform": "xueqiu",
+      "account_name": "大道无形我有型",
+      "account_uid": "1240335488",
+      "home_url": "https://xueqiu.com/u/1240335488",
+      "is_enabled": true,
+      "note": "雪球 UID 为公开常识性信息；若同步结果异常先核对此处"
+    },
+    {
+      "account_id": "guba:linyuan",
+      "investor_code": "linyuan_0001",
+      "platform": "guba",
+      "account_name": "林园投资",
+      "account_uid": null,
+      "home_url": null,
+      "is_enabled": false,
+      "note": "未确认股吧 UID，先禁用。确认后填 account_uid 并置 is_enabled=true"
+    },
+    {
+      "account_id": "guba:danbin",
+      "investor_code": "danbin_0001",
+      "platform": "guba",
+      "account_name": "但斌",
+      "account_uid": null,
+      "home_url": null,
+      "is_enabled": false,
+      "note": "同上；且需人工确认该股吧号确为本人（股吧认证可被伪造）"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ StockLab 领域契约包 (stocklab.domain)
    - valuation       估值：daily_valuations / valuation_history / industry_valuations
    - fundamental     基本面（Point-in-Time）：三表 + 财务指标
    - research        研究快照：snapshots / snapshot_results
+   - insight         投资人观点：investors / investor_accounts / investor_quotes
 
 【使用约定】
    - Repository 写入前一律 align_columns(frame, 契约, 表名)，INSERT 显式列出列名；
@@ -26,6 +27,17 @@ from .contract import (
     require_columns,
 )
 from .disclosure import ANNOUNCEMENT_COLUMNS
+from .insight import (
+    INVESTOR_ACCOUNT_COLUMNS,
+    INVESTOR_COLUMNS,
+    INVESTOR_QUOTE_COLUMNS,
+    INVESTOR_STYLES,
+    PLATFORMS,
+    QUOTE_TYPES,
+    VERIFICATION_STATUSES,
+    decode_raw_meta,
+    dumps_raw_meta,
+)
 from .fundamental import (
     BALANCE_SHEET_COLUMNS,
     CASHFLOW_STATEMENT_COLUMNS,
@@ -70,4 +82,13 @@ __all__ = [
     "SNAPSHOT_COLUMNS",
     "SNAPSHOT_RESULT_COLUMNS",
     "ANNOUNCEMENT_COLUMNS",
+    "INVESTOR_COLUMNS",
+    "INVESTOR_ACCOUNT_COLUMNS",
+    "INVESTOR_QUOTE_COLUMNS",
+    "PLATFORMS",
+    "QUOTE_TYPES",
+    "VERIFICATION_STATUSES",
+    "dumps_raw_meta",
+    "decode_raw_meta",
+    "INVESTOR_STYLES",
 ]

@@ -22,6 +22,11 @@ from .fundamental import (
 )
 from .index_membership import IndexMembershipRepository
 from .industry_valuation import IndustryValuationRepository
+from .insight import (
+    InvestorAccountRepository,
+    InvestorQuoteRepository,
+    InvestorRepository,
+)
 from .research_snapshot import ResearchSnapshotRepository, SnapshotResultRepository
 from .security import SecurityRepository
 from .security_event import SecurityEventRepository
@@ -43,4 +48,7 @@ __all__ = [
     "BalanceSheetRepository",
     "CashflowStatementRepository",
     "FinancialIndicatorRepository",
+    "InvestorRepository",
+    "InvestorAccountRepository",
+    "InvestorQuoteRepository",
 ]

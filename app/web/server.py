@@ -17,6 +17,7 @@ StockLab - Web 服务装配模块 (app.web.server)
   /screener                      选股器页面（模板渲染）
   /compare                       多股对比页面（模板渲染）
   /portfolio                     组合监控页面（自选股 + 分位阈值告警，模板渲染）
+  /insight                       投资人观点页面（投资理念 / 宏观判断学习，模板渲染）
   /favicon.ico                   站点图标（消除每页 404 噪音）
   /static/*                      本地静态资源（含 vendored ECharts，离线可用）
   /api/health                    健康检查
@@ -30,6 +31,10 @@ StockLab - Web 服务装配模块 (app.web.server)
   /api/screener/run              选股器执行（POST {spec, as_of, sort, order, limit}）
   /api/compare?codes=            多股对比（2~10 只 × 5 指标分位 + 对齐后的估值走势）
   /api/market/ranking?codes=     全市场排行（codes 参数支持精确指定自选股列表）
+  /api/insight/meta              投资人观点元数据（筛选枚举 / 核验状态分布）
+  /api/insight/quotes?...        投资人言论多维筛选（keyword / 投资人 / 平台 /
+                                 类型 / 主题 / 核验状态 / 标的 / 时间）
+  /api/insight/investor?code=    单个投资人档案（生平 + 账号 + 观点时间线）
   ==============================================================================
 """
 
@@ -40,6 +45,7 @@ from flask import Flask
 
 from app.web import api
 from app.web import compare_api
+from app.web import insight_api
 from app.web import market_api
 from app.web import screener_api
 
@@ -88,6 +94,9 @@ def create_app(priority=None, db_path=None):
     app.add_url_rule(
         "/portfolio", "portfolio", api.handle_portfolio_page, methods=["GET"]
     )
+    app.add_url_rule(
+        "/insight", "insight", insight_api.handle_insight_page, methods=["GET"]
+    )
     app.add_url_rule("/favicon.ico", "favicon", api.handle_favicon, methods=["GET"])
 
     # 数据接口
@@ -133,10 +142,30 @@ def create_app(priority=None, db_path=None):
         compare_api.handle_compare,
         methods=["GET"],
     )
+    app.add_url_rule(
+        "/api/insight/meta",
+        "insight_meta",
+        insight_api.handle_insight_meta,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/insight/quotes",
+        "insight_quotes",
+        insight_api.handle_insight_quotes,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/insight/investor",
+        "insight_investor",
+        insight_api.handle_insight_investor,
+        methods=["GET"],
+    )
 
     # 错误兜底
     app.register_error_handler(404, api.handle_not_found)
     app.register_error_handler(500, api.handle_internal_error)
 
-    _logger.info("Flask 应用已创建，路由 18 条（页面 7 + 接口 10 + 图标 1）")
+    _logger.info(
+        "Flask 应用已创建，路由 22 条（页面 8 + 接口 13 + 图标 1）"
+    )
     return app

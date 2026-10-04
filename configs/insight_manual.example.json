@@ -1,0 +1,43 @@
+{
+  "_README": [
+    "人工录入投资人观点的模板文件（ManualInsightCollector 读取）。",
+    "使用：cp configs/insight_manual.example.json data/insight_manual.json 后编辑。",
+    "文件不存在时同步会报错并提示本模板路径，不会静默跳过。",
+    "",
+    "【这是本库唯一允许写非抓取内容的通道】",
+    "  其他平台的采集器在凭证缺失/网络失败时一律报错，绝不返回占位内容。",
+    "  原因见 stocklab/datasource/insight/base.py 模块头的红线：",
+    "  把未经抓取的文本塞进「采集库」，几个月后你无法分辨哪条是真的。",
+    "",
+    "【verification 怎么填】",
+    "  unverified  默认。没核对过出处就填这个，别犹豫。",
+    "  verified     仅当**你本人**对照原始出处（书页/视频时间点）确认过。",
+    "  disputed     网上流传但存在互相矛盾的版本。",
+    "  fabricated  判定为伪造/张冠李戴。",
+    "  填其它值会让整轮同步失败（而不是悄悄改成 unverified ——",
+    "  悄悄降级同样会让人误信已经核实过了）。",
+    "",
+    "【source_url 强烈建议填】",
+    "  留空会在页面上显示「无溯源」。没有溯源的语录请把 verification",
+    "  保持 unverified 并加 raw_meta.note 说明出处线索（书名/节目名/日期）。",
+    "",
+    "【published_at 格式】",
+    "  观点的**原始产生时间**，不是录入时间。没有就留空（别编造日期）。",
+    "本文件的 quotes 为空是刻意的：cp 之后直接同步不会写入任何占位数据，你按 _field_docs 逐字段填即可。",
+    "同一条观点在多个来源出现时，content_hash 由「清洗后的正文」算出，所以请尽量录入全文而不是摘要片段 —— 只录半句会让去重失效。"
+  ],
+  "_field_docs": {
+    "content": "必填。观点原文。留空字符串的条目会被跳过，所以本模板默认产出 0 条 —— 刻意如此：一份 example 文件不该往库里写垃圾。",
+    "investor_code": "必填。须与 configs/insight_sources.json 的 investors 里的 investor_code 对得上，否则这条言论挂不到任何人名下。",
+    "platform": "可省，默认 'manual'。",
+    "quote_type": "可省。philosophy / macro_view / selection / position / caution / discipline；留空则由启发式猜测（宁可留空也别猜错）。",
+    "theme": "可省，逗号分隔。留空则由启发式猜测。",
+    "stock_codes": "可省，逗号分隔。留空则从正文自动抽取。",
+    "source_url": "强烈建议填（书 / 视频 / 访谈链接）。留空显示「无溯源」。",
+    "published_at": "观点原始产生时间，格式 'YYYY-MM-DD HH:MM:SS'。没有就留空。",
+    "verification": "unverified（默认） / verified / disputed / fabricated。只有你本人核对过原始出处才填 verified。",
+    "account_name": "可省。例如演讲场合或栏目名。",
+    "raw_meta": "可省。JSON 对象，用于保留出处线索等归一化装不下的信息。"
+  },
+  "quotes": []
+}

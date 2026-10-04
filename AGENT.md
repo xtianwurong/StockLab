@@ -250,7 +250,7 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 - `stocklab/facade`：**统一取数入口**，同时依赖 `datasource` 与 `persistence`，负责按优先级在两者间路由与回退。
 - `stocklab/analytics`：**纯统计变换层**，只接收 DataFrame 做聚合，不取数、不落库、不 import 上游三层。
 - `app/dashboard`：把数据渲染成网页。
-- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，七个页面共用一套数据层与一套应用外壳：
+- `app/web`：**本地 Web 分析服务**（Flask），把已有分析能力以 HTTP 接口暴露给浏览器，八个页面共用一套数据层与一套应用外壳：
   - **个股分析 `/`**：输入代码或中文名 → 投资仪表盘三屏：**结论区**（标的条 → 主指标大数 + 温度条 + 极值样本 → 多窗口分位；右侧并列**全市场横向位置**名次与分布直方图）→ **指标速览**（五张可点指标卡，取代原来重复的胶囊标签页）→ **走势图**（10/50/90 分位参考线与 25%~75% 分位带）→ **指标明细表**。
   - **全市场 Dashboard `/market`**：概览 → 分布 → 明细三段。筛选条（5 指标 / 市场 / 搜索 / 排序）→ 四格概览条 → 分位直方图与七档评级分布并排（点档位即钻取）→ 可排序分页排行表（点行跳个股页）。
   - **指数估值 `/indices`**：6 大宽基指数卡片（成分中位数口径）+ 点击展开走势图。
@@ -261,14 +261,15 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   - `market_api.py`：全市场与指数接口层——参数校验 → store 聚合 → 过滤/排序/分页，不经门面锁；`/api/market/ranking` 支持 `level` 七档评级过滤（summary 仍按过滤前口径统计）与 `codes` **精确 ts_code 集合过滤**（与 `q` 的「代码或名称子串匹配」语义不同、不可互替），组合监控页据此一次拉回自选清单，**不新建接口**；`/api/industries` 行业横截面。
   - 组合监控（`/portfolio`，自选股 + 分位阈值告警）：**自选列表存浏览器 localStorage、不落服务端**——告警是「打开页面看一眼」的辅助，不是需要后台常驻的任务，落库反而要处理多用户与过期。全市场名次由分位升序位次**现算**（分位本身就是「严格低于当前值的样本占比」，两者同源，另查排名只是多扫一次全表）。数据仍走既有 `/api/market/ranking`，PE / PB 各请求一次后按 `ts_code` 合并。
   - `screener_api.py`：选股器接口（`/api/screener/meta` 因子覆盖率+算子+模板就绪度、`/api/screener/run` 执行）。**只做编排**：筛选委托 `stocklab.screener.ScreenPipeline`、取数委托 `stocklab.research.frame.build_factor_frame`；因子帧按 as-of 缓存；数据库连接向 `store.facade_database()` **借用门面那一个**（DuckDB 同文件只允许一个写连接，另建会抛 `Could not set lock`）。默认注入 `pe_ttm > 0` 剔除亏损股——否则「PE<15」会把 PE 为负的亏损股全放进来，与估值分位页「亏损期剔除」口径相矛盾。
+  - `insight_api.py`：投资理念页接口（`/api/insight/meta` 筛选面板元数据+核验分布、`/api/insight/quotes` 多维筛选言论、`/api/insight/investor` 单投资人档案）。与其它接口层的两点差异：① **核验状态不可省略** —— 每条言论都带 `verification` / `verification_label`，meta 另给全库分布与一段 `verification_hint`，前端禁止把 `unverified` 呈现成「某某说」（网上名人语录大量伪造，不带状态的列表三个月后分不清原话与转述）；② **不做自动理念总结与情感打分** —— 自动总结会把 unverified 转述再加工一层，理念归纳必须由人读完原文后做。参数校验比别的接口更严：`keyword < 2 字`、`verification` / `order_by` / `since` 非法、`limit` `offset` 是垃圾值一律 400 而不静默回退，另有 `_reject_unencoded_query()` 拦住**未百分号编码的中文查询串**（WSGI 把 QUERY_STRING 当 latin-1，未编码的中文字节会变成 `ä¼°`、长度 2 绕过单字校验，拿它 LIKE 匹配必然 0 条 —— 于是「关键词没送达」被包装成「没有相关语录」）。
   - `static/`：**三段式设计系统**，`tokens.css` → `components.css` → `base.css` 逐层只依赖上层变量，不写字面色值。
     - `tokens.css`（唯一取值来源）：亮/暗/跟随系统三套色板 + 间距/圆角/阴影/字号/动效/层级 + 8px 垂直韵律 `--rhythm-*`，保留全部历史变量名（`--mono`、`--topbar-height` 等改为 `var(--font-mono)` / `var(--topbar-h)` 别名）。**涨跌语义色单列一组**（`--rise/--fall/--flat`，A 股口径红涨绿跌），与七档估值色（绿=便宜→红=贵）方向相反，两套变量分属不同语义、不得混用。
     - `components.css`（组件唯一定义处）：按钮 / 表单 / 卡片 / 表格 / 徽章 / 标签页 / 消息条 / 名词解释 / 提示气泡 / 浮层（模态框 · 抽屉）/ Toast / 骨架屏 / 空态 / 分隔线 / 七档评级与温度条 / 概览指标条 / 联想下拉 / 数字排版 / 工具类 / 主题切换按钮。
     - `base.css`（外壳与版式）：左侧常驻导航 + 顶部工具条 + 独立滚动内容区、页面韵律（`.page-head` / `.section` / `.split-*` / `.grid-auto`）、布局工具（`.stack` / `.row` / `.spacer`）、页脚、动效降级、打印样式。
     - **两文件不得重复定义同一个类**：重构前有 47 条规则在两边各写一份、靠 `<link>` 顺序决定谁生效，导致「改了样式没反应」，已归一（`verify_css` 口径：顶层选择器全等才算重复，`@media` 内同名不算）。
     - **组件只收有真实调用方的**：删掉了「只有样式、全站找不到任何 JS 会生成它」的下拉菜单 / 时间线 / 进度条 / 键盘按键 / 单选复选框 / 滑块 / 输入框前后缀 / 表格条纹与固定列 / 筹码药丸 / 按钮 xs·lg·outline·success·danger·warning·group 等变体；反过来模态框与抽屉虽无页面调用，但 `SL.modal` / `SL.drawer` / `SL.confirm` 有完整实现并挂在 `window.SL` 上，属可用对外能力，样式必须留着。
-    - **JS 分层**：`common.js`（请求/格式化/评级/图表 option，导出 `window.SL`）、`charts.js`（`SL.charts`：调色板 + 图表登记簿 + 主题切换重绘 + 可复用 option 片段）、`ui.js`（`SL.ui`：Toast/模态/抽屉/Tooltip/防抖节流/剪贴板/CSV 导出/URL 参数/快捷键 + **外壳装配** `initShell` / `initGlobalSearch`，在 DOM ready 时自动装配，全站无需各页调用）、`theme.js`（`SL.theme`：亮暗切换 + localStorage + `sl:themechange` 广播 + 快捷键 T），另加各页脚本（`app.js` / `market.js` / `indices.js` / `industries.js` / `screener.js` / `compare.js` / `portfolio.js`）；`templates/`：七个页面模板统一 `extends "_layout.html"`（**只覆盖 `page_title` / `page_css` / `content` / `page_scripts` 与 `active_page`**）+ `_sidebar.html`（**导航数据驱动，分「分析 / 估值 / 工具」三组，加页面只加一行**）+ `_topbar.html`（全局证券搜索 / 折叠 / 主题切换，**只放跨页面都常用的东西**，页面级筛选一律留在页面内部）+ `_footer.html`（口径说明 / 免责声明）。
-  - **外壳常驻的意义**：七个页面切换时「我在哪、能去哪、当前数据多新」始终可见，不靠回忆；旧结构是顶栏平铺 7 个 `01~07` 序号链接，序号本身是噪音且切换后不保留任何上下文。
+    - **JS 分层**：`common.js`（请求/格式化/评级/图表 option，导出 `window.SL`）、`charts.js`（`SL.charts`：调色板 + 图表登记簿 + 主题切换重绘 + 可复用 option 片段）、`ui.js`（`SL.ui`：Toast/模态/抽屉/Tooltip/防抖节流/剪贴板/CSV 导出/URL 参数/快捷键 + **外壳装配** `initShell` / `initGlobalSearch`，在 DOM ready 时自动装配，全站无需各页调用）、`theme.js`（`SL.theme`：亮暗切换 + localStorage + `sl:themechange` 广播 + 快捷键 T），另加各页脚本（`app.js` / `market.js` / `indices.js` / `industries.js` / `screener.js` / `compare.js` / `portfolio.js` / `insight.js`）；`templates/`：八个页面模板统一 `extends "_layout.html"`（**只覆盖 `page_title` / `page_css` / `content` / `page_scripts` 与 `active_page`**）+ `_sidebar.html`（**导航数据驱动，分「分析 / 估值 / 工具」三组，加页面只加一行**）+ `_topbar.html`（全局证券搜索 / 折叠 / 主题切换，**只放跨页面都常用的东西**，页面级筛选一律留在页面内部）+ `_footer.html`（口径说明 / 免责声明）。
+  - **外壳常驻的意义**：八个页面切换时「我在哪、能去哪、当前数据多新」始终可见，不靠回忆；旧结构是顶栏平铺 7 个 `01~07` 序号链接，序号本身是噪音且切换后不保留任何上下文。
   - **页面私有样式仍写在各自模板的 `<style>` 里**（加载在 `base.css` 之后，可覆盖差异）；重构时必须保住各页 JS 依赖的全部 `id` 与类名（`tests/test_web_api.py` 有页面要素断言，另可用「模板 id ⊇ JS `getElementById`」自查）。
   - `compare_api.py`：多股对比接口（`/api/compare?codes=`，2~10 只 × 5 指标）。历史序列走 `store.load_valuation_histories`（一次 IN 查询，避免逐只走门面的取数优先级），分位走**与个股页同一个 `ValuationPercentileAnalyzer`**。两点硬约束：① 序列按各标的交易日**并集对齐**，缺失点填 `None` 让图上断线，**不做前向填充**（否则停牌日会被画成「价格没变」）；② 走势图分类色板**刻意避开绿/黄/红这一段语义轴**，与七档评级色零重叠——那套颜色读者已理解为「低估→高估」，拿来区分标的会误读成优劣。
   - **暗色主题链路**：`tokens.css` 是唯一定义处，`html[data-theme]` 切换；首屏防闪烁靠 `_layout.html` 里的内联脚本在 CSS 首绘前写 `data-theme` 与 `html.shell-collapsed`（侧边栏折叠态同样要在 CSS 前落定，否则折叠会闪一下）；ECharts 颜色一律经 `SL.charts.palette()` 读 CSS 变量，各页 `renderChart` 传 rebuild 回调，主题切换时由登记簿统一重绘（容器已移除则自动注销）；侧边栏折叠会改变可用宽度，`setShellCollapsed` 延迟 320ms 调 `SL.charts.redrawAll()` 让图表重排。
@@ -281,6 +282,45 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   - `facade` 可依赖两者，但 **`datasource` 与 `persistence` 绝不可反向 import `facade`**，否则形成循环依赖。
 - **与 V2 需求文档的命名对照**：V2 §4.2 所称 `AkShareAdapter` / `BaoStockAdapter` / `TencentAdapter` 即本项目的 `datasource/_sources/{akshare,baostock,tencent}_source`（三个数据源通道实现）；`domain/corporate_action.py` 对应**尚未接入的公司行为（分红/送转）数据**——Phase 2 因子层已按「因子库先行、数据后补」交付，分红相关输入（`dps` / `dps_prior_year` / `dividend_years_*`）在因子输入帧里按 NaN 落地，`domain/corporate_action.py` 依旧**不预置空文件**，等真正接入公司行为数据源时再建。
 - 顶层入口脚本只做「参数解析 + 调用库」，不含业务逻辑；自检脚本放在 tests/ 下。
+
+### 投资理念域（insight）的设计约束
+
+这一页（`/insight`）与站内其它页有一个根本差别：**别的页存的是数字，这页存的是人说过的话**。
+数字算错了可以重算，一句被张冠李戴的话会被人当成论据引用出去。因此以下约束是硬的。
+
+- **三张表，不是一张。** `insight.investors` / `investor_accounts` / `investor_quotes`
+  变化频率完全不同：换昵称是常事、改 UID 是偶事、言论一条都不该改。
+  混成一张表，改个账号名就要 UPDATE 上万条不可变的原文。三表**一律只 INSERT**，
+  纠正靠 `verification` 字段，不改原文。
+
+- **核验状态只有 `manual` 通道能写 `verified`。** `_resolve_verification()` 是唯一裁决点：
+  任何采集器传 `verified` 都会被强制降级为 `unverified`。理由是网上的「名人语录」
+  有大量伪造与张冠李戴 —— 把一条标成「已核实」比标成「未核实」危险得多。
+  页面与接口**必须**把 `verification` 随每条下发并显示，绿色只给 `verified`；
+  本域**不做**自动理念总结与情感打分，因为那会把 unverified 的转述再加工一层。
+
+- **假溯源比无溯源更糟。** `source_url` 允许 NULL，但禁止用首页 / 搜索页 URL 凑数 ——
+  一个能点开却与内容无关的链接，会让人以为这句话已被核实过。同理，
+  `javascript:` 等非法 scheme 一律置 NULL 而不是留着。
+
+- **凭证缺失必须失败，不许返回空列表。** 空列表分不清「今天没发东西」和「cookie 没配」，
+  后者会静默地让同步看起来成功。`InsightCredentialError` 走非重试分支，
+  计入失败并让退出码为 1。**本域没有降级链** —— 行情缺一个源还能用别的顶上，
+  这里缺一个平台账号就是「少了一个人」。
+
+- **`collect` 不指定平台即退出码 2。** 默认全量爬一遍不是敲这条命令的人的意图，
+  而限速与反爬的代价是真实的。
+
+- **内容去重两级**：`quote_id` 主键冲突忽略（同一平台重跑），`content_hash` 跨平台去重
+  （同一段话在雪球与股吧各发一次只留一条）。hash 由**归一化后**的正文算出，
+  所以清洗规则的任何改动都会改变哈希口径 —— 改 `clean_ugc_text` 前先想清楚这一点。
+
+- **增量水位按投资人取，不按账号取。** 按账号取水位时，同一人在第二平台的早期内容
+  会被当成「新内容」重复抓回；按投资人取则从他最后一次发布的时刻起算。库内为空时回看 30 天。
+
+- **`configs/insight_sources.json` 里的 UID 必须人工确认**，宁可留空并在 `status` 里
+  点名报错，也不猜一个 —— 猜错的 UID 会把别人的发言记到这位投资人名下。
+  当前 `guba` 两个账号 `is_enabled=false` 就是这个原因。
 
 ### 测试架构（tests/）
 
@@ -324,8 +364,10 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   另一个高频错法是**假设错了的前提**：hypothesis 上线当天就抓出我自己写的
   `len(dict)` 取到键数、以及「分位算的是序列最小值」（实际是**最新一日**那个值）。
 
-- **覆盖率基线**（`--cov=stocklab --cov=app`）：**87%**（6335 语句 / 825 未覆盖），422 个用例。
+- **覆盖率基线**（`--cov=stocklab --cov=app`）：**87%**（7535 语句 / 980 未覆盖），657 个用例。
   第一轮补覆盖率时是 65%，主要靠新增 6 个测试文件（见上表）拉起来。
+  投资理念（insight）域上线时从 422 个用例增至 657 个（新增 `tests/test_insight.py` 235 个），
+  覆盖率维持 87% —— 新域一开始就把测试补齐，而不是「先上功能再补测试」。
 
   - **接近满覆盖的关键路径**（改动这里最需要担心）
     | 模块 | 覆盖率 | 为什么重要 |
@@ -338,6 +380,15 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
     | `analytics/percentile_reporter.py` | 95% | 单股分位报告 |
     | `app/scripts/sync_market_data.py` | 93% | 9 个同步阶段的失败语义与增量水位 |
     | `analytics/profile_reporter.py` / `markdown_reporter.py` | 92% / 90% | 报告排版 |
+
+  - **投资理念（insight）域的覆盖**（新域直接做到位，不留欠账）
+    | 模块 | 覆盖率 | 为什么重要 |
+    |---|---|---|
+    | `datasource/insight/collectors.py` | 96% | 统一分页 + 跨平台去重，错了会静默漏条或多条 |
+    | `persistence/repository/insight.py` | 94% | 三表只插入 / 水位 / 六维筛选，错了查不到该查的语录 |
+    | `normalization/insight.py` | 91% | `content_hash` 口径与 **verification 裁决**（核验红线的唯一裁决点） |
+    | `app/web/insight_api.py` | 85% | 参数校验与核验状态下发（`_reject_unencoded_query` 有专项用例） |
+    | `datasource/insight/base.py` | 69% | 未覆盖 33 条：`get_json` 的真实网络分支与 robots 抓取，需实况才触发 |
 
   - **仍偏低、且补起来性价比低的**（都是「要有真实外部响应才测得到」的分支）
     | 模块 | 覆盖率 | 未覆盖原因 |
@@ -382,7 +433,10 @@ StockLab/
 ├── .gitignore                          # Git 忽略规则（__pycache__ / venv / output / data / .workbuddy）
 ├── AGENT.md                            # 本文档（项目永久上下文与设计契约）
 ├── config.ini                          # 运行配置：月数、输出路径、超时、基准与板块清单
-├── configs/                            # 结构化筛选条件示例（JSON，供 run_research.py --config 使用）
+├── configs/                            # 结构化配置（JSON，随仓库入库）
+│   ├── screen_*.json                   #   结构化筛选条件示例（供 run_research.py --config 使用）
+│   ├── insight_sources.json            #   投资人与平台账号登记表（**UID 必须人工确认，宁可留空报错也不猜**）
+│   └── insight_manual.example.json     #   人工录入模板（quotes 为空 —— 直接 cp 使用也不会写出垃圾条目）
 ├── requirements.txt                    # 运行依赖（版本用 == 锁定）
 ├── docs/                               # ── 详细设计文档 ──
 │   ├── ARCHITECTURE.html               #   数据源容错策略、Facade 路由机制
@@ -403,14 +457,21 @@ StockLab/
 │   │   ├── market_service.py             #     【入库取数】MarketService：7 个 fetch_* 输出领域契约帧（源缺列抛 DataContractError）
 │   │   ├── fundamental_service.py        #     【逐只基本面】FundamentalService：东财三大报表（单只约 60 次请求）
 │   │   ├── lifecycle_service.py          #     【生命周期】LifecycleService：沪深北上市日历 + 退市日历
-│   │   └── _sources/                   #     单股通道实现包（下划线前缀 = 私有，外部勿依赖）
-│   │       ├── __init__.py             #       导出抽象基类与五个通道实现
-│   │       ├── base.py                 #       StockDataSource 抽象基类（纯虚接口 + 标准化/降采样工具）
-│   │       ├── akshare_source.py       #       东方财富主通道（akshare，含重试与列名防御）
-│   │       ├── baostock_source.py      #       证券宝备用通道（专有 Socket + login/logout 会话管理）
-│   │       ├── tencent_source.py       #       腾讯直连通道（实时行情/简称/备用日线降采样）
-│   │       ├── sina_source.py          #       新浪财经通道（实时/月线/qfq+hfq，HTTPS+Referer+GBK，约 4 年日线）
-│   │       └── tdx_source.py           #       通达信通道（tdxdata 新协议，category=6 月线，market=2 北交所，仅不复权）
+│   │   ├── _sources/                   #     单股通道实现包（下划线前缀 = 私有，外部勿依赖）
+│   │   │   ├── __init__.py             #       导出抽象基类与五个通道实现
+│   │   │   ├── base.py                 #       StockDataSource 抽象基类（纯虚接口 + 标准化/降采样工具）
+│   │   │   ├── akshare_source.py       #       东方财富主通道（akshare，含重试与列名防御）
+│   │   │   ├── baostock_source.py      #       证券宝备用通道（专有 Socket + login/logout 会话管理）
+│   │   │   ├── tencent_source.py       #       腾讯直连通道（实时行情/简称/备用日线降采样）
+│   │   │   ├── sina_source.py          #       新浪财经通道（实时/月线/qfq+hfq，HTTPS+Referer+GBK，约 4 年日线）
+│   │   │   └── tdx_source.py           #       通达信通道（tdxdata 新协议，category=6 月线，market=2 北交所，仅不复权）
+│   │   └── insight/                    #     投资人观点采集包（与行情采集平行，**无降级链**）
+│   │       ├── __init__.py             #       导出异常族 / 采集器 / 注册表 / 分页编排
+│   │       ├── base.py                 #       InsightCollector 抽象基类：限速 / 凭证校验 / robots / get_json + 三类异常
+│   │       ├── collectors.py           #       注册表 + fetch_account_quotes 统一分页 + normalize_outcome 归一去重
+│   │       ├── xueqiu.py               #       雪球表态（凭证走 STOCKLAB_XUEQIU_COOKIE，改版即抛 InsightParseError）
+│   │       ├── guba.py                 #       东财股吧文章列表（两套响应形态都要认，article_time 双格式）
+│   │       └── manual.py               #       人工录入通道（**唯一允许非抓取内容**，校验 verification 合法值）
 │   ├── domain/                         #   列契约层（叶子包，零 StockLab 依赖）
 │   │   ├── __init__.py                 #     导出契约元组、状态/事件枚举与 DataContractError
 │   │   ├── contract.py                 #     check_columns / require_columns / align_columns（缺列即拒绝）
@@ -418,13 +479,16 @@ StockLab/
 │   │   ├── market_data.py              #     DAILY_PRICE_COLUMNS
 │   │   ├── valuation.py                #     DAILY_VALUATION / VALUATION_HISTORY / INDUSTRY_VALUATION 列契约
 │   │   ├── fundamental.py              #     FUNDAMENTAL_PIT_COLUMNS（报告期 + 公告日 + 可见日）与四表契约
-│   │   └── research.py                 #     SNAPSHOT_COLUMNS / SNAPSHOT_RESULT_COLUMNS（研究快照两表，与 004 同序）
+│   │   ├── research.py                 #     SNAPSHOT_COLUMNS / SNAPSHOT_RESULT_COLUMNS（研究快照两表，与 004 同序）
+│   │   └── insight.py                  #     INVESTOR / INVESTOR_ACCOUNT / INVESTOR_QUOTE 列契约（与 006 同序）
+│   │                                    #       + PLATFORMS / QUOTE_TYPES / VERIFICATION_STATUSES / INVESTOR_STYLES 枚举
 │   ├── normalization/                  #   归一化层（叶子包：源表 → 契约帧，不取数不落库）
 │   │   ├── __init__.py                 #     导出三层归一化入口
 │   │   ├── base.py                     #     原子原语：代码 / 选列 / 数值 / 日期 / 文本清洗
 │   │   ├── akshare.py                  #     证券名录、日K、估值快照、历史估值、行业估值、指数成分、公司概况
 │   │   ├── exchange.py                 #     上市/退市日历、merge_lifecycle（回填日期 + 推导 status）、build_lifecycle_events
-│   │   └── eastmoney.py                #     东财三大报表 → PIT 帧（available_date = announce_date）
+│   │   ├── eastmoney.py                #     东财三大报表 → PIT 帧（available_date = announce_date）
+│   │   └── insight.py                  #     UGC 清洗 / content_hash / 启发式类型·主题·代码标注 / verification 裁决
 │   ├── fundamental/                    #   基本面派生层（纯计算，不取数不落库）
 │   │   ├── __init__.py                 #     导出 build_financial_indicators + 与 V2 文档 §3.1 目录的对应关系
 │   │   └── indicator.py                #     ROE / ROA / ROIC / 毛利率 / 净利率 / 同比；公告日取两表较晚者
@@ -453,7 +517,7 @@ StockLab/
 │   │   ├── universe.py                 #     universe_as_of：与 SecurityRepository.universe 同口径的 as-of 股票池
 │   │   └── metrics.py                  #     §9.3 十一项指标（252 日年化；分母为 0 → NaN）
 │   ├── persistence/                    #   本地数据持久化层（只负责「往本地存数」）
-│   │   ├── __init__.py                 #     本层统一出口（Database + 14 个 Repository）
+│   │   ├── __init__.py                 #     本层统一出口（Database + 17 个 Repository）
 │   │   ├── storage/                    #     数据存储基础设施
 │   │   │   ├── __init__.py             #       导出 Database / initialize_database
 │   │   │   ├── duckdb.py               #       DuckDB 连接管理（Database 类，支持 with，打开时校验版本）
@@ -465,9 +529,10 @@ StockLab/
 │   │   │   ├── 002_fundamental.sql     #       fundamental 域四张表
 │   │   │   ├── 003_security_events.sql #       list_status → status + reference.security_events
 │   │   │   ├── 004_research.sql        #       research.snapshots + research.snapshot_results（研究快照，只写不改）
-│   │   │   └── 005_announcements.sql   #       corporate.announcements（巨潮公告索引，主键 announcement_id + 二次去重键）
+│   │   │   ├── 005_announcements.sql   #       corporate.announcements（巨潮公告索引，主键 announcement_id + 二次去重键）
+│   │   │   └── 006_investor_insight.sql #      insight 三表：investors / investor_accounts / investor_quotes（+ 8 索引）
 │   │   └── repository/                 #     数据访问层（表级 SQL 封装）
-│   │       ├── __init__.py             #       导出 BaseRepository 与 14 个 Repository
+│   │       ├── __init__.py             #       导出 BaseRepository 与 17 个 Repository
 │   │       ├── base.py                 #       BaseRepository：契约对齐 + 显式列名 UPSERT / 异常处理 / 日志模板
 │   │       ├── security.py             #       reference.securities（名录 upsert / 生命周期 upsert_lifecycle / universe(as_of)）
 │   │       ├── security_event.py       #       reference.security_events（生命周期事件按 as-of 查询）
@@ -477,14 +542,18 @@ StockLab/
 │   │       ├── index_membership.py     #       reference.index_memberships 读写
 │   │       ├── industry_valuation.py   #       market.industry_valuations 读写
 │   │       ├── fundamental.py          #       fundamental 四表 + find_as_of / latest_as_of / cross_section_as_of
-│   │       └── research_snapshot.py    #       研究快照两表（只 INSERT，重复 snapshot_id 拒绝覆盖）
+│   │       ├── research_snapshot.py    #       研究快照两表（只 INSERT，重复 snapshot_id 拒绝覆盖）
+│   │       └── insight.py              #       insight 三表：只 INSERT / 六维 search / list_investors /
+│   │                                    #         list_themes（先 unnest 再分组）/ verification_summary /
+│   │                                    #         existing_hashes（跨平台去重）/ latest_published_at（增量水位）
 │   ├── research/                       #   研究编排层（V2 §6：取数 + 算因子 + 筛选 + 落快照的唯一编排方）
 │   │   ├── __init__.py                 #     导出 build_factor_frame / create_snapshot / load_snapshot / rerun_snapshot
 │   │   ├── frame.py                    #     build_factor_frame：按 Point-in-Time 拼因子输入帧，无数据源的列 NaN 落地并告警
 │   │   └── snapshot.py                 #     快照读写与复现比对 + config_version / data_version（库版本@真实数据截止日）
 │   ├── facade/                         #   统一数据取数门面层（位于 datasource 与 persistence 之上）
-│   │   ├── __init__.py                 #     导出 MarketDataFacade
-│   │   └── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
+│   │   ├── __init__.py                 #     导出 MarketDataFacade / InsightDataFacade
+│   │   ├── market_data.py              #     MarketDataFacade：本地/远端优先级路由与自动回退
+│   │   └── insight_data.py             #     InsightDataFacade：投资理念页三查询的取数编排（纯本地读）
 │   ├── analytics/                      #   统计分析层（纯变换，不取数不落库）
 │   │   ├── __init__.py                 #     导出分析器 / 渲染器 / 口径常量
 │   │   ├── valuation_distribution.py   #     ValuationDistributionAnalyzer：全市场市盈率分布统计
@@ -501,12 +570,13 @@ StockLab/
 │   │       └── dashboard.html         #    网页模板（占位符 __DATA_PAYLOAD__ 由数据替换）
 │   ├── web/                            #   本地 Web 分析服务（Flask，浏览器端点击分析）
 │   │   ├── __init__.py                #     导出 create_app
-│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器），页面 7 + 接口 10 + 图标 1
+│   │   ├── server.py                  #     create_app 装配：add_url_rule 路由注册表（非装饰器），页面 8 + 接口 13 + 图标 1
 │   │   ├── store.py                   #     进程级数据访问单例：单例门面锁 / 聚合连接锁 / 七档评级 / 行业横截面 / 进程内缓存
 │   │   ├── api.py                     #     个股接口：代码与中文名解析 → store → analyzer → JSON
 │   │   ├── screener_api.py             #     选股器接口：因子覆盖率元数据 + 执行筛选（委托 screener/research，连接借门面）
 │   │   ├── compare_api.py              #     多股对比接口：2~10 只 × 5 指标分位 + 按交易日对齐的叠加走势
 │   │   ├── market_api.py               #     全市场/指数/行业接口：过滤排序分页（ranking 支持 codes 精确过滤）→ store 聚合 → JSON
+│   │   ├── insight_api.py              #     投资理念接口：核验状态强制随条下发 / 不做自动总结 / 未编码查询串 400
 │   │   ├── templates/
 │   │   │   ├── _layout.html           #     应用外壳骨架 + 资源加载顺序 + 首屏防闪烁脚本
 │   │   │   ├── _sidebar.html          #     左侧常驻导航（三组，NAV_* 列表数据驱动）
@@ -518,7 +588,8 @@ StockLab/
 │   │   │   ├── industries.html        #     行业估值页（层级切换 / PE 条形图 / 明细表）
 │   │   │   ├── screener.html          #     选股器页（规则编辑器 / 漏斗 / 散点 / 行业通过率 / 导出分享）
 │   │   │   ├── compare.html           #     多股对比页（筹码挑选 / 指标对比卡 / 叠加走势 / 分位雷达 / 明细表）
-│   │   │   └── portfolio.html         #     组合监控页（自选筹码 / 分位阈值告警 / 卡片与表格双视图 / 导出对比）
+│   │   │   ├── portfolio.html         #     组合监控页（自选筹码 / 分位阈值告警 / 卡片与表格双视图 / 导出对比）
+│   │   │   └── insight.html           #     投资理念页（投资人档案 / 多维筛选言论流 / 核验徽标 / 主题与时间线）
 │   │   └── static/
 │   │       ├── echarts.min.js         #     ECharts 5.5 vendored（本地托管，离线可用）
 │   │       ├── tokens.css             #     设计令牌（唯一取值来源）：亮/暗双主题 + 间距/圆角/阴影/字号/动效/层级
@@ -534,11 +605,13 @@ StockLab/
 │   │       ├── app.js                 #     个股页：联想键盘操作 / 分析渲染 / URL 还原
 │   │       ├── market.js              #     Dashboard：统计卡 / 直方图 / 评级钻取 / 排行分页
 │   │       ├── indices.js             #     指数页：卡片列表 / 详情加载
-│   │       └── industries.js          #     行业页：层级切换 / 条形图 / 明细表
+│   │       ├── industries.js          #     行业页：层级切换 / 条形图 / 明细表
+│   │       └── insight.js             #     投资理念页：筛选面板 / 言论流分页 / 核验徽标 / 档案抽屉
 │   └── scripts/                       #   CLI 入口
 │       ├── generate_sector_trend.py   #     命令行入口：生成板块走势网页
 │       ├── sync_market_data.py        #     命令行入口：全市场数据同步到本地 DuckDB（八个阶段）
 │       ├── run_research.py            #     命令行入口：研究筛选（screen / rerun / list / factors 四个子命令）
+│       ├── sync_investor_insight.py  #     命令行入口：投资人观点（load-sources / manual / collect / status）
 │       ├── serve_web.py               #     命令行入口：启动本地 Web 分析服务（仅监听 127.0.0.1）
 │       ├── verify_market_sql.py       #     抽样校验：全市场分位 SQL 与 analyzer 口径一致（退出码可进 CI）
 │       ├── analyze_pe_distribution.py #     命令行入口：全市场市盈率分布统计
@@ -567,6 +640,8 @@ StockLab/
 │   ├── test_tdx_source.py              #     通达信通道自检（市场编号 / 月线 category / 实时量额 / 6 组失败 / 简称空串），注入 fake client
 │   ├── test_cninfo_client.py           #     巨潮客户端自检（解析 / 分页 / orgId缓存+精确匹配 / 去重 / 5 组网络异常），离线 fixture
 │   ├── test_announcements.py           #     公告持久化与同步自检（迁移005 / Repo / 水位 / 过滤 / 去重 / 逐只 / 幂等），临时库
+│   ├── test_insight.py                 #     投资理念自检（迁移006 / 契约 / 归一化 / **核验红线** / 采集器 /
+│   │                                    #       分页与失败分类 / 同步 CLI 退出码 / 接口 400·404 / 页面核验徽标契约）
 │   └── live_check_sources.py           #     手工联网验证脚本（**不是 pytest 用例**，函数名不匹配 test_*，pytest 不收集；
 │                                         #     有意保留为带退出码的诊断工具，供「上游疑似变更时快速复查」用）
 ├── data/                               # ── 以下均为运行时生成，已被 .gitignore 排除 ──
@@ -590,10 +665,12 @@ StockLab/
 | | `stocklab.datasource.market_service` | **入库取数 `MarketService`**：基础信息/日K/估值快照/历史估值/行业估值/指数成分/公司概况 —— 输出领域契约帧，源缺列抛 `DataContractError` |
 | | `stocklab.datasource.fundamental_service` | **逐只基本面 `FundamentalService`**：东财利润表/资产负债表/现金流量表（按报告期分批，单只约 60 次请求） |
 | | `stocklab.datasource.lifecycle_service` | **生命周期 `LifecycleService`**：沪深北上市日历与退市日历（只读交易所官网，名录外的退市股也由此补齐） |
+| | `stocklab.datasource.insight` | **投资人观点采集 `InsightCollector`**：雪球表态 / 东财股吧 / 人工录入三通道 + 注册表 + 统一分页。**三条红线**：凭证缺失必抛 `InsightCredentialError`（不许返回空列表）、限速 `MIN_INTERVAL_SECONDS`、**产出不得含任何未抓取内容**（唯一例外 `manual` 通道）。**无降级链** —— 缺一个平台账号就是「少一个人」 |
 | **契约** | `stocklab.domain.contract` | **列契约三件套**：`check_columns` / `require_columns` / `align_columns`，缺列即拒绝 |
 | | `stocklab.domain.*` | 各表列契约元组与 `SECURITY_STATUSES` / `SECURITY_EVENT_TYPES` 枚举 |
 | **归一化** | `stocklab.normalization.base` | 源表原子原语：代码归一、选列、数值/日期/文本清洗 |
 | | `stocklab.normalization.akshare` / `exchange` / `eastmoney` | 7 类 akshare 源表、交易所上市退市日历（含 `merge_lifecycle`）、东财三大报表 → 契约帧 |
+| | `stocklab.normalization.insight` | **UGC 清洗 + `content_hash` 跨平台去重 + 启发式标注**（类型/主题/股票代码，宁可 NULL 不错标）+ **`_resolve_verification`**：抓取侧一律降级 `unverified`，只有 `platform='manual'` 能写入 `verified` |
 | **派生** | `stocklab.fundamental.indicator` | 财务指标纯派生：ROE / ROA / ROIC / 毛利率 / 净利率 / 同比，公告日取两表较晚者 |
 | **因子** | `stocklab.factor.registry` | **因子登记与批量计算**：显式 `register()`（**无装饰器**）、`get` / `list_factors` / `compute`、`FACTOR_VERSION = "factor_v1"`；本模块不 import 分类包（由包入口触发登记） |
 | | `stocklab.factor.base` / `preprocessing` | `Factor` 定义（`categories` 为元组，一个因子可挂多个分类）+ `FactorDataError`；§7.6 预处理 winsorize / zscore / rank / missing / 行业·市值中性化（非法配置一律拒绝） |
@@ -605,6 +682,7 @@ StockLab/
 | **研究** | `stocklab.research.frame` | `build_factor_frame`：Point-in-Time 拼因子输入帧（as-of 股票池 / `available_date <= as-of` / 上年同期 / 日线派生动量·波动率·回撤）；无数据源的列 NaN 落地并告警 |
 | | `stocklab.research.snapshot` | `create_snapshot` / `load_snapshot` / `list_snapshots` / `rerun_snapshot`（按 spec 重新生成并逐行比对）+ `config_version` / `data_version` / `factor_version`；快照只写不改 |
 | **外观** | `stocklab.facade.market_data` | **统一取数门面**：本地优先/远端优先策略、Cache-Aside 回写 |
+| | `stocklab.facade.insight_data` | **投资人观点取数门面**：`metadata()` 筛选面板元数据 / `search_quotes()` 六维筛选 / `profile()` 投资人档案。纯本地读、**不做任何自动总结**，查不到返回 None 不猜 |
 | **持久化** | `stocklab.persistence.migrations` | **迁移执行器 `SchemaMigrator`**：`NNN_*.sql` 为 DDL 唯一真相，`sys.schema_version` 记录版本、失败不记版本 |
 | | `stocklab.persistence.storage.schema` | `initialize_database()`：委托迁移器（**本文件不含 DDL**） |
 | | `stocklab.persistence.storage.duckdb` | 连接管理：延迟初始化、上下文管理器、打开时校验结构版本 |
@@ -616,12 +694,14 @@ StockLab/
 | | `stocklab.analytics.markdown_reporter` | 全市场分布：归档级 Markdown（表格 + 自动结论） |
 | **仪表板** | `app.dashboard.sector_trend` | 板块走势 Facade：配置→取数→HTML 编排 |
 | | `app.dashboard.page_generator` | 模板渲染：月份并集对齐、JSON 注入 dashboard.html |
-| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器），页面 7 + 接口 10 + favicon = 18 条 |
+| **Web 服务** | `app.web.server` | `create_app()`：Flask 装配 + `add_url_rule` 路由注册表（无装饰器），页面 8 + 接口 13 + favicon = 22 条 |
 | | `app.web.store` | **进程级数据访问单例**：门面锁 / 聚合连接锁、全市场窗口函数 SQL、指数成分中位数序列、七档评级、进程内缓存 |
 | | `app.web.api` | 个股接口：`/api/percentile` 分位 + 多窗口、`/api/securities` 联想（排序 + 大小写不敏感）、代码与中文名解析 |
 | | `app.web.market_api` | 全市场接口：`/api/market/ranking`（过滤/排序/分页 + 七档分布与直方图）、`/api/indices`、`/api/index/detail` |
+| | `app.web.insight_api` | 投资理念接口：`/api/insight/{meta,quotes,investor}`。**核验状态每条必下发**；不做自动理念总结；参数校验最严（单字关键词 / 非法枚举 / 垃圾分页 / **未百分号编码的中文查询串** 一律 400） |
 | **脚本** | `app/scripts/sync_market_data.py` | 8 阶段同步 CLI：证券/日K/估值快照/历史估值/指数成分/行业估值/生命周期/基本面（默认全跑一、二、三、五、七） |
 | | `app/scripts/run_research.py` | 研究筛选 CLI：`screen`（取数 → 因子 → 筛选 → 写研究快照）/ `rerun`（复现比对，不一致退出码 1）/ `list` / `factors` |
+| | `app/scripts/sync_investor_insight.py` | 投资人观点 CLI：`load-sources`（登记表载入，幂等）/ `manual`（人工录入同步）/ `collect`（按平台抓取，**不指定平台即退出码 2**）/ `status`（含停用账号与缺 UID 提示）。退出码 0 成功 / 1 有失败 / 2 用法错误 |
 | | `app/scripts/generate_sector_trend.py` | 可视化生成 CLI：月数/输出路径/配置文件可配 |
 | | `app/scripts/serve_web.py` | 本地分析服务 CLI：端口/优先级/数据库路径可配，仅监听 127.0.0.1 |
 
@@ -630,7 +710,7 @@ StockLab/
 ## 运行方式
 
 ```bash
-# 启动本地 Web 分析服务（浏览器打开 http://127.0.0.1:8000 点击分析；七个页面）
+# 启动本地 Web 分析服务（浏览器打开 http://127.0.0.1:8000 点击分析；八个页面）
 ./venv/bin/python app/scripts/serve_web.py
 
 # 指定端口与取数优先级
@@ -696,6 +776,18 @@ pkill -f serve_web.py
 # list：全部研究快照；factors：已登记因子（分类 / 输入列 / 口径）
 ./venv/bin/python app/scripts/run_research.py list
 ./venv/bin/python app/scripts/run_research.py factors
+
+# ── 投资人观点（投资理念页的数据来源）──
+# load-sources：把 configs/insight_sources.json 的投资人与平台账号登记入库（只插入，可反复执行）
+./venv/bin/python app/scripts/sync_investor_insight.py load-sources
+# status：库内规模 / 核验分布 / 启用与停用账号 / 各采集器凭证是否就绪（缺 UID 会点名指出）
+./venv/bin/python app/scripts/sync_investor_insight.py status
+# manual：按人工录入文件同步（**唯一允许 verified 的通道**；重跑幂等，日志如实报新增 0 条）
+./venv/bin/python app/scripts/sync_investor_insight.py manual --manual-path data/insight_manual.json
+# collect：按平台抓取（不指定平台直接退出码 2，避免「敲错了就全量爬一遍」）
+./venv/bin/python app/scripts/sync_investor_insight.py collect --platform xueqiu --limit 50
+# 雪球需先给凭证（不支持账号密码，密码进代码库不可逆）
+export STOCKLAB_XUEQIU_COOKIE='xq_a_token=...;u=...'
 
 # 按主题挑测试（-k 支持布尔表达式；下面按被测对象分组）
 ./venv/bin/python -m pytest -k "migration or contract"   # 迁移幂等/老库升级 + 契约与 DDL 对齐 + 乱序写入
@@ -967,6 +1059,23 @@ pip install -r requirements.txt
     - `market.daily_prices` 仍只有 3 行 → 真实回测暂时无从谈起，因此**本阶段没有新增迁移**，
       `BacktestResult` 只在内存，`run_backtest.py` 待价格数据补齐后再接（§11 未要求回测表）；
     - 补数据路径与网络限制见第 25 条。
+30. **投资理念域（insight）当前已知的限制，用之前必须知道**：
+    - **雪球与股吧的端点未与真实平台联调**（本环境无外网）：`xueqiu.py` 的
+      `/v4/statuses/user_timeline.json` 与 `guba.py` 的
+      `Article/Articlelist` 是按公开形态写死的，**字段一改就会抛
+      `InsightParseError` 而不是静默返回空**（这是有意的），届时需按实际响应调整。
+      自检方式：`collect --platform xueqiu --limit 5` 看 `error_kind`。
+    - `configs/insight_sources.json` 里**两个股吧账号 `is_enabled=false`**，
+      原因是 `account_uid` 未经人工确认 —— 猜一个 UID 会把别人的发言记到
+      该投资人名下。`status` 会把它们连同「（未填）」一起列出来。
+    - **`data/insight_manual.json` 目前不存在**，所以页面是空态（这是有意的）：
+      一条虚假语录入库的代价高于一个空列表。填法见
+      `configs/insight_manual.example.json`，每条都要给出 `source_url` 或
+      把 `verification` 留成 `unverified`。
+    - `tests/test_insight.py` 的 `TestInsightWebApi.seeded` 会在**真实库**上
+      载入登记表并造 2 条言论，退出时删除这两条（按 content 精确删除）；
+      因此真实库可能已应用迁移 006 并带有三名投资人的登记数据 —— 这正是
+      `load-sources` 该做的事，且该命令幂等。
 
 ---
 

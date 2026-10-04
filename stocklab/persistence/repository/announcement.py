@@ -20,7 +20,7 @@ StockLab - 公告索引 Repository (stocklab.persistence.repository.announcement
 
 import logging
 
-from stocklab.domain import ANNOUNCEMENT_COLUMNS, DataContractError, align_columns
+from stocklab.domain import ANNOUNCEMENT_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository
 
 _logger = logging.getLogger(__name__)
@@ -46,33 +46,7 @@ class AnnouncementRepository(BaseRepository):
         Returns:
             int: 提交写入的行数；空数据或契约违约返回 0
         """
-        if frame is None or frame.empty:
-            _logger.warning("%s: insert 接收到空数据，跳过写入", self._TABLE_NAME)
-            return 0
-
-        try:
-            aligned = align_columns(frame, self._COLUMNS, self._TABLE_NAME)
-        except DataContractError as error:
-            _logger.error("%s 写入被拒绝: %s", self._TABLE_NAME, error)
-            return 0
-
-        column_list = ", ".join(self._COLUMNS)
-        select_list = ", ".join(self._COLUMNS)
-        conn = self._db.get_connection()
-        tmp_table = "_corporate_announcements_tmp"
-        conn.register(tmp_table, aligned)
-        try:
-            conn.execute(
-                f"INSERT INTO {self._TABLE_NAME} ({column_list}) "
-                f"SELECT {select_list} FROM {tmp_table} "
-                "ON CONFLICT (announcement_id) DO NOTHING"
-            )
-            return len(aligned)
-        except Exception as error:
-            _logger.error("%s 写入失败: %s", self._TABLE_NAME, error)
-            return 0
-        finally:
-            conn.unregister(tmp_table)
+        return self._insert_ignore_conflict(frame, ["announcement_id"])
 
     def latest_date(self):
         """

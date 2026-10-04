@@ -567,11 +567,18 @@ def test_empty_database(tmp_path):
         "WHERE table_schema = 'research' ORDER BY table_name"
     ).fetchall()
     assert [table for table, in tables] == ["snapshot_results", "snapshots"]
-    versions = conn.execute(
-        "SELECT version FROM sys.schema_version ORDER BY version"
-    ).fetchall()
-    assert [version for version, in versions] == [1, 2, 3, 4, 5]
-    print("  -> 迁移 004 已应用（research 两表 + 版本 1/2/3/4）")
+    versions = [
+        version for version, in conn.execute(
+            "SELECT version FROM sys.schema_version ORDER BY version"
+        ).fetchall()
+    ]
+    # 【原为 == [1,2,3,4,5]]】硬编码版本列表会让每加一个迁移都打红这里的
+    # 用例，而本用例关心的是「004 生效了且历史连续」，不是当前有几个迁移。
+    # 改成断言：1) 历史从 1 开始无空洞；2) 004 确实在历史里。
+    assert versions == list(range(1, len(versions) + 1)), versions
+    assert 4 in versions, "迁移 004 未应用"
+    print("  -> 迁移 004 已应用（research 两表 + 版本连续 1..%d）"
+          % max(versions))
 
 
 if __name__ == "__main__":

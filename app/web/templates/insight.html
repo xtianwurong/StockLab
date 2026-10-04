@@ -1,0 +1,360 @@
+{% extends "_layout.html" %}
+{% set active_page = "insight" %}
+
+{% block page_title %}投资理念{% endblock %}
+
+{% block page_css %}
+<style>
+  /* ---------- 核验状态徽标：可信度是视觉上的一等信息 ---------- */
+  /* 未核实 / 已核实 / 存疑 / 伪造 四态必须一眼可分，且「已核实」是唯一
+     绿色——绿色一旦泛用到「未核实」上，整页就失去了可信度分层。 */
+  .vf {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 7px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-full);
+    font-size: var(--font-xs);
+    font-weight: 600;
+    line-height: 1.7;
+    white-space: nowrap;
+  }
+  .vf::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .vf-unverified { color: var(--warning-700); background: var(--warning-50);
+                   border-color: var(--warning-500); }
+  .vf-verified   { color: var(--success-700); background: var(--success-50);
+                   border-color: var(--success-500); }
+  .vf-disputed   { color: var(--text-sub); background: var(--bg-subtle);
+                   border-color: var(--border-strong); }
+  .vf-fabricated { color: var(--danger-700); background: var(--danger-50);
+                   border-color: var(--danger-500); }
+  .vf-unknown    { color: var(--text-muted); background: var(--bg-inset);
+                   border-color: var(--border-color); }
+
+  /* ---------- 提示条 ---------- */
+  .disclaimer {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+    padding: var(--space-4);
+    border: 1px solid var(--warning-500);
+    border-left-width: 3px;
+    border-radius: var(--radius);
+    background: var(--warning-50);
+    color: var(--text-sub);
+    font-size: var(--font-sm);
+    line-height: var(--leading-relaxed);
+  }
+  .disclaimer-title { color: var(--warning-700); font-weight: 650; }
+
+  /* ---------- 筛选条 ---------- */
+  .insight-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+    gap: var(--rhythm-3) var(--rhythm-4);
+    align-items: end;
+  }
+  .filter-group { display: flex; flex-direction: column; gap: var(--space-2); }
+  .filter-group .field-label { margin: 0; }
+
+  .chip-row { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+  .chip {
+    padding: 3px var(--rhythm-3);
+    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    color: var(--text-sub);
+    font-family: inherit;
+    font-size: var(--font-xs);
+    font-weight: 550;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-out);
+  }
+  .chip:hover { border-color: var(--border-strong); color: var(--text-main); }
+  .chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+    font-weight: 650;
+  }
+
+  /* ---------- 投资人选择卡 ---------- */
+  .investor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(206px, 1fr));
+    gap: var(--space-3);
+  }
+  .investor-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--rhythm-4);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    transition: all var(--dur-fast) var(--ease-out);
+  }
+  .investor-card:hover { border-color: var(--accent); }
+  .investor-card.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .investor-card-name { font-size: var(--font-base); font-weight: 650; color: var(--text-main); }
+  .investor-card-sub { font-size: var(--font-xs); color: var(--text-muted); line-height: var(--leading-normal); }
+  .investor-card-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+  }
+
+  /* ---------- 言论流 ---------- */
+  .quote-list { display: flex; flex-direction: column; gap: var(--space-3); }
+
+  .quote-item {
+    padding: var(--rhythm-4);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+  }
+  /* 未核实条目左侧留一道警示竖条：即使滚动速度快，
+     也能一眼看出这一条没核对过出处 */
+  .quote-item[data-verification="unverified"] {
+    border-left: 3px solid var(--warning-500);
+  }
+  .quote-item[data-verification="disputed"],
+  .quote-item[data-verification="fabricated"] {
+    border-left: 3px solid var(--border-strong);
+  }
+
+  .quote-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-3);
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+  }
+  .quote-attr { font-weight: 650; color: var(--text-sub); }
+
+  .quote-body {
+    font-size: var(--font-base);
+    line-height: var(--leading-relaxed);
+    color: var(--text-main);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .quote-body.clamped {
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .quote-tags { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: var(--space-3); }
+  .tag {
+    padding: 1px 7px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-subtle);
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+  }
+  .tag-type { border-color: var(--border-brand); background: var(--accent-soft); color: var(--text-brand); }
+
+  .quote-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px dashed var(--border-color);
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+  }
+  .no-source { color: var(--warning-700); font-weight: 600; }
+  .link-plain { color: var(--accent); text-decoration: none; }
+  .link-plain:hover { text-decoration: underline; }
+
+  .expand-btn {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: var(--font-xs);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  @media (max-width: 760px) {
+    .insight-filters { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="page-head-main">
+    <div class="page-title">投资理念</div>
+    <div class="page-desc">
+      收录段永平、林园、但斌等投资人的公开言论与理念，用于宏观判断参考与方法论学习。
+      每条保留<span class="term" data-tip="记录该条内容出自哪个平台、哪个账号，以及可回溯的原始链接。">平台、账号与时间</span>，
+      并显式标注<span class="term" data-tip="「已核实原文」= 人工对照原始出处确认过；「未核实」= 已抓取但未核对。">核验状态</span>。
+    </div>
+  </div>
+  <div class="page-head-actions">
+    <button class="btn btn-primary btn-sm" id="btn-reload" type="button">刷新</button>
+  </div>
+</div>
+
+<!--
+  可信度声明常驻，不折叠、不做成可关闭的提示：
+  网上流传的「名人语录」有大量伪造与张冠李戴，而一旦这个声明被关掉，
+  页面上剩下的就是一份看起来很可信的语录列表。
+-->
+<div class="disclaimer section">
+  <span aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+         stroke-width="1.9" stroke-linecap="round">
+      <path d="M12 8v5M12 17h.01"></path>
+      <circle cx="12" cy="12" r="9"></circle>
+    </svg>
+  </span>
+  <span>
+    <b class="disclaimer-title">请先读这一条：</b>
+    <span id="disclaimer-text">本页内容多数来自公开平台的抓取，未经逐条核对原始出处。标记为「未核实」的条目仅供线索参考，不应直接作为投资依据。</span>
+    补采命令：<code class="mono">python app/scripts/sync_investor_insight.py collect --platform xueqiu</code>；
+    人工整理的语录走 <code class="mono">manual</code>（模板见 <code class="mono">configs/insight_manual.example.json</code>）。
+  </span>
+</div>
+
+<div class="message section" id="message"></div>
+
+<!-- 概览条：核验状态分布是这页最重要的一组数字 -->
+<section class="stat-grid section" id="stat-grid">
+  <div class="stat-card">
+    <span class="stat-k">收录投资人</span>
+    <span class="stat-v" id="stat-investors">-</span>
+    <span class="stat-sub" id="stat-accounts">-</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-k">言论总数</span>
+    <span class="stat-v" id="stat-quotes">-</span>
+    <span class="stat-sub">按清洗后正文去重</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-k">已核实原文</span>
+    <span class="stat-v" id="stat-verified">-</span>
+    <span class="stat-sub" id="stat-verified-sub">人工核对过出处</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-k">未核实</span>
+    <span class="stat-v" id="stat-unverified">-</span>
+    <span class="stat-sub" id="stat-unverified-sub">已抓取，未核对出处</span>
+  </div>
+</section>
+
+<!-- 投资人选择 -->
+<section class="card section">
+  <div class="card-head">
+    <div>
+      <div class="card-title">按投资人浏览</div>
+      <div class="card-hint">选一位查看其理念与观点流；未选中时展示全库言论</div>
+    </div>
+  </div>
+  <div class="card-pad">
+    <div class="investor-grid" id="investor-grid"></div>
+  </div>
+</section>
+
+<!-- 筛选 -->
+<section class="card section">
+  <div class="card-head">
+    <div>
+      <div class="card-title">筛选与检索</div>
+      <div class="card-hint">关键词同时匹配正文、摘要与提到的股票代码</div>
+    </div>
+  </div>
+  <div class="card-pad">
+    <div class="insight-filters">
+      <div class="field">
+        <label class="field-label" for="f-keyword">关键词</label>
+        <input class="input" id="f-keyword" type="text" autocomplete="off"
+               placeholder="如 估值 / 长期持有 / 600519">
+      </div>
+      <div class="field">
+        <label class="field-label" for="f-since">起始时间</label>
+        <input class="input" id="f-since" type="date" aria-label="只看该日期之后的言论">
+      </div>
+      <div class="field">
+        <label class="field-label" for="f-order">排序</label>
+        <select class="select" id="f-order">
+          <option value="captured_at">最近抓取</option>
+          <option value="published_at">原始发表时间</option>
+          <option value="investor_code">按投资人</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" for="f-verification">核验状态</label>
+        <select class="select" id="f-verification">
+          <option value="">全部</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="spacer" style="height:var(--rhythm-4)"></div>
+
+    <div class="filter-group">
+      <span class="field-label">平台</span>
+      <div class="chip-row" id="f-platforms"></div>
+    </div>
+    <div class="spacer" style="height:var(--rhythm-3)"></div>
+    <div class="filter-group">
+      <span class="field-label">言论类型</span>
+      <div class="chip-row" id="f-types"></div>
+    </div>
+    <div class="spacer" style="height:var(--rhythm-3)"></div>
+    <div class="filter-group">
+      <span class="field-label">主题</span>
+      <div class="chip-row" id="f-themes"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 言论流 -->
+<section class="card section">
+  <div class="card-head">
+    <div>
+      <div class="card-title">言论与理念</div>
+      <div class="card-hint" id="quote-hint">-</div>
+    </div>
+    <div class="pager-actions">
+      <button class="btn btn-ghost btn-sm" id="btn-prev" type="button">上一页</button>
+      <span class="text-sm text-muted" id="page-info">-</span>
+      <button class="btn btn-ghost btn-sm" id="btn-next" type="button">下一页</button>
+    </div>
+  </div>
+  <div class="card-pad">
+    <div class="quote-list" id="quote-list"></div>
+  </div>
+</section>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="/static/insight.js"></script>
+{% endblock %}

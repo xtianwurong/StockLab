@@ -14,6 +14,13 @@ StockLab - Repository 基类 (stocklab.persistence.repository.base)
      **不再依赖 DataFrame 列序**（禁止 INSERT INTO t SELECT *）
    - 契约防线：缺列直接拒绝写入并记 ERROR，数据源改版不会静默污染数据库
    - 统一异常处理与日志格式：避免各 Repository 重复编写 try/except
+
+【两种写入语义，不要混用】
+   upsert()                  —— 会 UPDATE 已有行。用于「可修正的当前状态」
+                               （证券主表、日行情、行业估值快照）。
+   _insert_ignore_conflict() —— 只 INSERT，冲突即丢弃。用于「既成事实、不可变」
+                               （公告索引、投资人观点）。可变的实体一旦被误改，
+                               正确做法是追加新行 + 状态字段，改旧行会破坏审计链。
 """
 
 import logging
@@ -122,6 +129,67 @@ class BaseRepository:
             return 0
         except Exception as error:
             _logger.error("%s 表 UPSERT 未知错误: %s", self._TABLE_NAME, error)
+            return 0
+        finally:
+            conn.unregister(tmp_table)
+
+    def _insert_ignore_conflict(self, frame, conflict_columns, table_name=None):
+        """
+        只插入：契约对齐 -> 显式列名 INSERT ... ON CONFLICT DO NOTHING
+
+        供「既成事实」类 Repository 复用。冲突行静默保留原值 —— 调用方
+        拿不到「本次哪几行被丢弃」，需要这个信息就自己先查（如同步时的
+        existing_hashes 二次去重）。
+
+        Args:
+            frame (pd.DataFrame): 待写入数据（任意列序）
+            conflict_columns (list): 冲突检测列名（必须属于 _COLUMNS）
+            table_name (str, optional): 日志用表名，默认 _TABLE_NAME
+
+        Returns:
+            int: 提交的行数（**不等于实际新增行数**）；空数据或契约违约返回 0
+        """
+        table_name = table_name or self._TABLE_NAME
+        if frame is None or frame.empty:
+            _logger.warning("%s: 只插入接收到空数据，跳过写入", table_name)
+            return 0
+
+        invalid_columns = [c for c in conflict_columns if c not in self._COLUMNS]
+        if invalid_columns:
+            _logger.error(
+                "%s 的冲突列不属于契约: %s",
+                table_name,
+                ", ".join(invalid_columns[:8]),
+            )
+            return 0
+
+        try:
+            aligned = align_columns(frame, self._COLUMNS, table_name)
+        except DataContractError as error:
+            _logger.error("%s 写入被拒绝: %s", table_name, error)
+            return 0
+
+        column_list = ", ".join(self._COLUMNS)
+        select_list = ", ".join(self._COLUMNS)
+        conflict_str = ", ".join(conflict_columns)
+        conn = self._db.get_connection()
+        tmp_table = f"_{table_name.replace('.', '_')}_tmp"
+        conn.register(tmp_table, aligned)
+        try:
+            conn.execute(
+                f"INSERT INTO {table_name} ({column_list}) "
+                f"SELECT {select_list} FROM {tmp_table} "
+                f"ON CONFLICT ({conflict_str}) DO NOTHING"
+            )
+            _logger.info(
+                "%s 只插入完成: %d 条待写入记录", table_name, len(aligned)
+            )
+            return len(aligned)
+        except duckdb.Error as error:
+            _logger.error("%s 只插入数据库错误: %s", table_name, error)
+            return 0
+        except Exception as error:
+            _logger.error("%s 只插入未知错误: %s", table_name, error)
             return 0
         finally:
             conn.unregister(tmp_table)
