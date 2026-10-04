@@ -291,7 +291,9 @@ html[data-theme="dark"] .select {
   padding: var(--space-4);
 }
 
-/* ---- 以下由 base.css 迁入，与上方同属一个组件 ---- */
+/* ==========================================================================
+   消息条（全局唯一实现，由 SL.showMessage 切换 .show）
+   ========================================================================== */
 
 .card {
   background: var(--bg-card);
@@ -512,53 +514,6 @@ html[data-theme="dark"] .tab.active {
   color: var(--text-muted);
 }
 .meta-strip b { color: var(--text-sub); font-weight: 620; font-family: var(--font-mono); }
-
-/* ==========================================================================
-   消息条
-   ========================================================================== */
-
-.message {
-  display: none;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-md);
-  border: 1px solid transparent;
-}
-.message.show {
-  display: flex;
-}
-.message-info {
-  background: var(--accent-soft);
-  border-color: var(--brand-200);
-  color: var(--brand-800);
-}
-.message-success {
-  background: var(--success-50);
-  border-color: var(--success-500);
-  color: var(--success-700);
-}
-.message-warning {
-  background: var(--warning-50);
-  border-color: var(--warning-500);
-  color: var(--warning-700);
-}
-.message-error {
-  background: var(--danger-50);
-  border-color: var(--danger-500);
-  color: var(--danger-700);
-}
-
-html[data-theme="dark"] .message-info {
-  border-color: var(--brand-300);
-  color: var(--brand-800);
-}
-html[data-theme="dark"] .message-success,
-html[data-theme="dark"] .message-warning,
-html[data-theme="dark"] .message-error {
-  color: var(--text-main);
-}
 
 /* ==========================================================================
    提示气泡（Tooltip）

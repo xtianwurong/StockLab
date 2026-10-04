@@ -25,6 +25,7 @@ import statistics
 from flask import jsonify, request
 
 from app.web import store
+from app.web.webcommon import looks_like_date, parse_paging
 from stocklab.analytics import ValuationPercentileReporter
 
 _logger = logging.getLogger("StockLab.Web.MarketApi")
@@ -80,25 +81,6 @@ def _indicator_labels():
         dict: 指标列名 -> 中文标签
     """
     return {indicator: _reporter.indicator_label(indicator) for indicator in _INDICATORS}
-
-
-def _parse_paging():
-    """
-    读取并校验分页参数
-
-    Returns:
-        tuple: (offset, limit) 或 (None, 错误文案)
-    """
-    try:
-        offset = int(request.args.get("offset", "0"))
-        limit = int(request.args.get("limit", str(_DEFAULT_PAGE_SIZE)))
-    except ValueError:
-        return None, "参数 [offset]/[limit] 必须是整数"
-    if offset < 0:
-        return None, "参数 [offset] 不能为负数"
-    if limit < 1 or limit > _MAX_PAGE_SIZE:
-        return None, "参数 [limit] 取值范围 1~%d" % _MAX_PAGE_SIZE
-    return (offset, limit), None
 
 
 def _build_summary(rows):
@@ -169,7 +151,7 @@ def handle_market_ranking():
     if error:
         return jsonify({"error": error}), 400
 
-    paging, error = _parse_paging()
+    paging, error = parse_paging(_DEFAULT_PAGE_SIZE, _MAX_PAGE_SIZE)
     if error:
         return jsonify({"error": error}), 400
     offset, limit = paging
@@ -278,7 +260,7 @@ def handle_industry_valuation():
         return jsonify({"error": "参数 [level] 非法，合法值: 1 / 2 / 3 / 4"}), 400
 
     stat_date = request.args.get("stat_date", "").strip() or None
-    if stat_date and len(stat_date) > 10:
+    if stat_date and not looks_like_date(stat_date):
         return jsonify({"error": "参数 [stat_date] 非法，格式应为 YYYY-MM-DD"}), 400
 
     stat_dates = store.industry_stat_dates()

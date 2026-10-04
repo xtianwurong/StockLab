@@ -181,7 +181,8 @@
     var color = level ? cssColor(level.color) : cssColor(LEVEL_COLOR_NA, "#94a3b8");
     return (
       '<span class="badge" style="background:' + hexA(color, 0.12) +
-      ";color:" + color + '"><span class="badge-dot"></span>' + name + "</span>"
+      ";color:" + color + '"><span class="badge-dot"></span>' +
+      escapeHtml(name) + "</span>"
     );
   }
 
@@ -494,7 +495,8 @@
             }
             html +=
               '<div style="display:flex;justify-content:space-between;gap:16px">' +
-              '<span style="color:' + color.textMuted + '">' + item.marker + item.seriesName + "</span>" +
+              '<span style="color:' + color.textMuted + '">' +
+              item.marker + escapeHtml(item.seriesName) + "</span>" +
               '<span style="font-weight:600;font-family:var(--font-mono)">' + value + "</span>" +
               "</div>";
           }
@@ -629,26 +631,65 @@
   }
 
   /**
-   * 创建带指定 HTML 的元素（仅用于本项目自己生成的受控 HTML，如徽章）
+   * HTML 转义
    *
-   * @param {string} tag 标签名
-   * @param {string} className class
-   * @param {string} html HTML 字符串
-   * @returns {HTMLElement} 元素
+   * 【什么时候必须用】
+   *     只要这段字符串要拼进 innerHTML、或拼进 tooltip 的 formatter
+   *     返回值，且内容可能来自后端（行业名、股票名、语录正文），
+   *     就必须先过这里。写死的常量标签不需要。
+   *
+   * @param {*} text 原始文本
+   * @returns {string} 转义后的文本
    */
-  function elHtml(tag, className, html) {
-    var node = document.createElement(tag);
-    if (className) {
-      node.className = className;
+  function escapeHtml(text) {
+    return String(text === null || text === undefined ? "" : text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /**
+   * 显示页面消息条
+   *
+   * 【为什么全局只留一份】
+   *     必须带 `show` 类，消息条才会从 display:none 变成可见。
+   *     此前 8 个页面各抄一遍，industries.js 与 insight.js 都漏了这个类
+   *     —— 提示被正确渲染却永远看不见。所以它只该存在一次。
+   *
+   * @param {HTMLElement} el 消息条元素
+   * @param {string} text 文本（按 textContent 写入，天然免疫注入）
+   * @param {string} [kind] info | success | warning | error
+   * @returns {void}
+   */
+  function showMessage(el, text, kind) {
+    if (!el) {
+      return;
     }
-    node.innerHTML = html;
-    return node;
+    el.textContent = text || "";
+    el.className = "message show " + (kind || "info");
+  }
+
+  /**
+   * 隐藏消息条
+   *
+   * @param {HTMLElement} el 消息条元素
+   * @returns {void}
+   */
+  function clearMessage(el) {
+    if (!el) {
+      return;
+    }
+    el.textContent = "";
+    el.className = "message";
   }
 
   // ---------- 导出 ----------
   window.SL = {
     el: el,
-    elHtml: elHtml,
+    escapeHtml: escapeHtml,
+    showMessage: showMessage,
+    clearMessage: clearMessage,
     fetchJson: fetchJson,
     formatNumber: formatNumber,
     formatPercent: formatPercent,

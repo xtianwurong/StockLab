@@ -158,8 +158,7 @@
    * @returns {void}
    */
   function showMessage(text, type) {
-    dom.message.textContent = text;
-    dom.message.className = "message show " + (type || "info");
+    SL.showMessage(dom.message, text, type);
   }
 
   /**
@@ -168,8 +167,7 @@
    * @returns {void}
    */
   function hideMessage() {
-    dom.message.className = "message";
-    dom.message.textContent = "";
+    SL.clearMessage(dom.message);
   }
 
   /**
@@ -182,7 +180,7 @@
     if (SL.charts && SL.charts.levelColorOf) {
       return SL.charts.levelColorOf(percentile);
     }
-    return SL.cssVar("--level-na", "#94a3b8");
+    return SL.charts.cssVar("--level-na", "#94a3b8");
   }
 
   // ==========================================================================

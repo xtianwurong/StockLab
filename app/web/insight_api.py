@@ -42,6 +42,7 @@ import pandas as pd
 from flask import jsonify, render_template, request
 
 from app.web import store
+from app.web.webcommon import looks_like_date, parse_int_arg, parse_paging
 from stocklab.domain import (
     INVESTOR_STYLES,
     PLATFORMS,
@@ -233,25 +234,13 @@ def handle_insight_quotes():
         }), 400
 
     since = (request.args.get("since") or "").strip() or None
-    if since and not _looks_like_date(since):
+    if since and not looks_like_date(since):
         return jsonify({"error": "since 应为 YYYY-MM-DD 格式"}), 400
 
-    raw_limit = (request.args.get("limit") or "").strip()
-    raw_offset = (request.args.get("offset") or "").strip()
-    if (raw_limit and not raw_limit.lstrip("-").isdigit()) or \
-            (raw_offset and not raw_offset.lstrip("-").isdigit()):
-        # 垃圾值静默退回默认分页会让调用方以为自己的 limit 生效了，
-        # 却拿到一批条数完全不同的数据
-        return jsonify({"error": "limit / offset 必须是整数"}), 400
-
-    limit = _as_int(raw_limit, default=30)
-    offset = _as_int(raw_offset, default=0)
-    if limit <= 0 or limit > _MAX_LIMIT:
-        return jsonify({
-            "error": "limit 应在 1~%d 之间" % _MAX_LIMIT
-        }), 400
-    if offset < 0:
-        return jsonify({"error": "offset 不能为负"}), 400
+    paging, error = parse_paging(30, _MAX_LIMIT)
+    if error:
+        return jsonify({"error": error}), 400
+    offset, limit = paging
 
     try:
         database = store.facade_database()
@@ -300,13 +289,11 @@ def handle_insight_investor():
     if not code:
         return jsonify({"error": "缺少 investor_code"}), 400
 
-    raw_limit = (request.args.get("limit") or "").strip()
-    if raw_limit and not raw_limit.lstrip("-").isdigit():
-        return jsonify({"error": "limit 必须是整数"}), 400
-
-    limit = _as_int(raw_limit, default=20)
-    if limit <= 0 or limit > _MAX_LIMIT:
-        return jsonify({"error": "limit 应在 1~%d 之间" % _MAX_LIMIT}), 400
+    limit, error = parse_int_arg(
+        "limit", request.args.get("limit"), 20,
+        minimum=1, maximum=_MAX_LIMIT)
+    if error:
+        return jsonify({"error": error}), 400
 
     try:
         database = store.facade_database()
@@ -471,14 +458,3 @@ def _as_text(value):
     if pd.isna(parsed):
         return None
     return parsed.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _looks_like_date(text):
-    """粗判 YYYY-MM-DD（用 pandas 严格解析，避免自己写日期正则）"""
-    if len(text) != 10:
-        return False
-    try:
-        return not pd.isna(pd.to_datetime(text, format="%Y-%m-%d",
-                                          errors="raise"))
-    except (ValueError, TypeError):
-        return False

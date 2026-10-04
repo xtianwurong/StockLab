@@ -67,13 +67,11 @@
   // ---------- 工具 ----------
 
   function showMessage(text, kind) {
-    messageBox.textContent = text || "";
-    messageBox.className = "message " + (kind || "info");
+    SL.showMessage(messageBox, text, kind);
   }
 
   function clearMessage() {
-    messageBox.textContent = "";
-    messageBox.className = "message";
+    SL.clearMessage(messageBox);
   }
 
   function setStat(node, value) {

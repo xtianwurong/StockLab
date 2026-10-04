@@ -43,16 +43,14 @@
    * @param {string} kind info | error
    */
   function showMessage(text, kind) {
-    messageBox.textContent = text || "";
-    messageBox.className = "message " + (kind || "info");
+    SL.showMessage(messageBox, text, kind);
   }
 
   /**
    * 清空消息条
    */
   function clearMessage() {
-    messageBox.textContent = "";
-    messageBox.className = "message";
+    SL.clearMessage(messageBox);
   }
 
   /**
@@ -136,7 +134,7 @@
           if (!item) {
             return "";
           }
-          var lines = [item.industry_name];
+          var lines = [SL.escapeHtml(item.industry_name)];
           lines.push("PE 中位：" + (item.pe_median === null ? "无" : item.pe_median.toFixed(2)));
           lines.push("PE 加权：" + (item.pe_weighted === null ? "无" : item.pe_weighted.toFixed(2)));
           lines.push("公司数：" + SL.formatInt(item.company_count));

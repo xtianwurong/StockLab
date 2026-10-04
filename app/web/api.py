@@ -33,7 +33,6 @@ from stocklab.analytics import (
     ValuationPercentileAnalyzer,
     ValuationPercentileReporter,
 )
-from stocklab.facade import MarketDataFacade
 
 _logger = logging.getLogger("StockLab.Web.Api")
 

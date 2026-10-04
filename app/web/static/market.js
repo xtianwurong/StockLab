@@ -55,16 +55,14 @@
    * @param {string} kind info | error
    */
   function showMessage(text, kind) {
-    messageBox.textContent = text;
-    messageBox.className = "message show " + (kind || "info");
+    SL.showMessage(messageBox, text, kind);
   }
 
   /**
    * 清空消息条
    */
   function clearMessage() {
-    messageBox.textContent = "";
-    messageBox.className = "message";
+    SL.clearMessage(messageBox);
   }
 
   /**

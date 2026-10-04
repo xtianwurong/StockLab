@@ -42,6 +42,7 @@ import threading
 import duckdb
 import pandas as pd
 
+from app.web.webcommon import json_num, json_text
 from stocklab.facade import MarketDataFacade
 
 _logger = logging.getLogger("StockLab.Web.Store")
@@ -443,20 +444,20 @@ def load_market_percentile(indicator):
 
     results = []
     for row in frame.itertuples(index=False):
-        percentile = _num(row.percentile)
+        percentile = json_num(row.percentile)
         if percentile is not None:
             percentile = round(percentile, 2)
         results.append({
             "ts_code": row.ts_code,
-            "name": _text(row.name),
-            "market": _text(row.market),
-            "current_value": _round4(_num(row.current_value)),
+            "name": json_text(row.name),
+            "market": json_text(row.market),
+            "current_value": json_num(row.current_value, 4),
             "percentile": percentile,
             "level": percentile_level(percentile),
             "sample_count": int(row.sample_count),
-            "median_value": _round4(_num(row.median_value)),
-            "min_value": _round4(_num(row.min_value)),
-            "max_value": _round4(_num(row.max_value)),
+            "median_value": json_num(row.median_value, 4),
+            "min_value": json_num(row.min_value, 4),
+            "max_value": json_num(row.max_value, 4),
         })
 
     _cache_put(cache_key, results)
@@ -700,15 +701,15 @@ def load_industry_valuation(industry_level, stat_date=None):
     results = []
     for row in frame.itertuples(index=False):
         results.append({
-            "industry_code": _text(row.industry_code),
-            "industry_name": _text(row.industry_name),
+            "industry_code": json_text(row.industry_code),
+            "industry_name": json_text(row.industry_name),
             "company_count": int(row.company_count or 0),
             "priced_company_count": int(row.priced_company_count or 0),
-            "pe_weighted": _round4(_num(row.pe_weighted)),
-            "pe_median": _round4(_num(row.pe_median)),
-            "pe_arithmetic": _round4(_num(row.pe_arithmetic)),
-            "total_market_value": _round4(_num(row.total_market_value)),
-            "net_profit": _round4(_num(row.net_profit)),
+            "pe_weighted": json_num(row.pe_weighted, 4),
+            "pe_median": json_num(row.pe_median, 4),
+            "pe_arithmetic": json_num(row.pe_arithmetic, 4),
+            "total_market_value": json_num(row.total_market_value, 4),
+            "net_profit": json_num(row.net_profit, 4),
         })
 
     _cache_put(cache_key, results)
@@ -742,60 +743,6 @@ def market_data_as_of():
 # ---------------------------------------------------------------------------
 # 内部工具
 # ---------------------------------------------------------------------------
-
-def _num(value):
-    """
-    把 pandas 数值转成 JSON 安全的数值（NaN -> None）
-
-    Args:
-        value: 原始数值
-
-    Returns:
-        float | None: JSON 可序列化数值
-    """
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if number != number:  # NaN 自比较不等
-        return None
-    return number
-
-
-def _text(value):
-    """
-    把可能为 NaN 的字符串转成空串
-
-    Args:
-        value: 原始字符串或 NaN
-
-    Returns:
-        str: 非空字符串
-    """
-    if value is None:
-        return ""
-    if isinstance(value, float) and value != value:  # NaN
-        return ""
-    return str(value)
-
-
-def _round4(value):
-    """
-    数值轮转到 4 位小数（None 原样返回）
-
-    【为何要轮转】
-      SQL 返回的中位数可能是 37.88999999999999 这类全长浮点，
-      全市场 5572 行直接下发会让 payload 白白变大，且展示时还得再格式化一次。
-
-    Args:
-        value (float | None): 原始数值
-
-    Returns:
-        float | None: 轮转后的数值
-    """
-    if value is None:
-        return None
-    return round(value, 4)
 
 
 def percentile_level(percentile):

@@ -89,6 +89,41 @@ def test_route(client):
     print("  -> /api/health  status=%s db=%s as_of=%s" % (
         health["status"], health["db_path"], health["data_as_of"]))
 
+def test_sidebar_navigation(client):
+    """阶段一之二：侧边栏每一条都是**可点开的真实 URL**，且当前页只高亮一次
+
+    【为什么值得单列一个用例】
+      _sidebar.html 的导航项是四元组 (key, label, href, icon)，href 与 SVG path
+      曾经共用同一个变量，结果八个页面渲染出的链接全是
+      `href="M12 5v14M5 12h14"` —— 点击后 404。测试只断言「页面 200」时
+      这种回归完全看不见：HTML 照出、样式照好看，只有点击导航会失败。
+      所以这里直接对 href 取值断言，并且真的请求一遍。
+    """
+    pages = ["/", "/market", "/indices", "/industries",
+             "/insight", "/screener", "/compare", "/portfolio"]
+    seen_hrefs = None
+    for path in pages:
+        html = client.get(path).get_data(as_text=True)
+        hrefs = re.findall(r'<a class="nav-item[^"]*" href="([^"]*)"', html)
+        assert len(hrefs) >= 8, "%s 侧边栏渲染出 %d 项，应为 8" % (path, len(hrefs))
+
+        for href in hrefs:
+            # SVG path 一定以 M/L/m/z 等绘图指令开头，真 URL 一定以 / 开头
+            assert href.startswith("/"), \
+                "%s 的导航链接 %r 不是 URL —— href 与图标 path 变量串了" % (path, href)
+
+        # 每页恰好一条高亮，且就是当前页
+        assert html.count('class="nav-item active"') == 1, "%s 高亮条数不是 1" % path
+        assert seen_hrefs is None or hrefs == seen_hrefs, \
+            "%s 的导航项与首页不一致" % path
+        seen_hrefs = hrefs
+
+    # 逐条实点一遍，避免「href 看着对但路由没登记」
+    for href in seen_hrefs:
+        assert client.get(href).status_code == 200, "%s 返回非 200" % href
+    print("  -> 侧边栏 8 页 × %d 项链接全部可跳转" % len(seen_hrefs))
+
+
 def test_validation(client):
     """阶段二：参数校验（400）与未知路径（404）"""
 

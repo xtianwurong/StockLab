@@ -29,6 +29,7 @@ import pandas as pd
 from flask import jsonify, request
 
 from app.web import store
+from app.web.webcommon import json_num
 from stocklab.analytics import ValuationPercentileAnalyzer, ValuationPercentileReporter
 
 _logger = logging.getLogger("StockLab.Web.CompareApi")
@@ -46,28 +47,6 @@ _INDICATORS = ("pe_ttm", "pe_static", "pb", "ps", "pcf")
 
 # 指标中文名渲染器（复用既有映射，避免前端再抄一份标签表）
 _reporter = ValuationPercentileReporter()
-
-
-def _num(value, digits=4):
-    """
-    转成 JSON 安全的数值：NaN / inf -> None
-
-    Args:
-        value: 原始数值
-        digits (int): 保留小数位
-
-    Returns:
-        float | None: 可序列化数值
-    """
-    if value is None:
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if number != number or number in (float("inf"), float("-inf")):
-        return None
-    return round(number, digits)
 
 
 def _parse_indicator_list():
@@ -152,7 +131,7 @@ def _align_history(frame, codes, indicator):
         for _, row in group.iterrows():
             day = row["trade_date"]
             if day in index:
-                mapping[index[day]] = _num(row[indicator])
+                mapping[index[day]] = json_num(row[indicator], 4)
         per_code[code] = mapping
 
     series = {}
@@ -253,11 +232,11 @@ def _stock_rows(frame, codes, indicators):
             data = target.to_dict()
             record["metrics"][indicator] = {
                 "label": _reporter.indicator_label(indicator),
-                "current_value": _num(data.get("current_value")),
-                "percentile": _num(data.get("percentile"), 2),
-                "median_value": _num(data.get("median_value")),
-                "min_value": _num(data.get("min_value")),
-                "max_value": _num(data.get("max_value")),
+                "current_value": json_num(data.get("current_value"), 4),
+                "percentile": json_num(data.get("percentile"), 2),
+                "median_value": json_num(data.get("median_value"), 4),
+                "min_value": json_num(data.get("min_value"), 4),
+                "max_value": json_num(data.get("max_value"), 4),
                 "sample_count": data.get("sample_count"),
                 "interval_text": data.get("interval_text") or "",
                 "level7": store.percentile_level(data.get("percentile")),

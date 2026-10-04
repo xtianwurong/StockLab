@@ -37,6 +37,7 @@ import pandas as pd
 from flask import jsonify, request
 
 from app.web import store
+from app.web.webcommon import json_num, json_text
 from stocklab.factor import registry as factor_registry
 from stocklab.research.frame import build_factor_frame
 from stocklab.screener import ScreenError, ScreenPipeline
@@ -153,44 +154,6 @@ _PRESETS = (
 # ---------------------------------------------------------------------------
 # 内部工具
 # ---------------------------------------------------------------------------
-
-def _num(value, digits=4):
-    """
-    转成 JSON 安全的数值：NaN / inf -> None
-
-    Args:
-        value: 原始数值
-        digits (int): 保留小数位
-
-    Returns:
-        float | int | None: 可序列化数值
-    """
-    if value is None:
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if number != number or number in (float("inf"), float("-inf")):
-        return None
-    return round(number, digits)
-
-
-def _text(value):
-    """
-    转成 JSON 安全的字符串：None / NaN -> 空串
-
-    Args:
-        value: 单元格原始值
-
-    Returns:
-        str: 非空字符串
-    """
-    if value is None:
-        return ""
-    if isinstance(value, float) and value != value:
-        return ""
-    return str(value)
 
 
 def _latest_as_of():
@@ -324,7 +287,7 @@ def _funnel(summary, spec):
             rows.append({
                 "factor": factor_name,
                 "operator": operator,
-                "threshold": _text(threshold),
+                "threshold": json_text(threshold),
                 "passed": 0,
                 "failed": len(summary),
                 "in_frame": False,
@@ -336,7 +299,7 @@ def _funnel(summary, spec):
         rows.append({
             "factor": factor_name,
             "operator": operator,
-            "threshold": _text(threshold),
+            "threshold": json_text(threshold),
             "passed": int(passed_mask.sum()),
             "failed": int(len(passed_mask) - passed_mask.sum()),
             "in_frame": True,
@@ -474,11 +437,11 @@ def _scatter_points(summary, spec):
     for row_index in index:
         row = summary.loc[row_index]
         points.append([
-            _num(x_series.loc[row_index]),
-            _num(y_series.loc[row_index]),
+            json_num(x_series.loc[row_index], 4),
+            json_num(y_series.loc[row_index], 4),
             bool(row.get("passed")),
-            _text(row.get("ts_code")),
-            _text(row.get("name")),
+            json_text(row.get("ts_code")),
+            json_text(row.get("name")),
         ])
 
     return {"x": x_name, "y": y_name, "points": points}
@@ -511,7 +474,7 @@ def _with_positive_only(spec, positive_only):
     for rule in rules:
         if isinstance(rule, dict) and rule.get("factor") == "pe_ttm" \
                 and rule.get("operator") in ("gt", "ge") \
-                and _num(rule.get("value"), 4) == 0:
+                and json_num(rule.get("value"), 4) == 0:
             # 用户已经自己写了「PE > 0」，不再重复注入
             return spec
     merged = {"factor": "pe_ttm", "operator": "gt", "value": 0}
@@ -723,9 +686,9 @@ def handle_screener_run():
     rows = []
     for _, row in page.iterrows():
         record = {
-            "ts_code": _text(row.get("ts_code")),
-            "name": _text(row.get("name")),
-            "industry": _text(row.get("industry")),
+            "ts_code": json_text(row.get("ts_code")),
+            "name": json_text(row.get("name")),
+            "industry": json_text(row.get("industry")),
             "passed": bool(row.get("passed")),
             "failed_rules": list(row.get("failed_rules") or []),
         }
@@ -733,7 +696,7 @@ def handle_screener_run():
         for operand in _rule_operands(spec):
             factor_name = operand.get("factor")
             if factor_name and factor_name not in record:
-                record[factor_name] = _num(row.get(factor_name))
+                record[factor_name] = json_num(row.get(factor_name), 4)
         rows.append(record)
 
     return jsonify({

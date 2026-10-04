@@ -79,8 +79,7 @@
    * @returns {void}
    */
   function showMessage(text, type) {
-    dom.message.textContent = text;
-    dom.message.className = "message show " + (type || "info");
+    SL.showMessage(dom.message, text, type);
   }
 
   /**
@@ -89,8 +88,7 @@
    * @returns {void}
    */
   function hideMessage() {
-    dom.message.className = "message";
-    dom.message.textContent = "";
+    SL.clearMessage(dom.message);
   }
 
   /**
@@ -563,7 +561,7 @@
       if (!point || point.length < 5) {
         return "";
       }
-      return "<b>" + SL.ui.escapeHtml(point[4]) + "</b> " + SL.ui.escapeHtml(point[3]) +
+      return "<b>" + SL.escapeHtml(point[4]) + "</b> " + SL.escapeHtml(point[3]) +
         "<br/>" + xName + " " + SL.formatNumber(point[0], 2) +
         "<br/>" + yName + " " + SL.formatNumber(point[1], 2) +
         "<br/>" + (point[2] ? "通过" : "未通过");

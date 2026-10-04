@@ -84,20 +84,6 @@
     return node;
   }
 
-  /**
-   * HTML 转义（用于把后端文本塞进 title / aria-label 等属性）
-   *
-   * @param {string} text 原始文本
-   * @returns {string} 转义后的文本
-   */
-  function escapeHtml(text) {
-    return String(text === null || text === undefined ? "" : text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
   // ---------------------------------------------------------------------------
   // 函数工具
   // ---------------------------------------------------------------------------
@@ -125,34 +111,6 @@
   }
 
   /**
-   * 节流：waitMs 窗口内最多执行一次
-   *
-   * @param {Function} fn 待包装函数
-   * @param {number} waitMs 窗口毫秒
-   * @returns {Function} 包装后的函数
-   */
-  function throttle(fn, waitMs) {
-    var last = 0;
-    var pending = null;
-    return function () {
-      var context = this;
-      var args = arguments;
-      var now = Date.now();
-      var wait = (waitMs || 200) - (now - last);
-      if (wait <= 0) {
-        last = now;
-        fn.apply(context, args);
-      } else if (!pending) {
-        pending = setTimeout(function () {
-          pending = null;
-          last = Date.now();
-          fn.apply(context, args);
-        }, wait);
-      }
-    };
-  }
-
-  /**
    * 睡眠
    *
    * @param {number} ms 毫秒
@@ -162,85 +120,6 @@
     return new Promise(function (resolve) {
       setTimeout(resolve, ms);
     });
-  }
-
-  // ---------------------------------------------------------------------------
-  // 格式化补充（common.js 之外的展示需求）
-  // ---------------------------------------------------------------------------
-
-  /**
-   * 紧凑数字：万 / 亿 / 万亿（A 股语境）
-   *
-   * @param {number|null} value 数值
-   * @returns {string} 如 12.3亿 / 4,500万
-   */
-  function formatCompact(value) {
-    if (value === null || value === undefined || value !== value) {
-      return "-";
-    }
-    var abs = Math.abs(value);
-    if (abs >= 1e12) {
-      return (value / 1e12).toFixed(2) + "万亿";
-    }
-    if (abs >= 1e8) {
-      return (value / 1e8).toFixed(2) + "亿";
-    }
-    if (abs >= 1e4) {
-      return (value / 1e4).toFixed(2) + "万";
-    }
-    return SL.formatNumber(value, 2);
-  }
-
-  /**
-   * 带符号百分比（涨跌幅场景，+ / - 前缀）
-   *
-   * @param {number|null} value 数值（已乘 100）
-   * @param {number} [digits] 小数位，默认 2
-   * @returns {string} 如 +1.86%
-   */
-  function formatSignedPercent(value, digits) {
-    if (value === null || value === undefined || value !== value) {
-      return "-";
-    }
-    var places = digits === undefined ? 2 : digits;
-    var sign = value > 0 ? "+" : "";
-    return sign + value.toFixed(places) + "%";
-  }
-
-  /**
-   * 日期 -> YYYY-MM-DD
-   *
-   * @param {Date|string} value 日期
-   * @returns {string} 文本；非法返回 "-"
-   */
-  function formatDate(value) {
-    if (!value) {
-      return "-";
-    }
-    var date = value instanceof Date ? value : new Date(value);
-    if (isNaN(date.getTime())) {
-      return "-";
-    }
-    var month = String(date.getMonth() + 1);
-    var day = String(date.getDate());
-    return (
-      date.getFullYear() +
-      "-" +
-      (month.length < 2 ? "0" + month : month) +
-      "-" +
-      (day.length < 2 ? "0" + day : day)
-    );
-  }
-
-  /**
-   * 日期 -> YYYY-MM（区间标签）
-   *
-   * @param {Date|string} value 日期
-   * @returns {string} 文本；非法返回 "-"
-   */
-  function formatMonth(value) {
-    var text = formatDate(value);
-    return text === "-" ? "-" : text.slice(0, 7);
   }
 
   // ---------------------------------------------------------------------------
@@ -1074,14 +953,8 @@
     find: find,
     findAll: findAll,
     el: el,
-    escapeHtml: escapeHtml,
     debounce: debounce,
-    throttle: throttle,
     sleep: sleep,
-    formatCompact: formatCompact,
-    formatSignedPercent: formatSignedPercent,
-    formatDate: formatDate,
-    formatMonth: formatMonth,
     toast: toast,
     modal: modal,
     confirm: confirmDialog,

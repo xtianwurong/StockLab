@@ -70,8 +70,7 @@
    * @returns {void}
    */
   function showMessage(text, type) {
-    dom.message.textContent = text;
-    dom.message.className = "message show " + (type || "info");
+    SL.showMessage(dom.message, text, type);
   }
 
   /**
@@ -80,8 +79,7 @@
    * @returns {void}
    */
   function hideMessage() {
-    dom.message.className = "message";
-    dom.message.textContent = "";
+    SL.clearMessage(dom.message);
   }
 
   /**
@@ -120,7 +118,7 @@
         }
       }
     }
-    return SL.cssVar("--accent", "#2563eb");
+    return SL.charts.cssVar("--accent", "#2563eb");
   }
 
   /**
@@ -133,7 +131,7 @@
     if (SL.charts && SL.charts.levelColorOf) {
       return SL.charts.levelColorOf(percentile);
     }
-    return SL.cssVar("--level-na", "#94a3b8");
+    return SL.charts.cssVar("--level-na", "#94a3b8");
   }
 
   /**
@@ -451,7 +449,7 @@
           return "";
         }
         var html = '<div style="font-weight:600;margin-bottom:5px">' +
-          SL.ui.escapeHtml(params[0].axisValue) + "</div>";
+          SL.escapeHtml(params[0].axisValue) + "</div>";
         for (var i = 0; i < params.length; i++) {
           var item = params[i];
           var value = (item.value === null || item.value === undefined || item.value !== item.value)
@@ -459,7 +457,7 @@
             : SL.formatNumber(item.value, 2);
           html += '<div style="display:flex;justify-content:space-between;gap:16px">' +
             '<span style="color:' + color.textMuted + '">' +
-            SL.ui.escapeHtml(item.marker + item.seriesName) + "</span>" +
+            item.marker + SL.escapeHtml(item.seriesName) + "</span>" +
             '<span style="font-weight:600;font-family:var(--font-mono)">' + value + "</span></div>";
         }
         return html;
