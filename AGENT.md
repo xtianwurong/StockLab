@@ -324,14 +324,50 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
   另一个高频错法是**假设错了的前提**：hypothesis 上线当天就抓出我自己写的
   `len(dict)` 取到键数、以及「分位算的是序列最小值」（实际是**最新一日**那个值）。
 
-- **覆盖率基线**（`--cov=stocklab --cov=app`，离线用例 `-m "not integration"`）
-  - 总计 **65%**（6335 语句 / 2224 未覆盖）。离线跑不满的主要是 `datasource/` 下
-    五个真实通道（17%~35%），它们由 `integration` 用例覆盖。
-  - 纯计算与持久化层覆盖良好：`research/frame.py` 97%、`migrations/runner.py` 98%、
-    `factor/registry.py` 96%、`factor/rules.py` 94%、`fundamental/indicator.py` 94%、
-    `screener/pipeline.py` 86%、`research/snapshot.py` 83%。
-  - 明确偏低且值得补的：`facade/market_data.py` 46%（取数优先级回退路径）、
-    `persistence/repository/industry_valuation.py` 31%（行业表本地无数据，用例被跳过）。
+- **覆盖率基线**（`--cov=stocklab --cov=app`）：**87%**（6335 语句 / 825 未覆盖），422 个用例。
+  第一轮补覆盖率时是 65%，主要靠新增 6 个测试文件（见上表）拉起来。
+
+  - **接近满覆盖的关键路径**（改动这里最需要担心）
+    | 模块 | 覆盖率 | 为什么重要 |
+    |---|---|---|
+    | `facade/market_data.py` | 98% | 取数优先级路由与 cache-aside，错了不报错只给另一批数据 |
+    | `datasource/lifecycle_service.py` | 98% | 上市/退市日历，任一来源失败须整体中止 |
+    | `persistence/migrations/runner.py` | 98% | 迁移幂等与失败不记版本 |
+    | `analytics/valuation_distribution.py` | 98% | 全市场 PE 分布口径（直接进报告文案） |
+    | `datasource/fundamental_service.py` | 94% | 三大报表的契约失败不得产出 |
+    | `analytics/percentile_reporter.py` | 95% | 单股分位报告 |
+    | `app/scripts/sync_market_data.py` | 93% | 9 个同步阶段的失败语义与增量水位 |
+    | `analytics/profile_reporter.py` / `markdown_reporter.py` | 92% / 90% | 报告排版 |
+
+  - **仍偏低、且补起来性价比低的**（都是「要有真实外部响应才测得到」的分支）
+    | 模块 | 覆盖率 | 未覆盖原因 |
+    |---|---|---|
+    | `datasource/market_service.py` | 56% | 未覆盖 74 条，主要是各 akshare 源站改列名后的分支 |
+    | `_sources/baostock_source.py` / `akshare_source.py` | 55% / 56% | 真实 baostock 会话与 akshare 分页 |
+    | `common/http_client.py` | 35% | 只有 UA 补丁与重试包装，需真实网络故障才能触发 |
+    | `persistence/repository/index_membership.py` | 46% | 成分股按 as-of 还原，缺真实成分数据 |
+
+    这几处的共性：**要触发它们必须先有一个「上游返回了奇怪东西」的实况**。
+    与其用桩硬造（造出来的形状和真异常不一样，测了也不可信），不如等 `integration`
+    用例在真实上游出问题时自然覆盖。所以这里刻意停在 87%，不追求数字。
+
+- **补覆盖率时踩到的四类坑（都写进了测试注释，值得复用）**
+  1. **列名必须照抄契约，不能凭印象写。** 数据源归一化只认
+     `eastmoney.py` / `exchange.py` 里的候选列清单；写错一个字母就走到
+     「缺关键列 → DataContractError」分支，测试会「全绿但什么都没测到」。
+     造假数据一律用 `stocklab.domain.*_COLUMNS` 补全，别手写。
+  2. **断言要写实际契约，不是合理推测。** 这一轮写错了 8 处，全是同一类：
+     以为「按交易日对齐」实际是「按月（Period）对齐」；以为「不传层级只返回一级」
+     实际返回全部层级；以为门面会吞掉远端异常实际会向上抛；以为估值快照的
+     `pe_ttm` 取「市盈率-动态」实际取「市盈率(TTM)」。每个都会让测试验证
+     一个不存在的保护。
+  3. **不要用「调用次数」推断行为。** 曾写过 `空表 if 该代码已被调用过 else 数据`，
+     既依赖 `find_all()` 的返回顺序（顺序一变结论翻转），又把一只股票的数据写进了
+     另一只的行里。要表达「哪只失败」就用代码集合显式指定。
+  4. **改行为要拆成两个用例。** 发现公告「批内同内容不去重」时，拆成
+     `test_..._against_previous_runs`（应有行为）与
+     `test_..._does_not_dedupe_within_one_batch`（已知缺口 + 修复后本用例会红），
+     这样修复时必然要同步更新期望值，不会悄悄把缺口当成规范。
 
 - **`live_check_sources.py` 不是 pytest 用例**：它的函数名是 `check_*`，
   pytest 不会收集；有意保留为带退出码（0/1）的诊断脚本，供「上游疑似变更时
@@ -511,6 +547,13 @@ StockLab/
 ├── tests/                              # ── 测试（pytest 9，统一用 `./venv/bin/python -m pytest` 运行）──
 │   ├── conftest.py                     #     共享装置：tmp_db_path / fresh_db 临时库、app·ctx·client 真实库、联网探测
 │   ├── test_properties.py              #     口径不变量属性测试（hypothesis 随机穷举 + 两个回归钉子）
+│   ├── test_analytics_distribution.py   #     PE 分布分析器与三类报告渲染（此前 18%）
+│   ├── test_sync_cli.py                #     同步 9 阶段的失败语义、增量日期推导、main() 编排（此前 9%）
+│   ├── test_facade_routing.py           #     取数门面的 local_first / remote_first 两个方向与回写（此前 46%）
+│   ├── test_quote_service.py            #     单股取数的五级降级链逐级验证 + 按月对齐（此前 56%）
+│   ├── test_datasource_services.py      #     日历/财报服务的重试、限流、契约失败降级（此前 25%）
+│   ├── test_config_and_normalization.py #     config.ini 解析与归一化边界（此前 38%）
+│   ├── test_industry_repo_and_dashboard.py #    行业表读写与看板网页生成（此前 33% / 20%）
 │   ├── test_data_interfaces.py         #     全链路自检（类型转换 / 跨资产行情 / 实时快照 / 简称 / 月线估值 / 网页生成），除类型转换外均联网
 │   ├── test_web_api.py                 #     Web 层自检（路由 / 参数校验 / 中文名解析 / 七档前后端一致 / 口径抽样 / 页面要素与导航高亮 / 选股器 / 多股对比 / 组合监控 / 横向位置）
 │   ├── test_migrations.py              #     迁移自检（新库 / 幂等 / 老库升级 / 失败不记版本 / 序号重复）
@@ -616,6 +659,7 @@ pkill -f serve_web.py
 ./venv/bin/python -m pytest --lf                 # 只重跑上次失败的
 ./venv/bin/python -m pytest -n 4                 # 4 进程并行
 ./venv/bin/python -m pytest --cov=stocklab --cov=app --cov-report=term-missing
+./venv/bin/python -m pytest --cov=stocklab --cov=app --cov-report=html  # 打开 htmlcov/index.html 看未覆盖行
 
 # 全市场分位 SQL 与 analyzer 口径抽样比对（默认 300 只，非 0 退出码即为不一致）
 ./venv/bin/python app/scripts/verify_market_sql.py 300
