@@ -1,0 +1,261 @@
+{% extends "_layout.html" %}
+{% set active_page = "commodities" %}
+
+{% block page_title %}大宗商品{% endblock %}
+
+{% block page_css %}
+<style>
+  /* ---------- 分组标题 ---------- */
+  .cm-group-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    margin: var(--rhythm-4) 0 var(--space-3);
+  }
+  .cm-group-head:first-child { margin-top: 0; }
+  .cm-group-title { font-size: var(--font-sm); font-weight: 680; color: var(--text-sub); }
+  .cm-group-count { font-family: var(--font-mono); font-size: var(--font-xs); color: var(--text-faint); }
+
+  /* ---------- 品种卡片 ---------- */
+  .cm-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+    gap: var(--rhythm-3);
+  }
+  .cm-card {
+    display: flex;
+    flex-direction: column;
+    padding: var(--rhythm-4);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    transition: border-color var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
+  }
+  .cm-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .cm-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
+
+  .cm-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); }
+  .cm-name { font-size: var(--font-lg); font-weight: 680; letter-spacing: -0.01em; }
+  .cm-meta {
+    font-family: var(--font-mono);
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+    margin-top: 2px;
+  }
+  /* 价格用等宽大数：单位不齐时小数点不跳动 */
+  .cm-price {
+    font-family: var(--font-mono);
+    font-size: var(--font-3xl);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    margin-top: var(--space-3);
+  }
+  .cm-price .cm-unit {
+    font-family: inherit;
+    font-size: var(--font-sm);
+    font-weight: 550;
+    color: var(--text-faint);
+    margin-left: 5px;
+    letter-spacing: 0;
+  }
+  .cm-pct {
+    font-family: var(--font-mono);
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    margin-top: 3px;
+  }
+  .cm-temp { margin-top: var(--rhythm-3); }
+
+  /* 涨跌幅：语义色单独一组（红涨绿跌，A 股口径），与七档估值色不混用。
+     tokens.css 早已定义 --rise/--fall 但全站没有一个组件消费它，
+     这里是第一处 —— 两套颜色方向相反（估值色绿=便宜→红=贵），
+     混在同一个数上会让「涨了」和「贵了」看起来是一件事。 */
+  .chg-up { color: var(--rise); }
+  .chg-down { color: var(--fall); }
+  .chg-flat { color: var(--text-faint); }
+  .cm-changes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+    margin-top: var(--rhythm-3);
+    padding-top: var(--rhythm-3);
+    border-top: 1px solid var(--border-subtle);
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+  }
+  .cm-changes b {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--font-base);
+    font-weight: 650;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .cm-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+  }
+  .cm-stale-note {
+    margin-top: var(--space-2);
+    padding: 6px var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--warning-soft, var(--bg-sub));
+    color: var(--warning, var(--text-muted));
+    font-size: var(--font-xs);
+    line-height: 1.5;
+  }
+
+  /* ---------- 走势图 ---------- */
+  #commodity-chart { width: 100%; height: 400px; }
+  .cm-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rhythm-4);
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+  }
+  .cm-facts b {
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    font-weight: 650;
+    margin-left: 5px;
+  }
+
+  /* ---------- 明细表 ---------- */
+  .cm-table th:first-child { min-width: 132px; }
+  .cm-table td.num {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .cm-table th.num { text-align: right; }
+  .cm-table .sub { display: block; font-size: var(--font-xs); color: var(--text-faint); }
+  /* 涨跌幅三列与分位之间加一道竖向分隔，靠 nth-child 定位 —— 单元格由 JS 生成，
+     加 class 要改两处、易漂移 */
+  .cm-table th:nth-child(7), .cm-table td:nth-child(7) {
+    border-left: 1px solid var(--border-color);
+  }
+
+  @media (max-width: 860px) {
+    #commodity-chart { height: 300px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="page-head-main">
+    <div class="page-title">大宗商品</div>
+    <div class="page-desc">
+      十个大宗品种的最新价、近一年涨跌与
+      <span class="term" data-tip="当前价格在近 5 年价格序列中的经验分布位置。分位 90% 表示过去 90% 的时间都比现在便宜。这是「价格历史分位」，不是估值 —— 大宗商品没有盈利，无法谈 PE。">价格历史分位</span>
+      与七档评级。评级口径与指数页一致，但**含义不同**：这里比较的是价格高低，
+      不是资产估值。价格分位高只说明「比过去贵」，不构成卖出结论。
+    </div>
+  </div>
+  <div class="page-head-actions">
+    <button class="btn btn-primary btn-sm" id="btn-reload" type="button">刷新</button>
+  </div>
+</div>
+
+<div class="message section" id="message"></div>
+
+<!-- 概览条 -->
+<section class="stat-grid section" id="stat-grid">
+  <div class="stat-card">
+    <span class="stat-k">覆盖品种</span>
+    <span class="stat-v" id="stat-count">-</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-k">数据截止</span>
+    <span class="stat-v" id="stat-asof">-</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-k">有效评级</span>
+    <span class="stat-v" id="stat-rated">-</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-k">分位窗口</span>
+    <span class="stat-v" id="stat-window">-</span>
+  </div>
+</section>
+
+<!-- 分类卡片 -->
+<section class="card section">
+  <div class="card-head">
+    <div>
+      <div class="card-title">品种与评级</div>
+      <div class="card-hint">点击卡片查看该品种的价格趋势与分位参考线</div>
+    </div>
+    <div id="level-legend"></div>
+  </div>
+  <div class="card-pad">
+    <div id="cm-groups"></div>
+    <div class="empty-state hidden" id="cm-empty">
+      <div class="empty-state-title">暂无大宗商品数据</div>
+      <div>运行 <code>python app/scripts/sync_commodities.py sync</code> 后刷新</div>
+    </div>
+  </div>
+</section>
+
+<!-- 走势详情 -->
+<section class="card section hidden" id="detail-card">
+  <div class="card-head">
+    <div>
+      <div class="card-title" id="detail-name">-</div>
+      <div class="card-hint" id="detail-desc">-</div>
+    </div>
+  </div>
+  <div class="card-pad">
+    <div class="cm-facts" id="detail-facts"></div>
+    <div id="detail-unit-note" class="card-hint" style="margin-top:var(--space-2)"></div>
+  </div>
+  <div class="card-pad"><div id="commodity-chart"></div></div>
+</section>
+
+<!-- 明细表 -->
+<section class="card section">
+  <div class="card-head">
+    <div>
+      <div class="card-title">品种明细</div>
+      <div class="card-hint">涨跌幅锚定该品种序列的末日（可复算）；分位窗口内样本不足 60 条或数据超过 15 天未更新时评级显示「-」</div>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-compact cm-table">
+      <thead>
+        <tr>
+          <th>品种</th>
+          <th>分类</th>
+          <th class="num">最新价</th>
+          <th class="num">1 月</th>
+          <th class="num">3 月</th>
+          <th class="num">12 月</th>
+          <th class="num">分位</th>
+          <th>评级</th>
+          <th class="num">样本</th>
+          <th class="num">末次数据</th>
+        </tr>
+      </thead>
+      <tbody id="cm-body"></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="/static/commodities.js"></script>
+{% endblock %}

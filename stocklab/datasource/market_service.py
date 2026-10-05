@@ -19,11 +19,20 @@ StockLab - 入库取数模块 (stocklab.datasource.market_service)
    - 行业横截面：    fetch_industry_valuation
    - 单指数成分：    fetch_index_membership
 
-【数据源策略】（直连 akshare 各接口，自带重试与限流，不做 _sources 三通道降级）
+【数据源策略】（直连 akshare 各接口，自带重试与限流）
    - 东方财富：证券名录、日 K、全市场估值快照
    - 百度股市通：单股历史估值序列
    - 巨潮资讯：行业估值横截面、公司概况
    - 中证官网：指数成分
+
+【唯一的例外：日 K 三源回退】
+   日 K 是本模块唯一「按单只反复请求」的接口，归因、同步、远端回写都要逐股拉取，
+   东财单点不可达（反爬、网络抖动）会让整条链路静默返回空表——调用方看到的不是
+   「源挂了」而是「这只股票没数据」，是最难排查的假阴性。因此 fetch_daily_prices
+   在方法内部按 东财 → 腾讯 → 新浪 顺序回退，三个源最终都走同一个
+   normalize_daily_prices，输出契约完全一致，调用方无感知。
+   其余接口都是「一次拿全市场」的批量拉取，源不可达时整批为空、由调用方显式中止，
+   不做源级回退，避免为了降级把不同源的口径混进同一张表。
 
 【设计原则】
    - 契约归一化：源列 → normalizer → 领域契约列序，Repository 显式列名写入
@@ -53,6 +62,41 @@ _logger = logging.getLogger(__name__)
 __all__ = [
     "MarketService",
 ]
+
+# ── 日 K 三源回退（见模块头部【唯一的例外】）────────────────────────────
+_KLINE_SOURCES = ("eastmoney", "tencent", "sina")
+
+# 腾讯/新浪返回英文列名，先改名成东财列名，才能复用同一个归一化器
+_KLINE_EN_TO_CN = {
+    "date": "日期",
+    "open": "开盘",
+    "high": "最高",
+    "low": "最低",
+    "close": "收盘",
+    "volume": "成交量",
+    "amount": "成交额",
+}
+
+# 成交量口径：东财 kline 为「手」，腾讯（其接口文档明示 volume 统一为股）与新浪为「股」。
+# 同一张 market.daily_prices 不能混两种单位，备用源统一 ÷100 换算为手。
+_SHARES_PER_HAND = 100
+
+
+def _prefixed_symbol(ts_code: str) -> str:
+    """600000.SH -> sh600000（腾讯与新浪要求代码带市场前缀）"""
+    code, _, market = ts_code.partition(".")
+    return f"{market.lower()}{code}" if market else code
+
+
+def _adapt_kline_frame(raw, source):
+    """把备用源的列名与成交量口径对齐东财，供 normalize_daily_prices 统一处理"""
+    if source == "eastmoney":
+        return raw
+    frame = raw.rename(columns=_KLINE_EN_TO_CN)
+    if "成交量" in frame.columns:
+        frame = frame.copy()
+        frame["成交量"] = pd.to_numeric(frame["成交量"], errors="coerce") / _SHARES_PER_HAND
+    return frame
 
 
 class MarketService:
@@ -120,6 +164,8 @@ class MarketService:
         """
         获取单只股票指定日期范围的日 K 行情（不复权）
 
+        按 东财 → 腾讯 → 新浪 顺序回退，任一源返回数据即停；三源同契约。
+
         Args:
             ts_code (str): 证券代码，如 "600519.SH"
             start_date (str): 起始日期，格式 "YYYYMMDD"
@@ -127,40 +173,78 @@ class MarketService:
 
         Returns:
             pd.DataFrame: 日 K 行情表（DAILY_PRICE_COLUMNS 契约列序）；
-                          失败或源列不匹配时返回空表
+                          三源均无数据或均失败时返回空表
         """
         symbol = ts_code.split(".")[0]
+        prefixed = _prefixed_symbol(ts_code)
 
+        for source in _KLINE_SOURCES:
+            frame = self._fetch_kline_from(
+                source, symbol, prefixed, ts_code, start_date, end_date
+            )
+            if not frame.empty:
+                return frame
+
+        _logger.warning(
+            "[%s] 日 K 三源均无数据 %s~%s", ts_code, start_date, end_date
+        )
+        return pd.DataFrame()
+
+    def _fetch_kline_from(self, source, symbol, prefixed, ts_code, start_date, end_date):
+        """
+        单源日 K 拉取（带重试）；失败或源列改版返回空表，交由调用方切下一源
+
+        与原单源实现的两处差异：
+          1. DataContractError 不再是终点——列改版只代表这个源坏了，换源仍可能取到；
+          2. 重试耗尽只记 WARNING，因为后面还有备用源，只有三源全挂才值得 ERROR。
+        """
         for attempt in range(1, self._retry_count + 1):
             try:
-                raw = ak.stock_zh_a_hist(
-                    symbol=symbol,
-                    period="daily",
-                    start_date=start_date,
-                    end_date=end_date,
-                    adjust="",
+                raw = self._call_kline_source(
+                    source, symbol, prefixed, start_date, end_date
                 )
                 if raw is None or raw.empty:
                     return pd.DataFrame()
 
-                return normalize_daily_prices(raw, ts_code)
+                return normalize_daily_prices(_adapt_kline_frame(raw, source), ts_code)
             except DataContractError as error:
-                _logger.error(
-                    "[%s] 日 K 数据契约违约，本批次不入库: %s", ts_code, error
+                _logger.warning(
+                    "[%s] 源 %s 日 K 列结构变更，改用下一数据源: %s",
+                    ts_code, source, error,
                 )
                 return pd.DataFrame()
             except Exception as error:
                 _logger.debug(
-                    "stock_zh_a_hist [%s] 第 %d/%d 次失败: %s",
-                    ts_code,
-                    attempt,
-                    self._retry_count,
-                    error,
+                    "%s [%s] 第 %d/%d 次失败: %s",
+                    source, ts_code, attempt, self._retry_count, error,
                 )
                 if attempt < self._retry_count:
                     time.sleep(self._retry_interval_seconds)
 
+        _logger.warning(
+            "[%s] 源 %s 连续 %d 次失败，切换下一数据源",
+            ts_code, source, self._retry_count,
+        )
         return pd.DataFrame()
+
+    @staticmethod
+    def _call_kline_source(source, symbol, prefixed, start_date, end_date):
+        """按源名调用对应 akshare 接口（三源入参不同，集中在此处分支）"""
+        if source == "tencent":
+            return ak.stock_zh_a_hist_tx(
+                symbol=prefixed, start_date=start_date, end_date=end_date, adjust=""
+            )
+        if source == "sina":
+            return ak.stock_zh_a_daily(
+                symbol=prefixed, start_date=start_date, end_date=end_date, adjust=""
+            )
+        return ak.stock_zh_a_hist(
+            symbol=symbol,
+            period="daily",
+            start_date=start_date,
+            end_date=end_date,
+            adjust="",
+        )
 
     def fetch_realtime_valuations(self):
         """

@@ -23,6 +23,12 @@ StockLab 统计分析层 (stocklab.analytics)
    新增输出形态应另写渲染器并在本文件导出，不要给既有渲染器加格式开关。
 """
 
+from .fund_attribution import (
+    AttributionConfig,
+    AttributionResult,
+    BrinsonAttribution,
+    FundAttributionEngine,
+)
 from .markdown_reporter import ValuationDistributionMarkdownReporter
 from .percentile_reporter import ValuationPercentileReporter
 from .profile_reporter import ValuationDistributionReporter
@@ -79,4 +85,10 @@ __all__ = [
     "ValuationPercentileAnalyzer",
     "ValuationPercentileResult",
     "ValuationPercentileReporter",
+    "ValuationDistributionReporter",
+    "ValuationDistributionMarkdownReporter",
+    "AttributionConfig",
+    "AttributionResult",
+    "BrinsonAttribution",
+    "FundAttributionEngine",
 ]

@@ -155,7 +155,7 @@ class MarketDataFacade:
         _logger.warning("远端证券基础信息获取失败，回退本地库")
         return self._security_repo.find_all()
 
-    def fetch_daily_prices(self, ts_code, start_date, end_date):
+    def fetch_daily_prices(self, ts_code, start_date, end_date, force_remote=False):
         """
         获取单只证券指定日期范围的日 K 行情（不复权）
 
@@ -163,11 +163,14 @@ class MarketDataFacade:
             ts_code (str): 标准证券代码，如 "600519.SH"
             start_date (str): 起始日期，格式 "YYYY-MM-DD"
             end_date (str): 结束日期，格式 "YYYY-MM-DD"
+            force_remote (bool): 跳过本地命中判定强制回源。本地优先是按「有行就算命中」
+                路由的，本地只剩零星几行时会把远端整个盖住；调用方发现区间不足两点时
+                用它强制回源，回写照常发生
 
         Returns:
             pd.DataFrame: 日 K 行情表；本地与远端都无数据时返回空 DataFrame
         """
-        if self._priority == "local_first":
+        if self._priority == "local_first" and not force_remote:
             local_data = self._price_repo.find_by_code(ts_code, start_date, end_date)
             if not local_data.empty:
                 _logger.debug(
@@ -175,11 +178,6 @@ class MarketDataFacade:
                 )
                 return local_data
             _logger.info("本地库无 %s 的日 K，回退远端接口", ts_code)
-            remote_data = self._market_service.fetch_daily_prices(
-                ts_code, self._compact_date(start_date), self._compact_date(end_date)
-            )
-            self._write_back(self._price_repo, remote_data, "daily_prices")
-            return remote_data
 
         remote_data = self._market_service.fetch_daily_prices(
             ts_code, self._compact_date(start_date), self._compact_date(end_date)

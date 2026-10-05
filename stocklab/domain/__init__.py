@@ -13,6 +13,9 @@ StockLab 领域契约包 (stocklab.domain)
    - fundamental     基本面（Point-in-Time）：三表 + 财务指标
    - research        研究快照：snapshots / snapshot_results
    - insight         投资人观点：investors / investor_accounts / investor_quotes
+   - commodity       大宗商品价格：price_history
+    - fund_analysis   基金调仓分析：行业指数/基金净值/资金流/调仓分析结果
+   - benchmark        基准指数：行业权重快照（Brinson 归因基准）
 
 【使用约定】
    - Repository 写入前一律 align_columns(frame, 契约, 表名)，INSERT 显式列出列名；
@@ -20,6 +23,27 @@ StockLab 领域契约包 (stocklab.domain)
    - 修改任何契约必须同步修改对应 migration 的 DDL，否则契约测试会失败。
 """
 
+from .commodity import COMMODITY_PRICE_COLUMNS
+from .benchmark import (
+    BENCHMARK_INDUSTRY_WEIGHT_COLUMNS,
+    BENCHMARK_INDEX_LEVEL1,
+)
+from .fund_analysis import (
+    SW_INDEX_DAILY_COLUMNS,
+    SW_INDUSTRY_MAPPING_COLUMNS,
+    FUND_INFO_COLUMNS,
+    FUND_NAV_HISTORY_COLUMNS,
+    CAPITAL_FLOW_DAILY_COLUMNS,
+    FUND_ALLOCATION_ANALYSIS_COLUMNS,
+)
+from .fund_holding import (
+    STOCK_INDUSTRY_MAPPING_COLUMNS,
+    FUND_HOLDING_COLUMNS,
+    FUND_INDUSTRY_EXPOSURE_COLUMNS,
+    FUND_INDUSTRY_EXPOSURE_DAILY_COLUMNS,
+    FUND_ATTRIBUTION_COLUMNS,
+    FUND_MANAGER_TENURE_COLUMNS,
+)
 from .contract import (
     DataContractError,
     align_columns,
@@ -85,6 +109,21 @@ __all__ = [
     "INVESTOR_COLUMNS",
     "INVESTOR_ACCOUNT_COLUMNS",
     "INVESTOR_QUOTE_COLUMNS",
+    "COMMODITY_PRICE_COLUMNS",
+    "BENCHMARK_INDUSTRY_WEIGHT_COLUMNS",
+    "BENCHMARK_INDEX_LEVEL1",
+    "SW_INDEX_DAILY_COLUMNS",
+    "SW_INDUSTRY_MAPPING_COLUMNS",
+    "FUND_INFO_COLUMNS",
+    "FUND_NAV_HISTORY_COLUMNS",
+    "CAPITAL_FLOW_DAILY_COLUMNS",
+    "FUND_ALLOCATION_ANALYSIS_COLUMNS",
+    "STOCK_INDUSTRY_MAPPING_COLUMNS",
+    "FUND_HOLDING_COLUMNS",
+    "FUND_INDUSTRY_EXPOSURE_COLUMNS",
+    "FUND_INDUSTRY_EXPOSURE_DAILY_COLUMNS",
+    "FUND_ATTRIBUTION_COLUMNS",
+    "FUND_MANAGER_TENURE_COLUMNS",
     "PLATFORMS",
     "QUOTE_TYPES",
     "VERIFICATION_STATUSES",

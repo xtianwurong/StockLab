@@ -1,4 +1,4 @@
-{#
+{# 
   左侧常驻导航 (app/web/templates/_sidebar.html)
 
   分三组：分析 / 估值 / 工具。
@@ -10,22 +10,39 @@
   于是 8 个页面的导航链接全都渲染成了 "M12 5v14M5 12h14" 这类路径数据 ——
   点击后 404。href 必须独立成一项，不能和图标复用。
 
-  active_page 取值：analysis / market / indices / industries / insight /
-                  screener / compare / portfolio
+  active_page 取值：analysis / market / fund_analysis / fund_holding / indices / industries / commodities /
+                  insight / screener / compare / portfolio
 #}
+
+{# 定义 SVG 图标路径为变量，避免 Jinja2 将括号解析为元组 #}
+{% set ICON_ANALYSIS = "M12 5v14M5 12h14" %}
+{% set ICON_MARKET = "M3 21h18M6 20v-8M11 20V5M16 20v-6" %}
+{% set ICON_FUND_ANALYSIS = "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.73-.21-1.41-.55-2H4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2h16c1.1 0 2-.9 2-2v-4h-2v4zm0-11h-2V4h2v4zm0 16h-2v2h2v-2z" %}
+{% set ICON_FUND_HOLDING = "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.73-.21-1.41-.55-2H4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2h16c1.1 0 2-.9 2-2v-4h-2v4zm0-11h-2V4h2v4zm0 16h-2v2h2v-2z" %}
+{% set ICON_INDICES = "M3 17l6-6 4 4 8-8M15 7h6v6" %}
+{% set ICON_INDUSTRIES = "M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5" %}
+{% set ICON_COMMODITIES = "M3 7h13a4 4 0 010 8H7a4 4 0 000 8h11" %}
+{% set ICON_INSIGHT = "M4 19h16M7 15l3-4 3 2 4-6M7 5h10" %}
+{% set ICON_SCREENER = "M3 5h18l-7 8v6l-4 2v-8L3 5z" %}
+{% set ICON_COMPARE = "M3 4h7v16H3zM14 8h7v12h-7z" %}
+{% set ICON_PORTFOLIO = "M12 3l2.6 5.6 6 .8-4.4 4.2 1.1 6.1L12 16.8 6.7 19.7l1.1-6.1L3.4 9.4l6-.8L12 3z" %}
+
 {% set NAV_ANALYSIS = [
-  ("analysis", "个股分析", "/",          "M12 5v14M5 12h14"),
-  ("market",   "全市场",   "/market",    "M3 21h18M6 20v-8M11 20V5M16 20v-6")
+  ("analysis", "个股分析", "/", ICON_ANALYSIS),
+  ("market", "全市场", "/market", ICON_MARKET),
+  ("fund_analysis", "基金调仓", "/fund-analysis", ICON_FUND_ANALYSIS),
+  ("fund_holding", "基金持仓", "/fund-holding", ICON_FUND_HOLDING)
 ] %}
 {% set NAV_VALUATION = [
-  ("indices",     "指数估值", "/indices",     "M3 17l6-6 4 4 8-8M15 7h6v6"),
-  ("industries",  "行业估值", "/industries",  "M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5")
+  ("indices", "指数估值", "/indices", ICON_INDICES),
+  ("industries", "行业估值", "/industries", ICON_INDUSTRIES),
+  ("commodities", "大宗商品", "/commodities", ICON_COMMODITIES)
 ] %}
 {% set NAV_TOOLS = [
-  ("insight",   "投资理念", "/insight",   "M4 19h16M7 15l3-4 3 2 4-6M7 5h10"),
-  ("screener",  "选股器",   "/screener",  "M3 5h18l-7 8v6l-4 2v-8L3 5z"),
-  ("compare",   "多股对比", "/compare",   "M3 4h7v16H3zM14 8h7v12h-7z"),
-  ("portfolio", "组合监控", "/portfolio", "M12 3l2.6 5.6 6 .8-4.4 4.2 1.1 6.1L12 16.8 6.7 19.7l1.1-6.1L3.4 9.4l6-.8L12 3z")
+  ("insight", "投资理念", "/insight", ICON_INSIGHT),
+  ("screener", "选股器", "/screener", ICON_SCREENER),
+  ("compare", "多股对比", "/compare", ICON_COMPARE),
+  ("portfolio", "组合监控", "/portfolio", ICON_PORTFOLIO)
 ] %}
 
 <aside class="sidebar">

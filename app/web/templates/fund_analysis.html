@@ -1,0 +1,539 @@
+{% extends "_layout.html" %}
+{% set active_page = "fund_analysis" %}
+
+{% block page_title %}基金调仓分析{% endblock %}
+
+{% block page_css %}
+<style>
+  /* ---------- 页面结构 ---------- */
+  .fa-container {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: var(--rhythm-4);
+    height: calc(100vh - 140px);
+    min-height: 600px;
+  }
+
+  @media (max-width: 1100px) {
+    .fa-container {
+      grid-template-columns: 1fr;
+    }
+    .fa-sidebar {
+      position: sticky;
+      top: var(--rhythm-4);
+      max-height: 400px;
+      overflow-y: auto;
+    }
+  }
+
+  /* ---------- 侧边栏：基金选择与参数 ---------- */
+  .fa-sidebar {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--rhythm-4);
+  }
+
+  .fa-section {
+    margin-bottom: var(--rhythm-4);
+    padding-bottom: var(--rhythm-3);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .fa-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+  }
+
+  .fa-section-title {
+    font-size: var(--font-sm);
+    font-weight: 650;
+    color: var(--text-sub);
+    margin-bottom: var(--rhythm-2);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .fa-field {
+    margin-bottom: var(--rhythm-2);
+  }
+
+  .fa-field label {
+    display: block;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .fa-field .input,
+  .fa-field .select {
+    width: 100%;
+  }
+
+  .fa-field-row {
+    display: flex;
+    gap: var(--space-2);
+  }
+  .fa-field-row .fa-field {
+    flex: 1;
+  }
+
+  .fa-btn-group {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--rhythm-3);
+  }
+  .fa-btn-group .btn {
+    flex: 1;
+  }
+
+  /* ---------- 主区域：分析结果 ---------- */
+  .fa-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--rhythm-4);
+  }
+
+  /* 概览卡片 */
+  .fa-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--rhythm-3);
+  }
+
+  .fa-overview-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--rhythm-3);
+  }
+  .fa-overview-card.primary {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .fa-overview-card.warning {
+    border-color: var(--warning);
+    background: var(--warning-soft);
+  }
+  .fa-overview-card.danger {
+    border-color: var(--danger);
+    background: var(--danger-soft);
+  }
+
+  .fa-overview-label {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .fa-overview-value {
+    font-family: var(--font-mono);
+    font-size: var(--font-2xl);
+    font-weight: 700;
+    margin-top: 4px;
+    line-height: 1.2;
+  }
+  .fa-overview-sub {
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+    margin-top: 4px;
+  }
+
+  /* ---------- 暴露度图表 ---------- */
+  .fa-chart-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+  }
+  .fa-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--rhythm-3) var(--rhythm-4);
+    border-bottom: 1px solid var(--border-color);
+  }
+  .fa-chart-title {
+    font-size: var(--font-base);
+    font-weight: 650;
+  }
+  .fa-chart-tabs {
+    display: flex;
+    gap: var(--space-1);
+  }
+  .fa-chart-tab {
+    padding: 4px var(--space-3);
+    font-size: var(--font-sm);
+    color: var(--text-sub);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .fa-chart-tab:hover {
+    border-color: var(--border-color);
+  }
+  .fa-chart-tab.active {
+    background: var(--accent);
+    color: var(--accent-contrast);
+    border-color: var(--accent);
+  }
+
+  #fa-exposure-chart {
+    width: 100%;
+    height: 380px;
+  }
+
+  /* ---------- 信号表格 ---------- */
+  .fa-signals-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .fa-signals-header {
+    padding: var(--rhythm-3) var(--rhythm-4);
+    border-bottom: 1px solid var(--border-color);
+    font-size: var(--font-base);
+    font-weight: 650;
+  }
+
+  .fa-signals-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-sm);
+  }
+  .fa-signals-table th,
+  .fa-signals-table td {
+    padding: var(--space-3) var(--space-4);
+    text-align: left;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .fa-signals-table th {
+    background: var(--bg-subtle);
+    font-weight: 600;
+    color: var(--text-sub);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .fa-signals-table tr:hover td {
+    background: var(--bg-subtle);
+  }
+  .fa-signals-table .num {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .fa-signals-table .signal-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-full);
+    font-size: var(--font-xs);
+    font-weight: 600;
+  }
+  .fa-signals-table .signal-strong-increase { background: var(--danger-soft); color: var(--danger); }
+  .fa-signals-table .signal-moderate-increase { background: var(--danger-soft); color: var(--danger); }
+  .fa-signals-table .signal-slight-increase { background: var(--warning-soft); color: var(--warning); }
+  .fa-signals-table .signal-neutral { background: var(--bg-subtle); color: var(--text-muted); }
+  .fa-signals-table .signal-slight-decrease { background: var(--success-soft); color: var(--success); }
+  .fa-signals-table .signal-moderate-decrease { background: var(--success-soft); color: var(--success); }
+  .fa-signals-table .signal-strong-decrease { background: var(--success-soft); color: var(--success); }
+
+  .fa-confidence-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-full);
+    font-size: var(--font-xs);
+    font-weight: 600;
+  }
+  .fa-confidence-high { background: var(--success-soft); color: var(--success); }
+  .fa-confidence-medium { background: var(--warning-soft); color: var(--warning); }
+  .fa-confidence-low { background: var(--bg-subtle); color: var(--text-muted); }
+
+  .fa-capital-flow-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+  }
+  .fa-capital-flow-indicator.confirm {
+    color: var(--success);
+  }
+
+  /* ---------- 当前持仓分布 ---------- */
+  .fa-holdings-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--rhythm-3) var(--rhythm-4);
+  }
+  .fa-holdings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-3);
+    margin-top: var(--rhythm-3);
+  }
+  .fa-holding-card {
+    background: var(--bg-sub);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--rhythm-2) var(--rhythm-3);
+    transition: all var(--dur-fast);
+  }
+  .fa-holding-card:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+  }
+  .fa-holding-name {
+    font-weight: 600;
+    font-size: var(--font-sm);
+    margin-bottom: 4px;
+  }
+  .fa-holding-exposure {
+    font-family: var(--font-mono);
+    font-size: var(--font-lg);
+    font-weight: 700;
+    color: var(--text-main);
+  }
+  .fa-holding-change {
+    font-size: var(--font-xs);
+    margin-top: 4px;
+    font-family: var(--font-mono);
+  }
+  .fa-holding-change.positive { color: var(--danger); }
+  .fa-holding-change.negative { color: var(--success); }
+  .fa-holding-change.neutral { color: var(--text-muted); }
+
+  /* ---------- 空态 ---------- */
+  .fa-empty {
+    text-align: center;
+    padding: var(--rhythm-8) var(--rhythm-4);
+    color: var(--text-muted);
+  }
+  .fa-empty-title {
+    font-size: var(--font-lg);
+    font-weight: 600;
+    margin-bottom: var(--space-2);
+    color: var(--text-sub);
+  }
+
+  /* ---------- 加载状态 ---------- */
+  .fa-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--rhythm-6);
+    color: var(--text-muted);
+  }
+  .fa-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: fa-spin 1s linear infinite;
+    margin-right: var(--space-3);
+  }
+  @keyframes fa-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ---------- 响应式 ---------- */
+  @media (max-width: 768px) {
+    .fa-overview {
+      grid-template-columns: 1fr 1fr;
+    }
+    .fa-signals-table {
+      font-size: var(--font-xs);
+    }
+    .fa-signals-table th,
+    .fa-signals-table td {
+      padding: var(--space-2) var(--space-3);
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="page-head-main">
+    <div class="page-title">基金调仓分析</div>
+    <div class="page-desc">
+      基于 <span class="term" data-tip="Returns-Based Style Analysis，基于收益率的风格分解">RBSA 模型</span> 
+      对基金净值进行风格分解，通过滚动窗口回归追踪行业暴露度变化，
+      结合 <span class="term" data-tip="板块主力资金净流入与基金行业暴露度变化的相关性">资金流佐证</span>
+      推测基金经理调仓方向。结果仅供参考，不构成投资建议。
+    </div>
+  </div>
+</div>
+
+<div class="message section" id="message"></div>
+
+<div class="fa-container">
+  <!-- 侧边栏 -->
+  <aside class="fa-sidebar" id="fa-sidebar">
+    <section class="fa-section">
+      <div class="fa-section-title">基金选择</div>
+      <div class="fa-field">
+        <label>基金代码</label>
+        <div class="field field-code">
+          <input class="input" id="fund-code-input" type="text" autocomplete="off"
+                 placeholder="代码，如 000001.OF" list="fund-suggest">
+          <div class="suggest" id="fund-suggest-list"></div>
+        </div>
+      </div>
+      <div class="fa-field">
+        <label>基金名称</label>
+        <input class="input" id="fund-name-display" type="text" readonly placeholder="自动填充">
+      </div>
+    </section>
+
+    <section class="fa-section">
+      <div class="fa-section-title">分析参数</div>
+      <div class="fa-field">
+        <label>分析基准日</label>
+        <input class="input" id="analysis-date" type="date">
+      </div>
+      <div class="fa-field-row">
+        <div class="fa-field">
+          <label>回看窗口（交易日）</label>
+          <input class="input" id="window-days" type="number" min="10" max="250" value="60">
+        </div>
+        <div class="fa-field">
+          <label>行业层级</label>
+          <select class="select" id="industry-level">
+            <option value="1">一级行业（31个）</option>
+            <option value="2">二级行业（100+）</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="fa-section">
+      <div class="fa-section-title">高级选项</div>
+      <div class="fa-field">
+        <label>
+          <input type="checkbox" id="use-capital-flow" checked>
+          启用资金流佐证
+        </label>
+      </div>
+      <div class="fa-field">
+        <label>
+          <input type="checkbox" id="show-cash" checked>
+          显示现金仓位
+        </label>
+      </div>
+    </section>
+
+    <div class="fa-btn-group">
+      <button class="btn btn-primary" id="btn-analyze" type="button">开始分析</button>
+      <button class="btn btn-secondary" id="btn-refresh" type="button">刷新</button>
+    </div>
+  </aside>
+
+  <!-- 主区域 -->
+  <main class="fa-main" id="fa-main">
+    <!-- 概览卡片 -->
+    <section class="fa-overview" id="overview-cards" style="display:none">
+      <div class="fa-overview-card primary">
+        <div class="fa-overview-label">分析基金</div>
+        <div class="fa-overview-value" id="ov-fund-name">-</div>
+        <div class="fa-overview-sub" id="ov-fund-code">-</div>
+      </div>
+      <div class="fa-overview-card">
+        <div class="fa-overview-label">分析基准日</div>
+        <div class="fa-overview-value" id="ov-date">-</div>
+        <div class="fa-overview-sub">回看 {{ window_days }} 交易日</div>
+      </div>
+      <div class="fa-overview-card">
+        <div class="fa-overview-label">拟合优度 (R²)</div>
+        <div class="fa-overview-value" id="ov-r2">-</div>
+        <div class="fa-overview-sub">越接近 1 越可信</div>
+      </div>
+      <div class="fa-overview-card">
+        <div class="fa-overview-label">现金仓位</div>
+        <div class="fa-overview-value" id="ov-cash">-</div>
+        <div class="fa-overview-sub">1 - Σ行业暴露度</div>
+      </div>
+      <div class="fa-overview-card warning">
+        <div class="fa-overview-label">加仓行业数</div>
+        <div class="fa-overview-value" id="ov-inc">-</div>
+        <div class="fa-overview-sub">环比增持 > 0.5%</div>
+      </div>
+      <div class="fa-overview-card danger">
+        <div class="fa-overview-label">减仓行业数</div>
+        <div class="fa-overview-value" id="ov-dec">-</div>
+        <div class="fa-overview-sub">环比减持 > 0.5%</div>
+      </div>
+    </section>
+
+    <!-- 暴露度时序图 -->
+    <section class="fa-chart-section" id="chart-section" style="display:none">
+      <div class="fa-chart-header">
+        <div class="fa-chart-title">行业暴露度时序 (近 {{ window_days }} 交易日)</div>
+        <div class="fa-chart-tabs">
+          <button class="fa-chart-tab active" data-tab="area">面积图</button>
+          <button class="fa-chart-tab" data-tab="line">折线图</button>
+          <button class="fa-chart-tab" data-tab="stacked">堆叠图</button>
+        </div>
+      </div>
+      <div id="fa-exposure-chart"></div>
+    </section>
+
+    <!-- 调仓信号表格 -->
+    <section class="fa-signals-section" id="signals-section" style="display:none">
+      <div class="fa-signals-header">
+        调仓信号 (按信号强度排序)
+        <span style="margin-left:var(--rhythm-3);font-size:var(--font-xs);color:var(--text-muted)">
+          资金流佐证：<span class="fa-capital-flow-indicator confirm">✓ 吻合</span> / <span class="fa-capital-flow-indicator">✗ 不吻合</span>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="fa-signals-table">
+          <thead>
+            <tr>
+              <th>行业</th>
+              <th class="num">当前暴露度</th>
+              <th class="num">环比变化</th>
+              <th class="num">5日变化</th>
+              <th class="num">20日变化</th>
+              <th>信号</th>
+              <th class="num">资金流相关性</th>
+              <th>资金流佐证</th>
+              <th>置信度</th>
+            </tr>
+          </thead>
+          <tbody id="signals-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 当前持仓分布 -->
+    <section class="fa-holdings-section" id="holdings-section" style="display:none">
+      <div class="section-head">
+        <div class="section-title">当前行业持仓分布 (Top 20)</div>
+        <div class="section-hint">按当前暴露度降序；颜色表示环比变化方向（红=加仓，绿=减仓）</div>
+      </div>
+      <div class="fa-holdings-grid" id="holdings-grid"></div>
+    </section>
+
+    <!-- 空态 -->
+    <div class="fa-empty" id="empty-state">
+      <div class="fa-empty-title">请选择基金并开始分析</div>
+      <div>支持输入基金代码（如 000001.OF）或中文名称搜索</div>
+    </div>
+
+    <!-- 加载状态 -->
+    <div class="fa-loading hidden" id="loading-state">
+      <div class="fa-spinner"></div>
+      <span>分析中，请稍候...</span>
+    </div>
+  </main>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="/static/fund_analysis.js"></script>
+{% endblock %}

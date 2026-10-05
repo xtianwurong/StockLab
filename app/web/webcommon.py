@@ -40,6 +40,7 @@ __all__ = [
     "json_num",
     "json_text",
     "parse_int_arg",
+    "parse_date_arg",
     "parse_paging",
     "looks_like_date",
 ]
@@ -224,3 +225,28 @@ def looks_like_date(text):
                                           errors="raise"))
     except (ValueError, TypeError):
         return False
+
+
+def parse_date_arg(name, raw):
+    """
+    解析日期查询参数 (YYYY-MM-DD)
+
+    Args:
+        name (str): 参数名，只用于拼错误文案
+        raw (str | None): 从 request.args 取到的原始值
+
+    Returns:
+        tuple: (date 字符串或 None, None) 或 (None, 错误文案)；调用方据后者回 400
+
+    Examples:
+        >>> parse_date_arg("date", "2026-01-01")
+        ('2026-01-01', None)
+        >>> parse_date_arg("date", "bad")
+        (None, '参数 [date] 格式非法，需 YYYY-MM-DD')
+    """
+    text = "" if raw is None else str(raw).strip()
+    if not text:
+        return None, None
+    if not looks_like_date(text):
+        return None, "参数 [%s] 格式非法，需 YYYY-MM-DD" % name
+    return text, None

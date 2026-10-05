@@ -94,8 +94,11 @@ def _to_sina_symbol(stock_code):
     if "." in raw:
         code, suffix = raw.split(".")[0], raw.split(".")[1].upper()
     else:
+        # normalize_ts_code 对非数字垃圾值不再伪造交易所后缀（原样返回），
+        # 因此这里可能拿不到后缀；留空即可，下面的数字位数校验会统一拒收
+        normalized = normalize_ts_code(raw)
         code = raw
-        suffix = normalize_ts_code(raw).split(".")[1]
+        suffix = normalized.split(".")[1].upper() if "." in normalized else ""
 
     # 严格校验：新浪只接受 6 位数字代码（避免把任意字符串拼进 URL）
     if not code.isdigit() or len(code) != 6:
@@ -199,7 +202,7 @@ class SinaDataSource(StockDataSource):
             StockRealtimeQuote | None: 失败返回 None
         """
         fields = self._fetch_quote_fields(stock_code)
-        if not fields:
+        if not fields or len(fields) < 10:
             return None
 
         price = safe_float(fields[3], 0.0)
@@ -209,8 +212,13 @@ class SinaDataSource(StockDataSource):
                             self.SOURCE_NAME, stock_code, fields[3], fields[2])
             return None
 
+        name = fields[0].strip()
+        if not name:
+            _logger.warning("%s %s 股票名称为空", self.SOURCE_NAME, stock_code)
+            return None
+
         quote = StockRealtimeQuote(stock_code)
-        quote.stock_name = fields[0].strip()
+        quote.stock_name = name
         quote.source_name = self.SOURCE_NAME
         quote.current_price = price
         quote.yesterday_close = prev_close
@@ -231,9 +239,12 @@ class SinaDataSource(StockDataSource):
     def fetch_stock_name(self, stock_code):
         """查询股票简称（直接复用实时行情响应，避免多发一次请求）"""
         fields = self._fetch_quote_fields(stock_code)
-        if not fields:
+        if not fields or len(fields) < 10:
             return ""
-        return fields[0].strip()
+        name = fields[0].strip()
+        if not name:
+            return ""
+        return name
 
     def fetch_monthly_close_prices(
         self, stock_code, adjust_type, retry_count=1, retry_interval_seconds=0

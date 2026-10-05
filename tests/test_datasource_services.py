@@ -397,6 +397,74 @@ def test_fetch_daily_prices_exception_returns_empty(ak):
     assert ms.MarketService().fetch_daily_prices("600519.SH", "20260901", "20260930").empty
 
 
+def _tx_frame():
+    """腾讯/新浪口径的英文列：volume 为股、amount 为元"""
+    return pd.DataFrame(
+        {
+            "date": ["2026-07-02", "2026-07-03"],
+            "open": [8.71, 8.69],
+            "close": [8.70, 8.69],
+            "high": [8.84, 8.82],
+            "low": [8.56, 8.59],
+            "volume": [71137604, 70513349],
+            "amount": [618574645, 604291542],
+        }
+    )
+
+
+def test_fetch_daily_prices_falls_back_to_tencent(ak):
+    """东财单点故障时必须回退腾讯，而不是静默返回空表（那会让归因误判为『这只股票没数据』）"""
+    ak.behaviour["stock_zh_a_hist"] = RuntimeError("ProxyError")
+    ak.behaviour["stock_zh_a_hist_tx"] = _tx_frame()
+
+    frame = ms.MarketService(retry_count=1).fetch_daily_prices(
+        "600000.SH", "20260702", "20260703"
+    )
+
+    assert not frame.empty
+    assert frame["ts_code"].eq("600000.SH").all()
+    assert frame["trade_date"].astype(str).tolist() == ["2026-07-02", "2026-07-03"]
+    # 备用源成交量是股，落库口径是手，必须除以 100，否则换手/量能类指标差 100 倍
+    assert frame["volume"].tolist() == [711376.04, 705133.49]
+    assert frame["amount"].tolist() == [618574645.0, 604291542.0]
+
+
+def test_fetch_daily_prices_falls_back_to_sina(ak):
+    """东财与腾讯都不可用时再退到新浪，且带市场前缀（sh600000）"""
+    ak.behaviour["stock_zh_a_hist"] = RuntimeError("ProxyError")
+    ak.behaviour["stock_zh_a_hist_tx"] = RuntimeError("连接被重置")
+    ak.behaviour["stock_zh_a_daily"] = _tx_frame()
+
+    frame = ms.MarketService(retry_count=1).fetch_daily_prices(
+        "600000.SH", "20260702", "20260703"
+    )
+
+    assert not frame.empty
+    assert ak.calls[-1][0] == "stock_zh_a_daily"
+    assert ak.calls[-1][1]["symbol"] == "sh600000"
+
+
+def test_fetch_daily_prices_all_sources_down_returns_empty(ak):
+    """三源全挂仍返回空表，绝不带病写出契约外的帧"""
+    for name in ("stock_zh_a_hist", "stock_zh_a_hist_tx", "stock_zh_a_daily"):
+        ak.behaviour[name] = RuntimeError("接口 502")
+
+    assert ms.MarketService(retry_count=1).fetch_daily_prices(
+        "600519.SH", "20260901", "20260930"
+    ).empty
+
+
+def test_fetch_daily_prices_empty_from_first_source_tries_others(ak):
+    """主源返回空表（源侧查无此股）也应继续尝试备用源，避免把『源没数据』当结论"""
+    ak.behaviour["stock_zh_a_hist"] = pd.DataFrame()
+    ak.behaviour["stock_zh_a_hist_tx"] = _tx_frame()
+
+    frame = ms.MarketService(retry_count=1).fetch_daily_prices(
+        "600000.SH", "20260702", "20260703"
+    )
+    assert not frame.empty
+
+
 def test_fetch_valuation_history_empty(ak):
     ak.behaviour["stock_zh_valuation_baidu"] = pd.DataFrame()
     result = ms.MarketService().fetch_valuation_history("600519.SH", "近五年")

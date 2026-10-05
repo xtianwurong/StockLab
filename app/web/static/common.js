@@ -374,21 +374,29 @@
   // ---------- ECharts 走势图 ----------
 
   /**
-   * 构造走势图 option：双 y 轴（PE 类 / 其他）+ 图例切换 + 分位参考线 + 分位带
+   * 构造走势图 option：y 轴 + 图例切换 + 分位参考线 + 分位带
    *
    * 【双轴缘由】PE 常在 10~100 量级而 PB 多在 1~10、PCF 可到 200+，
    *              混在同一坐标轴会让低量纲曲线被压成直线，无法辨识走势。
+   *
+   * 【何时必须传 singleAxis】
+   *   默认把「非 pe_ttm/pe_static 的序列」判定为 PB/PS/PCF 类并放到右轴。
+   *   这对估值页成立，对**单一价格序列**（大宗商品收盘价）不成立 ——
+   *   只有一条曲线却被摆到右侧副轴，坐标轴是空的，读者会以为有两条不同
+   *   量纲的序列。单一序列一律显式传 singleAxis: true。
    *
    * @param {object} args 参数集
    *   history     {dates, series}  后端 history 字段
    *   indicatorMeta {指标: {label}} 指标中文名映射
    *   primary     {string} 主指标（画参考线与分位带的那一个）
+   *   singleAxis  {boolean} 可选，强制单 y 轴（缺省 false = 自动判定双轴）
    * @returns {object} ECharts option
    */
   function buildTrendOption(args) {
     var history = args.history;
     var meta = args.indicatorMeta || {};
     var primary = args.primary;
+    var forceSingleAxis = args.singleAxis === true;
     var color = palette();
 
     var dates = history.dates;
@@ -399,10 +407,12 @@
 
     var keys = Object.keys(history.series);
     var hasRight = false;
-    for (var k = 0; k < keys.length; k++) {
-      if (PE_INDICATORS.indexOf(keys[k]) === -1) {
-        hasRight = true;
-        break;
+    if (!forceSingleAxis) {
+      for (var k = 0; k < keys.length; k++) {
+        if (PE_INDICATORS.indexOf(keys[k]) === -1) {
+          hasRight = true;
+          break;
+        }
       }
     }
     if (hasRight) {

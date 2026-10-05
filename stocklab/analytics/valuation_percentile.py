@@ -71,6 +71,17 @@ VALUATION_LEVEL_LOW = "相对低位"
 VALUATION_LEVEL_MIDDLE = "中性"
 VALUATION_LEVEL_HIGH = "相对高位"
 
+# 默认待算指标（历史估值表的五列）。analyze(indicators=...) 可覆盖，
+# 供大宗商品等「拿价格列算同一个分位口径」的调用方复用 —— 分位是**唯一实现**，
+# 不允许在调用方再写一遍 count(x < v)/len(x)，否则两处口径迟早漂移。
+_DEFAULT_INDICATORS = (
+    VALUATION_INDICATOR_PE_TTM,
+    VALUATION_INDICATOR_PE_STATIC,
+    VALUATION_INDICATOR_PB,
+    VALUATION_INDICATOR_PS,
+    VALUATION_INDICATOR_PCF,
+)
+
 _LOW_PERCENTILE = 30.0
 _HIGH_PERCENTILE = 70.0
 
@@ -143,7 +154,8 @@ class ValuationPercentileAnalyzer:
       3. 输出区间统计与高低档位判定
     """
 
-    def analyze(self, history_df, current_values=None, start_date=None, end_date=None):
+    def analyze(self, history_df, current_values=None, start_date=None,
+                end_date=None, indicators=None):
         """
         计算各估值指标的历史分位
 
@@ -154,6 +166,11 @@ class ValuationPercentileAnalyzer:
                                              为空时取区间内最新一个交易日的值
             start_date (str, optional): 计算区间起始日期 YYYY-MM-DD，缺省为全部历史
             end_date (str, optional): 计算区间结束日期 YYYY-MM-DD，缺省为最新
+            indicators (list, optional): 待算的列名。缺省 None 表示历史估值表的
+                                         五列（pe_ttm/pe_static/pb/ps/pcf）。
+                                         传入后只算这些列 —— 用于非估值序列
+                                         （如大宗商品价格 close）复用同一个分位
+                                         口径。分位是唯一实现，调用方不得自算。
 
         Returns:
             list: ValuationPercentileResult 列表（每个指标一项）
@@ -162,18 +179,18 @@ class ValuationPercentileAnalyzer:
 
         if history_df is None or history_df.empty:
             _logger.warning("历史估值序列为空，无法计算分位")
-            return self._build_unavailable_results(current_values)
+            return self._build_unavailable_results(current_values, indicators)
 
         sample_df = self._slice_interval(history_df, start_date, end_date)
         if sample_df.empty:
             _logger.warning("指定区间内无历史估值样本，无法计算分位")
-            return self._build_unavailable_results(current_values)
+            return self._build_unavailable_results(current_values, indicators)
 
         interval_text = self._build_interval_text(sample_df)
 
         # 候选指标中，有数据的正常计算；无数据的也要显式标记为不可用，
         # 否则调用方无法区分「该指标算不出来」与「该指标不存在」
-        indicators = self._resolve_indicator_candidates(sample_df)
+        indicators = self._resolve_indicator_candidates(sample_df, indicators)
         for indicator in indicators:
             results.append(
                 self._analyze_indicator(
@@ -280,23 +297,18 @@ class ValuationPercentileAnalyzer:
         except (ValueError, TypeError):
             return date_text
 
-    def _resolve_indicator_candidates(self, sample_df):
+    def _resolve_indicator_candidates(self, sample_df, indicators=None):
         """
-        列出待计算的指标列（表结构中实际存在的估值列）
+        列出待计算的指标列（表结构中实际存在、且调用方要求算的列）
 
         Args:
             sample_df (pd.DataFrame): 区间内的历史估值表
+            indicators (list, optional): 调用方指定的列名；None 表示默认五列
 
         Returns:
-            list: 指标列名列表
+            list: 指标列名列表（保留传入顺序）
         """
-        candidates = [
-            VALUATION_INDICATOR_PE_TTM,
-            VALUATION_INDICATOR_PE_STATIC,
-            VALUATION_INDICATOR_PB,
-            VALUATION_INDICATOR_PS,
-            VALUATION_INDICATOR_PCF,
-        ]
+        candidates = list(indicators) if indicators else list(_DEFAULT_INDICATORS)
 
         found = []
         for indicator in candidates:
@@ -365,28 +377,28 @@ class ValuationPercentileAnalyzer:
             return VALUATION_LEVEL_HIGH
         return VALUATION_LEVEL_MIDDLE
 
-    def _build_unavailable_results(self, current_values):
+    def _build_unavailable_results(self, current_values, indicators=None):
         """
         构造全部指标均不可用的结果列表
 
         Args:
             current_values (dict): 当前值字典，可能为空
+            indicators (list, optional): 调用方指定的列名；优先级高于
+                                         current_values 的键（调用方明确说了
+                                         「我只要这几个」，那就按它构造）
 
         Returns:
             list: ValuationPercentileResult 列表
         """
-        indicators = [
-            VALUATION_INDICATOR_PE_TTM,
-            VALUATION_INDICATOR_PE_STATIC,
-            VALUATION_INDICATOR_PB,
-            VALUATION_INDICATOR_PS,
-            VALUATION_INDICATOR_PCF,
-        ]
-        if current_values:
-            indicators = list(current_values.keys())
+        if indicators:
+            candidates = list(indicators)
+        elif current_values:
+            candidates = list(current_values.keys())
+        else:
+            candidates = list(_DEFAULT_INDICATORS)
 
         results = []
-        for indicator in indicators:
+        for indicator in candidates:
             results.append(
                 ValuationPercentileResult(
                     indicator, None, None, 0, None, None, None, _EMPTY_TEXT, _EMPTY_TEXT

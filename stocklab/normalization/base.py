@@ -39,6 +39,10 @@ def normalize_ts_code(code):
        6/5/90 开头 → 上交所；4/8/92 开头 → 北交所；其余 → 深交所。
        注：920/4/8 属北交所，5 开头为沪市 ETF/债券，故归入 .SH。
 
+    【幂等与容错】
+       已带后缀的代码原样返回（避免 600519.SH 变成 600519.SH.SH），
+       非纯数字代码（空值、A/HK 混排、"-"）原样返回，由调用方决定是否丢弃。
+
     Args:
         code (str): 纯数字代码，如 "600519"
 
@@ -46,6 +50,12 @@ def normalize_ts_code(code):
         str: 标准格式，如 "600519.SH"
     """
     code = str(code).strip()
+    if not code:
+        return code
+    if "." in code:
+        return code.upper()
+    if not code.isdigit():
+        return code
     if code.startswith(("6", "5", "90")):
         return code + ".SH"
     if code.startswith(("4", "8", "92")):

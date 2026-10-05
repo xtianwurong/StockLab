@@ -12,7 +12,25 @@ StockLab 数据访问层 (stocklab.persistence.repository)
 
 from .announcement import AnnouncementRepository
 from .base import BaseRepository
+from .benchmark import BenchmarkIndustryWeightRepository
+from .commodity import CommodityPriceRepository
 from .daily_price import DailyPriceRepository
+from .fund_analysis import (
+    SWIndexDailyRepository,
+    SWIndustryMappingRepository,
+    FundInfoRepository,
+    FundNavHistoryRepository,
+    CapitalFlowDailyRepository,
+    FundAllocationAnalysisRepository,
+)
+from .fund_holding import (
+    StockIndustryMappingRepository,
+    FundHoldingRepository,
+    FundIndustryExposureRepository,
+    FundIndustryExposureDailyRepository,
+    FundAttributionRepository,
+    FundManagerTenureRepository,
+)
 from .daily_valuation import DailyValuationRepository
 from .fundamental import (
     BalanceSheetRepository,
@@ -35,6 +53,20 @@ from .valuation_history import ValuationHistoryRepository
 __all__ = [
     "BaseRepository",
     "AnnouncementRepository",
+    "BenchmarkIndustryWeightRepository",
+    "CommodityPriceRepository",
+    "SWIndexDailyRepository",
+    "SWIndustryMappingRepository",
+    "FundInfoRepository",
+    "FundNavHistoryRepository",
+    "CapitalFlowDailyRepository",
+    "FundAllocationAnalysisRepository",
+    "StockIndustryMappingRepository",
+    "FundHoldingRepository",
+    "FundIndustryExposureRepository",
+    "FundIndustryExposureDailyRepository",
+    "FundAttributionRepository",
+    "FundManagerTenureRepository",
     "SecurityRepository",
     "SecurityEventRepository",
     "DailyPriceRepository",
