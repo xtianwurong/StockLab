@@ -477,11 +477,14 @@
         s.capital_flow_corr.toFixed(2) : "-";
       tr.appendChild(tdCorr);
 
-      // 资金流佐证
+      // 资金流佐证（三态）：null = 窗口内资金流样本不足，既不能说吻合，
+      // 也不能说不吻合 —— 显示成「✗ 不吻合」是拿没数据当成了反证
       var tdConfirm = document.createElement("td");
       var indicator = document.createElement("span");
-      indicator.className = "fa-capital-flow-indicator" + (s.capital_flow_confirm ? " confirm" : "");
-      indicator.textContent = s.capital_flow_confirm ? "✓ 吻合" : "✗ 不吻合";
+      var hasVerdict = s.capital_flow_confirm !== null && s.capital_flow_confirm !== undefined;
+      var confirmed = s.capital_flow_confirm === true;
+      indicator.className = "fa-capital-flow-indicator" + (confirmed ? " confirm" : "");
+      indicator.textContent = hasVerdict ? (confirmed ? "✓ 吻合" : "✗ 不吻合") : "— 无数据";
       tdConfirm.appendChild(indicator);
       tr.appendChild(tdConfirm);
 

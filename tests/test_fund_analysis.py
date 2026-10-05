@@ -308,7 +308,8 @@ class TestFundStyleDecomposer:
                 SignalStrength.STRONG_DECREASE,
             ]
             assert s.confidence in [ConfidenceLevel.HIGH, ConfidenceLevel.MEDIUM, ConfidenceLevel.LOW]
-            assert -1 <= s.capital_flow_corr <= 1
+            # None = 资金流样本不足、算不出相关性（不是 0）；有值才是 [-1, 1]
+            assert s.capital_flow_corr is None or -1 <= s.capital_flow_corr <= 1
 
     def test_analyze_full(self, setup_data):
         """完整分析入口测试"""

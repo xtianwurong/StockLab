@@ -42,7 +42,40 @@ __all__ = [
     "DecompositionResult",
     "SignalStrength",
     "ConfidenceLevel",
+    "required_history_days",
 ]
+
+
+# ---------------------------------------------------------------------------
+# 窗口口径（全项目唯一定义处）
+#
+# window_days 是**交易日**，而滚动推进与单期回看按自然日（沿用既有实现），
+# 因此两侧都写成「window_days × 系数」的自然日跨度。
+#
+# 装载方（facade._load_analysis_data）与计算方（本模块）必须共用下面这个
+# 公式：装载少一天，滚动序列最早那批时点就会静默判「数据不足」，日志看起来
+# 像「历史数据缺失」，实际是自己没装够 —— 这个坑已经踩过一次。
+# ---------------------------------------------------------------------------
+ROLLING_WINDOW_DAYS_FACTOR = 3.0   # rolling_decompose 往回滚多少个 window
+SINGLE_WINDOW_DAYS_FACTOR = 1.5     # 单期分解往前回看多少个 window
+HISTORY_BUFFER_DAYS = 7             # 首个收益率所需的 1 天 + 余量
+MIN_ALIGNMENT_OBSERVATIONS = 20      # 少于这么多对齐观测就不做回归（样本不足）
+
+
+def required_history_days(window_days: int) -> int:
+    """给定单期窗口（交易日），算出从分析日往回必须装载多少**自然日**的历史
+
+    装载区间 = 滚动跨度（3×window）+ 单期回看（1.5×window）+ 余量。
+    任何要跑滚动分解的调用方都应按这个数装载净值 / 指数 / 资金流。
+
+    Args:
+        window_days: 单期分解窗口（交易日）
+
+    Returns:
+        int: 自然日天数
+    """
+    span = (ROLLING_WINDOW_DAYS_FACTOR + SINGLE_WINDOW_DAYS_FACTOR) * window_days
+    return int(span) + HISTORY_BUFFER_DAYS
 
 
 class SignalStrength:
@@ -87,11 +120,14 @@ class FundAllocationSignal:
     level: int
     current_exposure: float
     exposure_change: float
-    exposure_change_5d: float
-    exposure_change_20d: float
+    # 5/20 期对比：上一个可比时点若没算到这个行业（指数缺数据被排除），
+    # 变化量无从谈起 -> None（前端显示「—」），拿 0 当过去值会造出假信号
+    exposure_change_5d: Optional[float]
+    exposure_change_20d: Optional[float]
     signal: str  # SignalStrength 枚举值
-    capital_flow_corr: float  # 与资金流相关性
-    capital_flow_confirm: bool  # 资金流是否佐证
+    # 资金流佐证三态：True 吻合 / False 有数据但不吻合 / None 数据不足无法判断
+    capital_flow_corr: Optional[float]
+    capital_flow_confirm: Optional[bool]
     confidence: str  # ConfidenceLevel 枚举值
     r_squared: float
     analysis_date: date
@@ -180,6 +216,27 @@ class FundStyleDecomposer:
         else:
             self.capital_flow_df = pd.DataFrame()
 
+    @staticmethod
+    def _skipped_result(fund_code: str, end_date: date, window_days: int) -> DecompositionResult:
+        """「这个时点没算出来」的统一结果（n_sectors=0，滚动序列会跳过它）
+
+        数据不足、含非有限值、优化失败三条路径都走这里。
+        关键在于**不返回等权占位**：等权会让「没算出来」在下游长成
+        「持仓稳定」的信号，等于用一个编出来的结论回答用户的调仓问题。
+        """
+        return DecompositionResult(
+            fund_code=fund_code,
+            trade_date=end_date,
+            window_days=window_days,
+            level=1,
+            exposures={},
+            r_squared=0.0,
+            alpha=0.0,
+            residual_vol=0.0,
+            n_sectors=0,
+            cash_exposure=1.0,
+        )
+
     def _align_data(
         self,
         fund_code: str,
@@ -195,7 +252,7 @@ class FundStyleDecomposer:
         """
         # 转换为 pandas Timestamp 以便比较
         end_ts = pd.Timestamp(end_date)
-        start_ts = end_ts - timedelta(days=int(window_days * 1.5))
+        start_ts = end_ts - timedelta(days=int(window_days * SINGLE_WINDOW_DAYS_FACTOR))
 
         # 基金收益率
         fund_ret = self.fund_returns[
@@ -218,13 +275,23 @@ class FundStyleDecomposer:
 
         # 对齐日期（取交集）
         common_dates = fund_ret.index.intersection(sector_df.index)
-        if len(common_dates) < 20:
+        if len(common_dates) < MIN_ALIGNMENT_OBSERVATIONS:
             return pd.DataFrame(), pd.DataFrame()
 
         fund_aligned = fund_ret.loc[common_dates]
         sector_aligned = sector_df.loc[common_dates]
 
-        # 取最近 window_days 个交易日
+        # 丢掉任一侧有缺失的日期，只在**完整观测**上取窗口：
+        # 矩阵里残留的 NaN 会让目标函数返回 NaN，SLSQP 随即报一句与真实原因
+        # 无关的「Inequality constraints incompatible」，代码便退回等权权重 ——
+        # 页面看着有结果，实际是假信号。宁可这个时点算不出来（如实缩短时序）。
+        valid = fund_aligned["fund_return"].notna() & sector_aligned.notna().all(axis=1)
+        fund_aligned = fund_aligned[valid]
+        sector_aligned = sector_aligned[valid]
+        if len(fund_aligned) < MIN_ALIGNMENT_OBSERVATIONS:
+            return pd.DataFrame(), pd.DataFrame()
+
+        # 取最近 window_days 个完整交易日
         fund_aligned = fund_aligned.tail(window_days)
         sector_aligned = sector_aligned.tail(window_days)
 
@@ -249,22 +316,22 @@ class FundStyleDecomposer:
 
         if fund_ret.empty or len(sector_ret.columns) < 2:
             _logger.warning("基金 [%s] 于 %s 数据不足，无法分解", fund_code, end_date)
-            return DecompositionResult(
-                fund_code=fund_code,
-                trade_date=end_date,
-                window_days=window_days,
-                level=1,
-                exposures={},
-                r_squared=0.0,
-                alpha=0.0,
-                residual_vol=0.0,
-                n_sectors=0,
-                cash_exposure=1.0,
-            )
+            return self._skipped_result(fund_code, end_date, window_days)
 
         y = fund_ret["fund_return"].values
         X = sector_ret.values
         n_sectors = X.shape[1]
+
+        # 数值闸门：进优化器的 y / X 必须全有限。
+        # pct_change 遇到 0 净值会产 inf，交集日期也可能残留缺失值；这类脏值
+        # 流进 SLSQP 后只会得到一句与真实原因无关的「Inequality constraints
+        # incompatible」，然后被当成「优化失败」吞掉 —— 根因完全看不出来。
+        if not (np.isfinite(y).all() and np.isfinite(X).all()):
+            _logger.warning(
+                "基金 [%s] 于 %s 对齐后的收益含非有限值（NaN/inf），放弃该时点",
+                fund_code, end_date,
+            )
+            return self._skipped_result(fund_code, end_date, window_days)
 
         # 约束条件
         if non_negative:
@@ -292,12 +359,18 @@ class FundStyleDecomposer:
             options={"maxiter": 1000, "ftol": 1e-9}
         )
 
-        if not result.success:
-            _logger.warning("基金 [%s] 分解优化失败: %s", fund_code, result.message)
-            weights = w0
-        else:
-            weights = result.x
+        if not result.success or not np.isfinite(result.fun) \
+                or not np.isfinite(result.x).all():
+            # 优化失败 = 这一期没算出来，**不拿等权 w0 顶替**：
+            # 等权会让「算不出来」伪装成「持仓没变」，信号层读到一片假稳定，
+            # 比少一个时点更糟（滚动序列少一点，上层会明说点数不足）。
+            _logger.warning(
+                "基金 [%s] 于 %s 分解优化失败，跳过该时点: %s",
+                fund_code, end_date, result.message,
+            )
+            return self._skipped_result(fund_code, end_date, window_days)
 
+        weights = result.x
         exposures = {code: float(w) for code, w in zip(sector_ret.columns, weights)}
         total_exposure = sum(exposures.values())
         cash_exposure = max(0, 1 - total_exposure)
@@ -305,9 +378,20 @@ class FundStyleDecomposer:
         # 计算统计指标
         y_pred = X @ weights
         residuals = y - y_pred
-        r_squared = 1 - np.sum(residuals ** 2) / np.sum((y - np.mean(y)) ** 2)
         alpha = np.mean(residuals) * 252  # 年化
         residual_vol = np.std(residuals) * np.sqrt(252)
+        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+        if not np.isfinite(ss_tot) or ss_tot <= 0:
+            # 窗口内基金收益恒定 -> R² 数学上无定义。
+            # 记 0 而不是留 NaN：NaN 会绕过上层「R²<0.5 不可信」的告警
+            # （nan < 0.5 恒为 False），还会把 summary.avg_r_squared 变成 NaN
+            # 直接污染 JSON。0 既不假装拟合好，也必然触发不可信告警。
+            _logger.warning("基金 [%s] 于 %s 窗口内收益无波动，R² 无定义（按 0 计）",
+                            fund_code, end_date)
+            r_squared = 0.0
+        else:
+            r_squared = 1 - float(np.sum(residuals ** 2)) / ss_tot
+            r_squared = float(r_squared) if np.isfinite(r_squared) else 0.0
 
         # 获取行业层级
         level = 1
@@ -342,7 +426,9 @@ class FundStyleDecomposer:
         results = []
         current_date = end_date
 
-        while current_date >= end_date - timedelta(days=window_days * 3):
+        while current_date >= end_date - timedelta(
+            days=int(window_days * ROLLING_WINDOW_DAYS_FACTOR)
+        ):
             result = self.decompose_single(fund_code, current_date, window_days, sector_codes)
             if result.n_sectors > 0:
                 results.append(result)
@@ -401,9 +487,20 @@ class FundStyleDecomposer:
 
         signals = []
         for sector_code, current_exp in current.items():
-            change = current_exp - prev.get(sector_code, 0)
-            change_5d = current_exp - prev_5d.get(sector_code, 0)
-            change_20d = current_exp - prev_20d.get(sector_code, 0)
+            # 环比必须有可比的上一期：上一期没算到这个行业时（指数在该窗口缺
+            # 数据、被 _align_data 排除），把它当 0 会凭空造出一条「大幅加仓」。
+            # 宁可这一期不出这个行业的信号，也不要编一个过去值。
+            if sector_code not in prev:
+                _logger.warning(
+                    "基金 [%s] %s 的上一期分解不含该行业，跳过其环比信号",
+                    fund_code, sector_code,
+                )
+                continue
+            change = current_exp - prev[sector_code]
+            change_5d = (current_exp - prev_5d[sector_code]
+                         if sector_code in prev_5d else None)
+            change_20d = (current_exp - prev_20d[sector_code]
+                          if sector_code in prev_20d else None)
 
             # 信号分级
             if change >= self.THRESHOLDS["strong_increase"]:
@@ -421,9 +518,10 @@ class FundStyleDecomposer:
             else:
                 signal = SignalStrength.NEUTRAL
 
-            # 资金流佐证
-            capital_flow_corr = 0.0
-            capital_flow_confirm = False
+            # 资金流佐证：判不出来就是 None，绝不用 0.0 冒充「不相关」——
+            # 0.0 是一个结论，而「只有一个交易日的资金流」根本没有结论
+            capital_flow_corr = None
+            capital_flow_confirm = None
             if not self.capital_flow_df.empty:
                 # 计算暴露度变化与资金流的相关性
                 # 统一转换为 pd.Timestamp 进行比较
@@ -436,19 +534,28 @@ class FundStyleDecomposer:
                 ].tail(20)
 
                 if len(flow_data) >= 10:
-                    # 暴露度变化序列
-                    exp_changes = []
-                    for h in history[-20:]:
-                        exp_changes.append(h.exposures.get(sector_code, 0))
-                    exp_changes = np.diff(exp_changes)
+                    # 暴露度变化序列：只取**确实算到过该行业**的时点，
+                    # 缺席的时点跳过，而不是补 0（补 0 等于伪造一段持仓历史）
+                    exposures = [h.exposures[sector_code] for h in history[-20:]
+                                 if sector_code in h.exposures]
+                    exp_changes = np.diff(exposures) if len(exposures) > 1 else np.array([])
 
-                    flow_values = flow_data["flow_zscore"].values[-len(exp_changes):]
+                    flow_values = (flow_data["flow_zscore"].values[-len(exp_changes):]
+                                   if len(exp_changes) else np.array([]))
 
                     if len(exp_changes) == len(flow_values) and len(exp_changes) > 5:
                         corr = np.corrcoef(exp_changes, flow_values)[0, 1]
-                        if not np.isnan(corr):
+                        # 任一侧为常数时 corrcoef 给的是 nan/inf，都不能当成结论
+                        if np.isfinite(corr):
                             capital_flow_corr = float(corr)
-                            capital_flow_confirm = (corr > 0.3 and change > 0) or (corr < -0.3 and change < 0)
+                            capital_flow_confirm = ((corr > 0.3 and change > 0)
+                                                    or (corr < -0.3 and change < 0))
+                else:
+                    # 这个行业在窗口内资金流样本不足 —— 佐证不了，也否定不了
+                    _logger.debug(
+                        "行业 [%s] 资金流样本不足（%d/%d），佐证留空",
+                        sector_code, len(flow_data), 10,
+                    )
 
             # 置信度评级
             r_sq = history[-1].r_squared

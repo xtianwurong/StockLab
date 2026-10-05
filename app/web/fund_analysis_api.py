@@ -29,10 +29,12 @@ StockLab - 基金调仓分析接口 (app.web.fund_analysis_api)
 
 import logging
 from datetime import date
+
+import pandas as pd
 from flask import jsonify, render_template, request
 
 from app.web import store
-from app.web.webcommon import parse_int_arg, parse_date_arg
+from app.web.webcommon import parse_date_arg, parse_int_arg
 from stocklab.facade import FundAnalysisFacade
 
 _logger = logging.getLogger("StockLab.Web.FundAnalysisApi")
@@ -195,17 +197,31 @@ def handle_capital_flow():
     if sector_type not in valid_types:
         return jsonify({"error": f"参数 [type] 非法：必须是 {', '.join(valid_types)}"}), 400
 
-    trade_date = request.args.get("date", date.today().strftime("%Y-%m-%d"))
+    # 不传 date = 取库里最新一天（回传实际使用的日期，前端不用猜数据是哪天的）
+    requested, err = parse_date_arg("date", request.args.get("date"))
+    if err:
+        return jsonify({"error": err}), 400
 
     try:
         facade = _facade()
-        df = facade.get_capital_flow(sector_type, trade_date)
-        return jsonify({
+        trade_date = requested or facade.latest_capital_flow_date(sector_type)
+        df = (facade.get_capital_flow(sector_type, trade_date)
+              if trade_date else pd.DataFrame())
+        payload = {
             "sector_type": sector_type,
             "date": trade_date,
             "items": df.to_dict(orient="records") if not df.empty else [],
             "count": len(df),
-        })
+        }
+        if not payload["count"]:
+            # 空结果必须说清是「口径没有数据」还是「这一天没有数据」：
+            # 不写 reason，页面上的「暂无数据」和「没人同步」长得一模一样
+            payload["reason"] = (
+                f"库中没有 {sector_type} 口径"
+                + (f" 在 {trade_date} 当天的数据" if trade_date else "的数据")
+                + "（申万口径由 sync_fund.py 每日聚合写入，历史序列不回填）"
+            )
+        return jsonify(payload)
     except Exception:
         _logger.exception("资金流查询失败 [%s]", sector_type)
         return jsonify({"error": "资金流数据加载失败"}), 500

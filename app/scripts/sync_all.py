@@ -27,6 +27,10 @@ StockLab - 统一同步入口 (app/scripts/sync_all.py)
    # 仅同步公告（需显式指定起始日期首次运行）
    python app/scripts/sync_all.py --announcements --start-date 2015-01-01
 
+   # 仅同步基金域（基金信息/净值/持仓 + 申万口径资金流）
+   python app/scripts/sync_all.py --funds
+   python app/scripts/sync_all.py --funds --fund-codes 000001.OF,161725.OF
+
    # 指定数据库路径
    python app/scripts/sync_all.py --db-path /path/to/stocklab.duckdb
 
@@ -39,7 +43,8 @@ StockLab - 统一同步入口 (app/scripts/sync_all.py)
    6. fundamentals  （基本面，依赖 securities；可选，耗时最长）
    7. commodities   （大宗商品，无依赖；可选）
    8. insight       （投资人观点，依赖 securities；可选）
-   9. announcements （公告，依赖 securities；可选，首次需 --start-date）
+   9. funds          （基金域：信息/净值/持仓/资金流；可选）
+  10. announcements （公告，依赖 securities；可选，首次需 --start-date）
 
 【退出码语义】
    0  全部成功
@@ -111,6 +116,17 @@ def parse_args():
         "--announcements",
         action="store_true",
         help="同步巨潮公告索引（增量）",
+    )
+    parser.add_argument(
+        "--funds",
+        action="store_true",
+        help="同步基金域（信息/净值/持仓 + 申万口径资金流）",
+    )
+    parser.add_argument(
+        "--fund-codes",
+        type=str,
+        default=None,
+        help="基金域限定基金代码（逗号分隔）；缺省同步库中已登记的基金",
     )
 
     # 通用参数
@@ -278,6 +294,12 @@ def main():
         optional_phases.append(("sync_investor_insight.py", ["collect", "--platform", "xueqiu", "--limit", "200"], "投资人采集-雪球"))
         optional_phases.append(("sync_investor_insight.py", ["collect", "--platform", "guba", "--limit", "200"], "投资人采集-股吧"))
 
+    if args.funds:
+        fa = ["sync"]
+        if args.fund_codes:
+            fa.extend(["--codes", args.fund_codes])
+        optional_phases.append(("sync_fund.py", fa, "基金域（信息/净值/持仓/资金流）"))
+
     if args.announcements:
         an = ["announcements"]
         if args.start_date:
@@ -290,7 +312,7 @@ def main():
 
     # 如果没有显式指定任何可选阶段且不是 --core-only，默认只跑核心
     if not args.core_only and not optional_phases:
-        _logger.info("未指定可选阶段（--fundamentals/--commodities/--insight/--announcements），仅执行核心同步")
+        _logger.info("未指定可选阶段（--fundamentals/--commodities/--insight/--announcements/--funds），仅执行核心同步")
         plan = core_phases
     elif args.core_only:
         plan = core_phases

@@ -5,8 +5,9 @@ StockLab - Web 层横切公共模块 (app.web.webcommon)
 ==============================================================================
 
 【模块职责】
-  只放**多个接口模块长得一模一样**的横切逻辑，三类：
+  只放**多个接口模块长得一模一样**的横切逻辑，四类：
     - json_num / json_text            DataFrame 单元格 -> JSON 安全值
+    - StrictJSONProvider              整帧应答的 NaN/±inf -> null（最后闸门）
     - parse_int_arg / parse_paging    整数查询参数的格式与范围校验
     - looks_like_date                 严格 YYYY-MM-DD 校验
 
@@ -24,21 +25,33 @@ StockLab - Web 层横切公共模块 (app.web.webcommon)
   这份逻辑此前在 store / compare_api / screener_api 各有一份拷贝，
   且 store 那份漏了 inf —— 这正是它该只存在一次的理由。
 
+【为什么还要 StrictJSONProvider】
+  json_num 是**逐格手工**调用的，漏一处就漏一处：`df.to_dict(orient="records")`
+  这种整帧直出的写法根本不会经过它 —— capital / fundamental 两个域就因此
+  长期把 `NaN` 字面量发给浏览器。所以再加一道**边界闸门**：所有 jsonify
+  出去的应答统一 scrub 一遍，并用 allow_nan=False 让漏网的非有限浮点宁可
+  触发 500 兜底，也不把非法 JSON 发出去。手工 json_num 依然保留，它决定
+  「哪一格留空」，闸门只保证「发出去的必须是合法 JSON」。
+
 【依赖方向】
-  只依赖 flask 与 pandas，**不 import stocklab.***（含 persistence）。
+  只依赖 flask / pandas / numpy，**不 import stocklab.***（含 persistence）。
   app.web 各接口模块的取数统一走 stocklab.facade，本模块不参与。
 ==============================================================================
 """
 
+import json
 import math
 import re
 
+import numpy as np
 import pandas as pd
 from flask import request
+from flask.json.provider import DefaultJSONProvider
 
 __all__ = [
     "json_num",
     "json_text",
+    "StrictJSONProvider",
     "parse_int_arg",
     "parse_date_arg",
     "parse_paging",
@@ -114,6 +127,54 @@ def json_text(value):
     if isinstance(value, str):
         return value
     return str(value)
+
+
+class StrictJSONProvider(DefaultJSONProvider):
+    """
+    应答体序列化闸门：非有限浮点（NaN / ±inf）一律归一成 null
+
+    【为什么需要它】
+      `jsonify` 走 flask 的 JSON provider，而 Python 的 json.dumps 默认
+      allow_nan=True，会把 float('nan') 原样写成 `NaN` 字面量 —— 那不是合法
+      JSON，浏览器 JSON.parse 直接抛错、整块数据渲染不出来。偏偏 Python 侧的
+      json.loads 默认**接受** NaN，于是这类响应在本地测试里「看起来正常」，
+      只有到前端才炸。
+
+    【为什么光有 json_num 不够】
+      json_num 要求每一格手工调用，`df.to_dict(orient="records")` 这种整帧
+      直出会完全绕过它（capital / fundamental 两个域就长期在发 `NaN`）。
+      闸门放在序列化边界上，不依赖调用方记得做什么。
+
+    【allow_nan=False 的取舍】
+      scrub 之后仍显式关掉 allow_nan：万一还有漏网的形状，宁可触发 500 兜底
+      （handle_internal_error 回的是带 error 的合法 JSON），也不发非法 JSON。
+    """
+
+    @staticmethod
+    def _scrub(value):
+        """递归把非有限浮点换成 None，并把 numpy 标量还原成原生类型"""
+        if isinstance(value, dict):
+            return {k: StrictJSONProvider._scrub(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [StrictJSONProvider._scrub(v) for v in value]
+        if isinstance(value, np.generic):
+            # np.float64 -> float（随后判非有限）；np.int64 -> int；NaT -> None
+            value = value.item()
+        if isinstance(value, float) and not math.isfinite(value):
+            # NaN 与 ±inf 在 JSON 里都没有表示，统一说「没有这个值」
+            return None
+        return value
+
+    def dumps(self, obj, **kwargs):
+        """
+        Args:
+            obj: 任意可序列化对象（通常是 jsonify 的字典）
+
+        Returns:
+            str: 保证合法的 JSON 文本（不含 NaN / Infinity 字面量）
+        """
+        kwargs.setdefault("allow_nan", False)
+        return super().dumps(self._scrub(obj), **kwargs)
 
 
 # ---------------------------------------------------------------------------

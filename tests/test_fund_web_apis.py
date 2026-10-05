@@ -46,6 +46,7 @@ INVALID_CASES = [
     "/api/sector/indices?codes=%20,%20",               # 全是分隔符
     "/api/sector/indices?codes=801010.SI&start=bad",   # start 日期格式
     "/api/capital/flow?type=unknown",                  # 板块类型不在枚举内
+    "/api/capital/flow?type=sw_level1&date=bad-date",  # 日期格式（老实现直接把坏日期拿去查，回 200 空表）
     "/api/fund/allocation",                            # 缺 code
     "/api/fund/allocation?code=000001.OF&date=bad",    # 日期格式
     "/api/fund/allocation?code=000001.OF&window=5",    # 窗口下界
@@ -171,3 +172,37 @@ def test_industry_mapping_level_routes_differently(client):
             assert "mapping" in payload, f"level={level} 应返回 mapping 字典"
         else:
             assert "items" in payload, "level=3 应返回明细行 items"
+
+
+# ---------------------------------------------------------------------------
+# 3. 资金流：默认取「库里最新一天」而不是今天
+# ---------------------------------------------------------------------------
+def test_capital_flow_defaults_to_latest_available(client):
+    """不传 date 时返回库里最新一天的数据
+
+    老实现默认按「今天」精确过滤：周末、假日、上游没跑同步时必然查空，
+    表里明明有 155 行却显示 count=0 —— 页面上的「资金流佐证」长期是空的。
+    """
+    payload = client.get("/api/capital/flow?type=sw_level1").get_json()
+
+    if not payload.get("count"):
+        pytest.skip("库中暂无申万一级资金流（跑过 sync_fund.py --with-flow 后应有）")
+
+    assert payload["date"]
+    assert payload["date"] <= __import__("datetime").date.today().isoformat()
+    # 回传的 date 必须自洽：按它再查一次结果一致，前端不会拿到一个查不回的日期
+    same = client.get(
+        f"/api/capital/flow?type=sw_level1&date={payload['date']}"
+    ).get_json()
+    assert same["count"] == payload["count"]
+
+
+def test_capital_flow_empty_type_says_so(client):
+    """查不到数据时要说明「该口径无数据」，而不是回一个看起来正常的空 200"""
+    payload = client.get("/api/capital/flow?type=concept").get_json()
+
+    assert payload["sector_type"] == "concept"
+    assert payload["count"] == len(payload["items"])
+    if payload["count"] == 0:
+        assert payload.get("reason"), "空结果必须带 reason，否则前端只能说「暂无数据」"
+        assert payload["date"] is None

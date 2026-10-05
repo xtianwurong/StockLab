@@ -76,6 +76,7 @@ from app.web import fund_holding_api
 from app.web import insight_api
 from app.web import market_api
 from app.web import screener_api
+from app.web.webcommon import StrictJSONProvider
 
 _logger = logging.getLogger("StockLab.Web.Server")
 
@@ -105,6 +106,12 @@ def create_app(priority=None, db_path=None):
     # 供 api 层按请求取用启动期配置（不引入全局可变量）
     app.config["STOCKLAB_PRIORITY"] = priority
     app.config["STOCKLAB_DB_PATH"] = db_path
+
+    # 应答体序列化闸门：NaN / ±inf -> null，保证发出去的都是合法 JSON。
+    # 必须在首次 jsonify 之前挂好（实例属性覆盖类属性；app.json 是 __init__
+    # 里按 json_provider_class 建好的实例，一并换掉）。
+    app.json_provider_class = StrictJSONProvider
+    app.json = StrictJSONProvider(app)
 
     # 页面路由（普通函数调用，非装饰器）
     app.add_url_rule("/", "index", api.handle_index, methods=["GET"])

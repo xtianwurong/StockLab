@@ -441,6 +441,37 @@ A 股核心板块行业 ETF 与主板基准的长周期（默认 10 年）月线
 
 ---
 
+## 本轮修复摘要 (2026-10-05)
+
+### P0 核心修复
+1. **NaN/Inf → 非法 JSON 闸门**：新增 `app.web.webcommon.StrictJSONProvider`，所有 `jsonify` 应答统一 scrub，配合 `allow_nan=False`，保证发给浏览器的都是合法 JSON（修复 `/api/capital/flow`、`/api/fundamental/income|indicators` 等长期吐 `NaN` 字面量的问题）。
+2. **RBSA 优化器 NaN/约束假失败**：
+   - `_align_data` 显式剔除含 NaN 的对齐日期，门槛 `MIN_ALIGNMENT_OBSERVATIONS=20`。
+   - 优化前强校验 `np.isfinite(y).all() and np.isfinite(X).all()`，非有限直接判"数据不足"而非交给 SLSQP（后者只会报误导性的 "Inequality constraints incompatible"）。
+   - 优化失败不再用等权 `w0` 顶替（会把"算不出来"伪装成"持仓稳定"），直接返回 `n_sectors=0` 让滚动序列如实缩短。
+   - R² 未定义（基金收益窗口内恒定）记 0.0 并告警，避免 NaN 绕过 `R²<0.5` 不可信告警并污染 JSON。
+3. **滚动/装载窗口口径统一**：新增 `analytics.fund_style.required_history_days(window_days)`（= 3×W + 1.5×W + 7），`facade._load_analysis_data` 与 `rolling_decompose` 共用，消除"装载 150 天却要滚 270 天"导致前 1/3 静默"数据不足"的坑。
+
+### P0 信号层
+4. **环比/5d/20d 变化量三态化**：上一期未算到该行业 → `change=None`（跳过信号）而非补 0 造假；资金流佐证 `capital_flow_corr` / `capital_flow_confirm` 由 `bool` 变三态（`True` 吻合 / `False` 有数不吻合 / `None` 样本不足），前端 JS 同步显示 "— 无数据"。
+
+### P0 基金域写方补齐
+5. 新增 `app/scripts/sync_fund.py`（status/sync、基金代码归一、最近交易日归属、四类写方独立失败/独立 skip、dry-run、register 只补新代码不覆盖详情）。
+6. 接入 `sync_all.py --funds`，统一入口一键全跑。
+7. 资金流口径切换：东财 push2 本机不可用 → **新浪个股即时资金流 → 按 `fund.stock_industry_mapping` 聚合到申万一/二级**（L1 31 行 / L2 124 行，个股 join 覆盖率 99.9% / 99.5%，守恒校验通过）。
+8. 接口 `/api/capital/flow`：不传 `date` 时取库中最新一天并回传实际日期；空结果带 `reason`；日期格式校验 400。
+
+### 代码规范/健壮性
+9. 净值双源回退（东财 lsjz 主源 + akshare pingzhongdata 备源），任一页失败整源判失败、不拿半截历史冒充完整序列；缺 `累计净值` 列不崩（akshare 1.18 现状）。
+10. 申万指数码制归一：`sw.index_daily` 存 `801010.SI`、映射表裸码 `801010` → 读路径 `_symbol_variants` 双向兼容，修复调仓分析恒"数据不足"。
+11. 清理真库合成残留：`fund.nav_history` 155 行、`fund.fund_holding` 10 行、`sw.index_daily` 190 行、`capital.flow_daily` 88 行（比真实数据还新）、派生表 3 张 —— 全删并备份。
+12. 新增测试：`tests/test_sync_fund.py`（46 用例）、`tests/test_db_guard.py`（真实库污染守卫）、`test_fund_sources.py` 重写双源/新浪聚合/解析契约。
+
+### 测试/覆盖率
+- 全量 1,062 用例通过，覆盖率 87%（门槛 85%）。
+- CI 工作流已包含 `--cov-fail-under=85`。
+
+
 ## 目录结构
 
 ```

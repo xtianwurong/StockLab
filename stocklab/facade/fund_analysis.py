@@ -27,12 +27,14 @@ from typing import Optional, List, Dict
 import pandas as pd
 
 from stocklab.analytics.fund_style import (
+    required_history_days,
     FundStyleDecomposer,
     decompose_fund_style,
     FundAllocationSignal,
     SignalStrength,
     ConfidenceLevel,
 )
+from stocklab.domain import CAPITAL_FLOW_DAILY_COLUMNS
 from stocklab.persistence.repository.fund_analysis import (
     SWIndexDailyRepository,
     SWIndustryMappingRepository,
@@ -107,9 +109,22 @@ class FundAnalysisFacade:
         return self._sw_index_repo.load_series(sector_codes, since)
 
     def get_capital_flow(self, sector_type: str, trade_date: str = None) -> pd.DataFrame:
+        """
+        板块资金流
+
+        Args:
+            trade_date: None = **库里的最新一天**（不是今天）。资金流是按天快照，
+                按今天查在周末/假日/未同步时必然为空，表里有数据也显示没有。
+        """
         if trade_date is None:
-            trade_date = date.today().strftime("%Y-%m-%d")
+            trade_date = self.latest_capital_flow_date(sector_type)
+            if trade_date is None:
+                return pd.DataFrame(columns=list(CAPITAL_FLOW_DAILY_COLUMNS))
         return self._capital_flow_repo.load_by_type_and_date(sector_type, trade_date)
+
+    def latest_capital_flow_date(self, sector_type: str):
+        """该类型在库里的最新交易日；无数据返回 None"""
+        return self._capital_flow_repo.latest_trade_date(sector_type)
 
     def get_capital_flow_series(self, sector_codes: List[str], since: date = None) -> pd.DataFrame:
         return self._capital_flow_repo.load_series(sector_codes, since)
@@ -125,8 +140,14 @@ class FundAnalysisFacade:
         window_days: int,
         level: int
     ) -> Dict:
-        """加载分析所需的所有数据"""
-        since = analysis_date - timedelta(days=int(window_days * 2.5))
+        """加载分析所需的所有数据
+
+        装载区间必须覆盖**整段滚动序列**（滚动往回 3×window，单期再回看
+        1.5×window），而不是拍脑袋的 2.5×window：少装一天，滚动序列最早那批
+        时点就会静默判「数据不足」，日志像历史缺失，其实是自己没装够。
+        口径统一由 analytics.fund_style.required_history_days 给出。
+        """
+        since = analysis_date - timedelta(days=required_history_days(window_days))
 
         # 1. 行业映射
         mapping = self.get_industry_mapping()
@@ -154,7 +175,7 @@ class FundAnalysisFacade:
         except Exception as e:
             _logger.warning("资金流数据加载失败: %s", e)
 
-        # 5. 行业映射
+        # 5. 本层级的行业映射（分析时用它筛 sector_codes 与回填行业名）
         mapping_df = mapping[mapping["level"] == level].copy()
 
         return {
