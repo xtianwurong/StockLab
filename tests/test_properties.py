@@ -38,6 +38,8 @@ from stocklab.analytics import ValuationPercentileAnalyzer
 from stocklab.factor import compute, get
 
 from app.web.compare_api import _align_history
+from app.web.market_api import handle_market_ranking
+from app.web import store
 
 def _valuation_frame(values):
     """构造单只标的的估值历史帧（analyzer 要求 trade_date 为 date 类型）"""
@@ -292,6 +294,70 @@ def test_roe_trend_never_infinite(values):
     import math
     for value in out["roe_trend"]:
         assert not math.isinf(value), "roe_trend 产生了 inf"
+
+
+# ---------------------------------------------------------------------------
+# 四、/api/market/ranking 的 codes 精确过滤不变量（钉住「子串匹配」变异）
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _mock_store(monkeypatch):
+    """Mock store.load_market_percentile 返回固定数据，测试过滤逻辑"""
+    def mock_load(indicator):
+        return [
+            {"ts_code": "600519.SH", "name": "贵州茅台", "market": "SH",
+             "current_value": 28.5, "percentile": 75.0, "level": "正常偏高",
+             "sample_count": 800, "median_value": 25.0, "min_value": 10.0, "max_value": 60.0},
+            {"ts_code": "000001.SZ", "name": "平安银行", "market": "SZ",
+             "current_value": 5.2, "percentile": 30.0, "level": "正常偏低",
+             "sample_count": 800, "median_value": 4.8, "min_value": 2.0, "max_value": 12.0},
+            {"ts_code": "300750.SZ", "name": "宁德时代", "market": "SZ",
+             "current_value": 42.0, "percentile": 90.0, "level": "高估",
+             "sample_count": 600, "median_value": 38.0, "min_value": 15.0, "max_value": 80.0},
+        ]
+    monkeypatch.setattr(store, "load_market_percentile", mock_load)
+    # 也要 mock percentile_level
+    monkeypatch.setattr(store, "percentile_level", lambda p: "正常" if p is not None else "-")
+
+
+@given(fragment=st.sampled_from([
+    "60051", "6005", "00000", "30075", "519",
+    "SH", "SZ", "600", "000", "300", "688", "8",
+    "MAOTAI", "PINGAN", "NIDE",
+    "600519", "000001", "300750",  # 无后缀
+]))
+@settings(max_examples=50, deadline=None)
+def test_market_ranking_codes_exact_filter_rejects_fragments(fragment):
+    """【回归：子串匹配变异】codes 参数必须精确匹配 ts_code，片段必须返回 0 条
+
+    迁移前只验「传 3 个完整代码返回 3 只」，这 3 个代码之间本无子串关系，
+    子串匹配也能通过。这里参数化传片段，精确过滤必须 0 条。
+    """
+    from flask import Flask
+    app = Flask(__name__)
+    with app.test_request_context(f"/api/market/ranking?codes={fragment}&indicator=pe_ttm"):
+        resp = handle_market_ranking()
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["total"] == 0, "片段 %r 应被精确过滤拦截，实际返回 %d 条" % (fragment, data["total"])
+
+
+@given(codes=st.lists(
+    st.sampled_from(["600519.SH", "000001.SZ", "300750.SZ"]),
+    min_size=1, max_size=3, unique=True))
+@settings(max_examples=20, deadline=None)
+def test_market_ranking_codes_exact_filter_accepts_full_codes(codes):
+    """精确过滤：传完整 ts_code 必须返回对应条目"""
+    from flask import Flask
+    app = Flask(__name__)
+    codes_str = ",".join(codes)
+    with app.test_request_context(f"/api/market/ranking?codes={codes_str}&indicator=pe_ttm"):
+        resp = handle_market_ranking()
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["total"] == len(codes), "完整代码 %s 应全部匹配，实际 %d 条" % (codes_str, data["total"])
+    returned = {item["ts_code"] for item in data["items"]}
+    assert returned == set(codes)
 
 
 if __name__ == "__main__":

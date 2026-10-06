@@ -16,9 +16,14 @@ StockLab 测试共享装置 (tests/conftest.py)
   DuckDB 对同一文件只允许一个写连接，而 serve_web.py 的 store 会长期持有
   data/stocklab.duckdb。这里不静默跳过，而是在 fixture 里主动探测并给出
   可操作的报错——否则使用者只会看到一句 `Could not set lock`。
+
+【xdist 并行跑 real_db 测试】
+  每个 worker 复制一份真实库到临时文件，避免「同文件多写连接」冲突。
+  只在首次创建 app 时复制，后续复用；tmp_path 自动清理。
 """
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -119,8 +124,12 @@ def _serve_web_running():
 
 
 @pytest.fixture(scope="session")
-def app():
+def app(tmp_path_factory):
     """真实库上的 Flask 应用（会话级，只装配一次）
+
+    【xdist 并行支持】每个 worker 复制一份真实库到临时文件，
+    避免「同文件多写连接」冲突。复制发生在首次创建 app 时，
+    后续复用；tmp_path_factory 自动清理。
 
     Yields:
         Flask: create_app() 的结果
@@ -131,24 +140,34 @@ def app():
             "Web 层用例无法打开该库。请先执行：pkill -f serve_web.py",
             pytrace=False,
         )
-    # xdist 下每个 worker 是独立进程，会各自去开同一个库文件；DuckDB 没有跨进程
-    # 文件锁队列，第二个进程起就报 Could not set lock，表现为一堆
-    # 「一级行业不应为空」这种看不出因果的断言失败。放在 fixture 里判（而不是
-    # pytest_collection_modifyitems）是实测更可靠的位置：collection hook 在
-    # controller 与 worker 各跑一遍，标记并不可靠地传到实际执行的 worker。
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        pytest.skip(
-            "test_web_api 需要真实库，而 pytest-xdist 每个 worker 是独立进程、"
-            "无法共享 DuckDB 写连接。请不带 -n 跑全量，或单独跑："
-            "pytest tests/test_web_api.py",
-            allow_module_level=True,
-        )
-    from app.web import create_app
 
-    application = create_app()
+    # 复制真实库到临时文件（每个 xdist worker 独立文件）
+    real_db = "data/stocklab.duckdb"
+    if not os.path.exists(real_db):
+        pytest.skip(f"真实库不存在: {real_db}，跳过 real_db 测试", allow_module_level=True)
+
+    # 使用 tmp_path_factory 创建会话级临时目录（xdist 下每个 worker 独立）
+    temp_dir = tmp_path_factory.mktemp("real_db")
+    temp_db = temp_dir / "stocklab.duckdb"
+    shutil.copy2(real_db, temp_db)
+
+    from app.web import create_app
+    from app.web import store
+
+    # 显式传入临时库路径，避免读取默认配置
+    application = create_app(db_path=str(temp_db))
+
+    # 重置 store 的单例连接，强制指向新的临时库
+    with application.app_context():
+        store.reset_facade()
+        store._store_conn = None  # type: ignore
+
     # store 的只读聚合依赖 current_app，必须整段跑在应用上下文里；
     # 这里只负责建 app，上下文由 client fixture 推入
     yield application
+
+    # 清理环境变量（如果有）
+    os.environ.pop("STOCKLAB_DB_PATH", None)
 
 
 @pytest.fixture
