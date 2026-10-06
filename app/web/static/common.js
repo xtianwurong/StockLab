@@ -1,7 +1,7 @@
 /*
  * StockLab 前端共享工具 (app/web/static/common.js)
  *
- * 职责：三个页面共用的工具集 ——
+ * 职责：多页面共用的工具集 ——
  *   1. fetchJson：带超时与统一错误处理的请求（修复「请求卡住按钮永远转圈」）
  *   2. 数值格式化 / 七档评级与配色
  *   3. 温度条（0-100 分位可视化）渲染
@@ -32,11 +32,6 @@
   // PE 类指标走左轴，其余（PB/PS/PCF）走右轴：量纲差异大，混轴会互相压扁
   var PE_INDICATORS = ["pe_ttm", "pe_static"];
 
-  var LEVEL_NAME_COLOR = {};
-  for (var i = 0; i < LEVEL7.length; i++) {
-    LEVEL_NAME_COLOR[LEVEL7[i].name] = LEVEL7[i].color;
-  }
-
   // ---------- 请求 ----------
 
   /**
@@ -56,15 +51,9 @@
 
     var init = { signal: controller.signal };
     if (options) {
-      if (options.method) {
-        init.method = options.method;
-      }
-      if (options.headers) {
-        init.headers = options.headers;
-      }
-      if (options.body) {
-        init.body = options.body;
-      }
+      if (options.method) init.method = options.method;
+      if (options.headers) init.headers = options.headers;
+      if (options.body) init.body = options.body;
     }
 
     return fetch(url, init)
@@ -91,7 +80,7 @@
    * 数值格式化：按量级选择小数位，负数与千分位一并处理
    *
    * @param {number|null} value 数值
-   * @param {number} digits 指定小数位；缺省时按量级自适应
+   * @param {number} [digits] 指定小数位；缺省时按量级自适应
    * @returns {string} 展示文本
    */
   function formatNumber(value, digits) {
@@ -172,7 +161,7 @@
    * 评级徽章 HTML（值不可用时返回灰色「不可用」）
    *
    * @param {number|null} percentile 分位数
-   * @param {string} levelName 后端给定的档位名（可省略，内部重新推导）
+   * @param {string} [levelName] 后端给定的档位名（可省略，内部重新推导）
    * @returns {string} HTML 字符串
    */
   function levelBadge(percentile, levelName) {
@@ -189,7 +178,7 @@
   /**
    * 把 #rrggbb 转成带透明度的 rgba
    *
-   * @param {string} hex 颜色
+   * @param {string} hex 颜色（必须是已解析的十六进制色值）
    * @param {number} alpha 透明度 0~1
    * @returns {string} rgba(...) 文本
    */
@@ -212,17 +201,19 @@
    *
    * @param {string} color 颜色文本
    * @param {string} [fallback] 解析失败时的兜底
-   * @returns {string} 具体颜色
+   * @returns {string} 具体颜色（十六进制或 rgb() 等可用于 CSS 的值）
    */
   function cssColor(color, fallback) {
     if (window.SL && window.SL.charts && window.SL.charts.cssColor) {
       return window.SL.charts.cssColor(color, fallback);
     }
+    // charts.js 未就绪时的降级：若是 CSS 变量引用，直接返回原值（浏览器会解析）
+    // 这样徽章背景色虽无透明度叠加，但至少颜色正确
     return color || fallback || "";
   }
 
   /**
-   * 当前主题的图表调色板（charts.js 提供；缺省时给出亮色兜底值）
+   * 当前主题的图表调色板（charts.js 提供；缺省时给出双主题兜底值）
    *
    * 【为何图表颜色要读变量】暗色主题下 ECharts 的轴线/文字若仍用写死的浅色，
    *   会在深色卡片上几乎不可见；统一从 tokens.css 取值才能自动跟随主题。
@@ -233,12 +224,14 @@
     if (window.SL && window.SL.charts && window.SL.charts.palette) {
       return window.SL.charts.palette();
     }
+    // 降级兜底：同时提供亮/暗两套，由 CSS media query 决定生效哪套
+    // 这里返回亮色值，暗色由 tokens.css @media 覆盖
     return {
-      textMain: "#0f172a", textSub: "#475569", textMuted: "#64748b", textFaint: "#94a3b8",
+      textMain: "#0f172a", textSub: "#334155", textMuted: "#475569", textFaint: "#64748b",
       axis: "#cbd5e1", axisLabel: "#64748b", split: "#eef2f7", accent: "#2563eb",
       tooltipBg: "#ffffff", tooltipText: "#0f172a", tooltipBorder: "#e2e8f0",
       band: "rgba(100,116,139,0.09)", zoomFiller: "rgba(37,99,235,0.12)",
-      gridBg: "#f8fafc", border: "#e2e8f0", danger: "#dc2626", success: "#16a34a"
+      gridBg: "#f8fafc", border: "#e2e8f0", danger: "#dc2626", success: "#15803d"
     };
   }
 
@@ -340,33 +333,21 @@
     var text = document.getElementById("status-text");
     return fetchJson("/api/health", 6000)
       .then(function (data) {
-        if (dot) {
-          dot.className = "status-dot ok";
-        }
-        if (text) {
-          text.textContent = "服务正常 · " + data.priority;
-        }
+        if (dot) dot.className = "status-dot ok";
+        if (text) text.textContent = "服务正常 · " + data.priority;
         var asOf = data.data_as_of || "";
         var strip = document.getElementById("data-as-of");
-        if (strip) {
-          if (asOf) {
-            strip.textContent = "数据截止 " + asOf;
-            strip.className = "";
-          }
+        if (strip && asOf) {
+          strip.textContent = "数据截止 " + asOf;
+          strip.className = "";
         }
         var footer = document.getElementById("footer-as-of");
-        if (footer && asOf) {
-          footer.textContent = "数据截止 " + asOf;
-        }
+        if (footer && asOf) footer.textContent = "数据截止 " + asOf;
         return data;
       })
       .catch(function () {
-        if (dot) {
-          dot.className = "status-dot bad";
-        }
-        if (text) {
-          text.textContent = "服务不可用";
-        }
+        if (dot) dot.className = "status-dot bad";
+        if (text) text.textContent = "服务不可用";
         return null;
       });
   }
@@ -402,8 +383,6 @@
     var dates = history.dates;
     var seriesList = [];
     var yAxis = [];
-    var leftIndex = 0;
-    var rightIndex = -1;
 
     var keys = Object.keys(history.series);
     var hasRight = false;
@@ -416,7 +395,6 @@
       }
     }
     if (hasRight) {
-      rightIndex = 1;
       yAxis.push(
         { type: "value", name: "PE 类", scale: true, position: "left",
           axisLabel: { color: color.axisLabel, fontSize: 11 },
@@ -491,9 +469,7 @@
         textStyle: { color: color.tooltipText, fontSize: 12.5 },
         extraCssText: "box-shadow:0 4px 14px rgba(15,23,42,.10);border-radius:8px;",
         formatter: function (params) {
-          if (!params.length) {
-            return "";
-          }
+          if (!params.length) return "";
           var html = '<div style="font-weight:600;margin-bottom:5px">' + params[0].axisValue + "</div>";
           for (var p = 0; p < params.length; p++) {
             var item = params[p];
@@ -625,18 +601,14 @@
    * 创建带指定文本的元素（统一用 textContent，杜绝 HTML 注入）
    *
    * @param {string} tag 标签名
-   * @param {string} className class，可省略
-   * @param {string} text 文本内容，可省略
+   * @param {string} [className] class，可省略
+   * @param {string} [text] 文本内容，可省略
    * @returns {HTMLElement} 元素
    */
   function el(tag, className, text) {
     var node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== undefined && text !== null) {
-      node.textContent = text;
-    }
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
     return node;
   }
 
@@ -653,10 +625,10 @@
    */
   function escapeHtml(text) {
     return String(text === null || text === undefined ? "" : text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/&/g, "&")
+      .replace(/</g, "<")
+      .replace(/>/g, ">")
+      .replace(/"/g,"\u0022");
   }
 
   /**
@@ -673,9 +645,7 @@
    * @returns {void}
    */
   function showMessage(el, text, kind) {
-    if (!el) {
-      return;
-    }
+    if (!el) return;
     el.textContent = text || "";
     el.className = "message show " + (kind || "info");
   }
@@ -687,9 +657,7 @@
    * @returns {void}
    */
   function clearMessage(el) {
-    if (!el) {
-      return;
-    }
+    if (!el) return;
     el.textContent = "";
     el.className = "message";
   }

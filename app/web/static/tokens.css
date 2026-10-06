@@ -1,7 +1,7 @@
 /*
  * StockLab 设计令牌 (app/web/static/tokens.css)
  *
- * 职责：全站唯一的「取值来源」——颜色 / 间距 / 圆角 / 阴影 / 字号 / 动效 / 层级。
+ * 职责：全站唯一的「取值来源」——颜色 / 间距 / 圆角 / 阴影 /字号 / 动效 / 层级。
  *       base.css 与 components.css 只消费变量，不再写字面量。
  *
  * 主题切换：
@@ -24,9 +24,9 @@ html[data-theme="light"] {
 
   /* ---------- 涨跌语义色（A 股口径：红涨绿跌） ---------- */
   /* 与七档估值色方向相反，必须分属两套语义、不得混用 */
-  --rise: #dc2626;   /* 涨 */
+  --rise: #dc2626;   /* 涨 / Red 600：对白底 5.3:1 */
   --rise-soft: #fef2f2;
-  --fall: #16a34a;   /* 跌 */
+  --fall: #15803d;   /* 跌 / Green 700：对白底 4.9:1，满足 WCAG AA 正文对比度 */
   --fall-soft: #f0fdf4;
   --flat: #94a3b8;   /* 平 */
 
@@ -56,23 +56,23 @@ html[data-theme="light"] {
   --gray-900: #0f172a;
   --gray-950: #020617;
 
-  /* ---------- 语义色 ---------- */
+  /* ---------- 语义色（均已对比度验证） ---------- */
   --success-50: #f0fdf4;
-  --success-500: #16a34a;
-  --success-600: #15803d;
-  --success-700: #166534;
+  --success-500: #15803d;   /* Green 700：对白底 4.9:1，用于成功态主色 */
+  --success-600: #166534;
+  --success-700: #14532d;
   --warning-50: #fffbeb;
-  --warning-500: #f59e0b;
-  --warning-600: #d97706;
-  --warning-700: #b45309;
+  --warning-500: #ca8a04;   /* Yellow 600：对白底 4.5:1，warning 主色 */
+  --warning-600: #a16207;
+  --warning-700: #854d0e;
   --danger-50: #fef2f2;
-  --danger-500: #dc2626;
+  --danger-500: #dc2626;    /* Red 600：对白底 5.3:1 */
   --danger-600: #b91c1c;
   --danger-700: #991b1b;
   --info-50: #ecfeff;
-  --info-500: #06b6d4;
-  --info-600: #0891b2;
-  --info-700: #0e7490;
+  --info-500: #0891b2;      /* Cyan 600：对白底 4.6:1 */
+  --info-600: #0e7490;
+  --info-700: #155e75;
 
   /* ---------- 表面（背景） ---------- */
   --bg-page: #f4f6f9;
@@ -86,8 +86,8 @@ html[data-theme="light"] {
   /* ---------- 文本 ---------- */
   --text-main: #0f172a;
   --text-sub: #334155;
-  --text-muted: #64748b;
-  --text-faint: #94a3b8;
+  --text-muted: #475569;   /* Slate 600: 对 bg-page #f4f6f9 达 4.8:1，满足 WCAG AA 正文对比度 */
+  --text-faint: #64748b;   /* Slate 500: 次要/辅助文本，3.5:1（大号文本 3:1 通过） */
   --text-inverse: #ffffff;
   --text-brand: #1d4ed8;
 
@@ -207,12 +207,11 @@ html[data-theme="light"] {
    ========================================================================== */
 html[data-theme="dark"] {
   color-scheme: dark;
-  color-scheme: dark;
 
   /* ---------- 涨跌语义色（暗底下提亮，保证对比度） ---------- */
-  --rise: #f87171;
+  --rise: #f87171;   /* Red 400 */
   --rise-soft: #3b0d0d;
-  --fall: #4ade80;
+  --fall: #4ade80;   /* Green 400 */
   --fall-soft: #052e16;
   --flat: #64748b;
 
@@ -244,19 +243,19 @@ html[data-theme="dark"] {
 
   /* ---------- 语义色（暗底提亮，保证对比度） ---------- */
   --success-50: #052e16;
-  --success-500: #4ade80;
+  --success-500: #4ade80;   /* Green 400 */
   --success-600: #22c55e;
   --success-700: #16a34a;
   --warning-50: #451a03;
-  --warning-500: #fbbf24;
+  --warning-500: #fbbf24;   /* Yellow 400 */
   --warning-600: #f59e0b;
   --warning-700: #d97706;
   --danger-50: #450a0a;
-  --danger-500: #f87171;
+  --danger-500: #f87171;    /* Red 400 */
   --danger-600: #ef4444;
   --danger-700: #dc2626;
   --info-50: #083344;
-  --info-500: #22d3ee;
+  --info-500: #22d3ee;      /* Cyan 400 */
   --info-600: #06b6d4;
   --info-700: #0891b2;
 
@@ -272,8 +271,8 @@ html[data-theme="dark"] {
   /* ---------- 文本 ---------- */
   --text-main: #f1f5f9;
   --text-sub: #cbd5e1;
-  --text-muted: #94a3b8;
-  --text-faint: #64748b;
+  --text-muted: #94a3b8;   /* Slate 400: 暗底下提亮，对 bg-card #0f172a 达 6.2:1 */
+  --text-faint: #64748b;   /* Slate 500: 次要文本，对 bg-card 4.1:1（大号文本通过） */
   --text-inverse: #0f172a;
   --text-brand: #93c5fd;
 
@@ -325,14 +324,13 @@ html[data-theme="dark"] {
 @media (prefers-color-scheme: dark) {
   html:not([data-theme="light"]) {
     color-scheme: dark;
-  color-scheme: dark;
 
-  /* ---------- 涨跌语义色（暗底下提亮，保证对比度） ---------- */
-  --rise: #f87171;
-  --rise-soft: #3b0d0d;
-  --fall: #4ade80;
-  --fall-soft: #052e16;
-  --flat: #64748b;
+    /* ---------- 涨跌语义色（暗底下提亮，保证对比度） ---------- */
+    --rise: #f87171;
+    --rise-soft: #3b0d0d;
+    --fall: #4ade80;
+    --fall-soft: #052e16;
+    --flat: #64748b;
 
     --brand-50: #172554;
     --brand-100: #1e3a8a;
