@@ -33,6 +33,7 @@ from stocklab.analytics.fund_style import (
     FundAllocationSignal,
     SignalStrength,
     ConfidenceLevel,
+    TransactionCostModel,
 )
 from stocklab.domain import CAPITAL_FLOW_DAILY_COLUMNS
 from stocklab.persistence.repository.fund_analysis import (
@@ -178,13 +179,31 @@ class FundAnalysisFacade:
         # 5. 本层级的行业映射（分析时用它筛 sector_codes 与回填行业名）
         mapping_df = mapping[mapping["level"] == level].copy()
 
+        # P1: 加载因子收益率（风格因子 + 宏观因子）
+        factor_returns = self._load_factor_returns(since)
+
         return {
             "fund_nav": fund_nav,
             "sector_indices": sector_indices,
             "capital_flow": capital_flow,
             "mapping": mapping_df,
             "sector_codes": sector_codes,
+            "factor_returns": factor_returns,  # P1: 因子收益率
         }
+
+    def _load_factor_returns(self, since: date) -> Dict[str, pd.DataFrame]:
+        """
+        P1: 加载因子收益率数据（风格因子 + 宏观因子）
+
+        目前使用内置模拟因子，后续可接入真实因子数据源（如 Barra、Wind、自建因子库）。
+        返回: {factor_name: DataFrame(trade_date, factor_return)}
+        """
+        from stocklab.datasource.factor_returns import fetch_factor_returns
+        try:
+            return fetch_factor_returns(since=since)
+        except Exception as e:
+            _logger.warning("因子收益率加载失败，将仅使用行业分解: %s", e)
+            return {}
 
     def analyze_fund_allocation(
         self,
@@ -224,6 +243,9 @@ class FundAnalysisFacade:
             }
 
         # 执行分解
+        # P1: 创建交易成本模型
+        cost_model = TransactionCostModel()
+
         result = decompose_fund_style(
             fund_nav_df=data["fund_nav"],
             sector_index_dfs=data["sector_indices"],
@@ -233,6 +255,8 @@ class FundAnalysisFacade:
             analysis_date=analysis_date,
             window_days=window_days,
             level=level,
+            factor_returns_dfs=data.get("factor_returns"),  # P1: 因子收益率
+            transaction_cost_model=cost_model,  # P1: 交易成本模型
         )
 
         # 保存分析结果到缓存表

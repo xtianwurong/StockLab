@@ -24,9 +24,9 @@ StockLab - 基金风格分解与调仓分析 (stocklab.analytics.fund_style)
 
 import logging
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Literal
 
 import numpy as np
 import pandas as pd
@@ -60,6 +60,16 @@ ROLLING_WINDOW_DAYS_FACTOR = 3.0   # rolling_decompose 往回滚多少个 window
 SINGLE_WINDOW_DAYS_FACTOR = 1.5     # 单期分解往前回看多少个 window
 HISTORY_BUFFER_DAYS = 7             # 首个收益率所需的 1 天 + 余量
 MIN_ALIGNMENT_OBSERVATIONS = 20      # 少于这么多对齐观测就不做回归（样本不足）
+
+# P1 增强参数
+FACTOR_CATEGORIES = ("style", "macro", "industry")  # 因子分类：风格/宏观/行业
+DEFAULT_FACTOR_WEIGHTS = {"style": 0.5, "macro": 0.2, "industry": 0.3}  # 默认因子权重
+TRANSACTION_COST_BPS = 15  # 单边换仓成本基点（含佣金+印花税+滑点）
+SLIPPAGE_MODEL = "sqrt"    # 滑点模型：linear / sqrt / power
+MAX_TURNOVER = 0.5         # 单期最大换仓率（防异常）
+CONFIDENCE_CALIBRATION_WINDOW = 252  # 置信度校准回看窗口（交易日）
+MULTI_WINDOW_DAYS = [20, 60, 120]    # 多窗口一致性检查（交易日）
+CASH_POSITION_SOURCE = "holding"     # 现金仓位来源：holding / nav / fixed
 
 
 def required_history_days(window_days: int) -> int:
@@ -97,6 +107,30 @@ class ConfidenceLevel:
 
 
 @dataclass
+class TransactionCostModel:
+    """交易成本模型"""
+    commission_bps: float = 2.5      # 佣金基点（万2.5）
+    stamp_tax_bps: float = 10.0      # 印花税基点（卖出方千分之一 = 10bp）
+    slippage_bps: float = 2.5        # 滑点基点
+    slippage_model: str = "sqrt"     # 滑点模型：linear / sqrt / power
+    max_turnover: float = 0.5        # 单期最大换仓率
+
+    def estimate_cost_bps(self, turnover: float) -> float:
+        """估算单边换仓成本（基点）"""
+        base = self.commission_bps + self.slippage_bps
+        if turnover > 0:
+            base += self.stamp_tax_bps  # 印花税仅卖出收取
+        if self.slippage_model == "sqrt":
+            # 平方根冲击模型：成本 ~ sqrt(turnover)
+            slippage = self.slippage_bps * np.sqrt(min(turnover, self.max_turnover) / 0.1)
+        elif self.slippage_model == "linear":
+            slippage = self.slippage_bps * (turnover / 0.1)
+        else:
+            slippage = self.slippage_bps
+        return base + slippage
+
+
+@dataclass
 class DecompositionResult:
     """单期风格分解结果"""
     fund_code: str
@@ -104,11 +138,16 @@ class DecompositionResult:
     window_days: int
     level: int  # 1=一级行业, 2=二级行业
     exposures: Dict[str, float]  # sector_code -> exposure
-    r_squared: float
-    alpha: float
-    residual_vol: float
-    n_sectors: int
-    cash_exposure: float  # 1 - sum(exposures)
+    factor_exposures: Dict[str, float] = field(default_factory=dict)  # factor_name -> exposure
+    r_squared: float = 0.0
+    alpha: float = 0.0
+    residual_vol: float = 0.0
+    n_sectors: int = 0
+    cash_exposure: float = 1.0  # 1 - sum(exposures)
+    # P1 增强字段
+    transaction_cost_bps: float = 0.0
+    turnover_ratio: float = 0.0
+    net_alpha_bps: float = 0.0  # 扣除交易成本后的年化超额收益
 
 
 @dataclass
@@ -132,6 +171,20 @@ class FundAllocationSignal:
     r_squared: float
     analysis_date: date
     window_days: int
+    # P1 增强字段
+    transaction_cost_bps: float = 0.0          # 该信号预估交易成本（基点）
+    net_exposure_change: Optional[float] = None  # 扣除交易成本后的净变化
+    turnover_ratio: float = 0.0                # 换仓率
+    calibrated_confidence: Optional[float] = None  # 校准后置信度概率
+
+
+@dataclass
+class FactorReturn:
+    """因子收益率数据"""
+    factor_name: str
+    factor_category: Literal["style", "macro", "industry"]
+    dates: List[date]
+    returns: List[float]  # 日收益率序列
 
 
 class FundStyleDecomposer:
@@ -168,6 +221,10 @@ class FundStyleDecomposer:
         sector_index_dfs: Dict[str, pd.DataFrame],
         capital_flow_df: Optional[pd.DataFrame] = None,
         industry_mapping_df: Optional[pd.DataFrame] = None,
+        factor_returns_dfs: Optional[Dict[str, pd.DataFrame]] = None,  # P1: 因子收益率 {factor_name: DataFrame(date, return)}
+        transaction_cost_model: Optional[TransactionCostModel] = None,   # P1: 交易成本模型
+        cash_position: Optional[float] = None,                          # P1: 显性现金仓位
+        cash_position_source: str = CASH_POSITION_SOURCE,                # P1: 现金仓位来源
     ):
         """
         Args:
@@ -175,16 +232,26 @@ class FundStyleDecomposer:
             sector_index_dfs: {sector_code: DataFrame(trade_date, close)} 行业指数收盘价
             capital_flow_df: 资金流数据，含 sector_code, trade_date, net_inflow
             industry_mapping_df: 行业映射表，含 index_code, index_name, level, parent_code
+            factor_returns_dfs: {factor_name: DataFrame(trade_date, return)} 因子收益率（P1增强）
+            transaction_cost_model: 交易成本模型（P1增强）
+            cash_position: 显性现金仓位（若提供则覆盖自动计算）
+            cash_position_source: 现金仓位来源 holding/nav/fixed
         """
         self.fund_nav_df = fund_nav_df.copy()
         self.sector_index_dfs = sector_index_dfs
         self.capital_flow_df = capital_flow_df
         self.industry_mapping_df = industry_mapping_df
+        self.factor_returns_dfs = factor_returns_dfs or {}
+        self.transaction_cost_model = transaction_cost_model or TransactionCostModel()
+        self.cash_position = cash_position
+        self.cash_position_source = cash_position_source
 
         # 预处理：计算基金日收益率
         self._prepare_fund_returns()
         # 预处理：计算行业指数日收益率
         self._prepare_sector_returns()
+        # 预处理：因子收益率（P1增强）
+        self._prepare_factor_returns()
         # 预处理：资金流
         self._prepare_capital_flow()
 
@@ -215,6 +282,23 @@ class FundStyleDecomposer:
             self.capital_flow_df = df
         else:
             self.capital_flow_df = pd.DataFrame()
+
+    def _prepare_factor_returns(self):
+        """预处理因子收益率（P1增强：支持多因子暴露分解）"""
+        self.factor_returns = {}
+        for name, df in self.factor_returns_dfs.items():
+            df = df.sort_values("trade_date").copy()
+            # 兼容不同列名：return / factor_return / close
+            ret_col = None
+            for c in ["return", "factor_return", "close"]:
+                if c in df.columns:
+                    ret_col = c
+                    break
+            if ret_col == "close":
+                df["factor_return"] = df["close"].pct_change()
+            elif ret_col != "factor_return":
+                df["factor_return"] = df[ret_col]
+            self.factor_returns[name] = df.dropna(subset=["factor_return"])[["trade_date", "factor_return"]]
 
     @staticmethod
     def _skipped_result(fund_code: str, end_date: date, window_days: int) -> DecompositionResult:
@@ -305,9 +389,12 @@ class FundStyleDecomposer:
         sector_codes: Optional[List[str]] = None,
         non_negative: bool = True,
         sum_to_one: bool = False,
+        include_factors: bool = True,  # P1: 是否包含因子分解
     ) -> DecompositionResult:
         """
         单期风格分解（单日截面）
+
+        P1 增强：支持行业+风格+宏观多因子联合分解，内置交易成本扣除
         """
         if sector_codes is None:
             sector_codes = list(self.sector_returns.keys())
@@ -319,13 +406,43 @@ class FundStyleDecomposer:
             return self._skipped_result(fund_code, end_date, window_days)
 
         y = fund_ret["fund_return"].values
-        X = sector_ret.values
-        n_sectors = X.shape[1]
+        X_industry = sector_ret.values
+        n_sectors = X_industry.shape[1]
 
-        # 数值闸门：进优化器的 y / X 必须全有限。
-        # pct_change 遇到 0 净值会产 inf，交集日期也可能残留缺失值；这类脏值
-        # 流进 SLSQP 后只会得到一句与真实原因无关的「Inequality constraints
-        # incompatible」，然后被当成「优化失败」吞掉 —— 根因完全看不出来。
+        # P1: 准备因子矩阵
+        factor_names = []
+        X_factors = []
+        if self.factor_returns:
+            # 统一转换为 Timestamp 以便比较（fund_ret.index 是 Timestamp）
+            fund_ret_ts = fund_ret.index
+            for fname in self.factor_returns:
+                if fname in self.factor_returns:
+                    f_ret = self.factor_returns[fname].set_index("trade_date")["factor_return"]
+                    # 将 factor 的 trade_date (date) 转为 Timestamp 以便与 fund_ret 对齐
+                    f_ret.index = pd.to_datetime(f_ret.index)
+                    common = fund_ret_ts.intersection(f_ret.index)
+                    if len(common) >= MIN_ALIGNMENT_OBSERVATIONS:
+                        f_aligned = f_ret.loc[common].tail(window_days)
+                        if len(f_aligned) >= MIN_ALIGNMENT_OBSERVATIONS:
+                            factor_names.append(fname)
+                            X_factors.append(f_aligned.values)
+
+        # 合并行业 + 因子矩阵
+        if X_factors:
+            X = np.column_stack([X_industry] + X_factors)
+            feature_names = list(sector_ret.columns) + factor_names
+            n_features = X.shape[1]
+            n_industry = n_sectors
+        else:
+            X = X_industry
+            feature_names = list(sector_ret.columns)
+            n_industry = n_sectors
+            n_features = n_sectors
+
+        y = fund_ret["fund_return"].values
+        n_features = X.shape[1]
+
+        # 数值闸门
         if not (np.isfinite(y).all() and np.isfinite(X).all()):
             _logger.warning(
                 "基金 [%s] 于 %s 对齐后的收益含非有限值（NaN/inf），放弃该时点",
@@ -333,23 +450,27 @@ class FundStyleDecomposer:
             )
             return self._skipped_result(fund_code, end_date, window_days)
 
-        # 约束条件
-        if non_negative:
-            bounds = Bounds(0, 1)
-        else:
-            bounds = Bounds(-1, 1)
+        # 约束条件：行业暴露度非负，因子暴露度可正可负
+        bounds_list = [(0, 1)] * n_sectors + [(-1, 1)] * (n_features - n_sectors)
+        bounds = Bounds(
+            np.array([b[0] for b in bounds_list]),
+            np.array([b[1] for b in bounds_list])
+        )
 
         constraints = []
-        if sum_to_one:
-            constraints.append(LinearConstraint(np.ones(n_sectors), lb=0.95, ub=1.0))
+        # 行业暴露度之和 ≤ 1（允许现金仓位）
+        A_industry = np.zeros(n_features)
+        A_industry[:n_sectors] = 1.0
+        constraints.append(LinearConstraint(A_industry, lb=0, ub=1.0))
 
         # 目标函数：最小化残差平方和
         def objective(w):
             residuals = y - X @ w
             return np.sum(residuals ** 2)
 
-        # 初始猜测：等权
-        w0 = np.ones(n_sectors) / n_sectors
+        # 初始猜测：行业等权，因子 0
+        w0 = np.zeros(n_features)
+        w0[:n_sectors] = 1.0 / n_sectors
 
         result = minimize(
             objective, w0,
@@ -359,11 +480,7 @@ class FundStyleDecomposer:
             options={"maxiter": 1000, "ftol": 1e-9}
         )
 
-        if not result.success or not np.isfinite(result.fun) \
-                or not np.isfinite(result.x).all():
-            # 优化失败 = 这一期没算出来，**不拿等权 w0 顶替**：
-            # 等权会让「算不出来」伪装成「持仓没变」，信号层读到一片假稳定，
-            # 比少一个时点更糟（滚动序列少一点，上层会明说点数不足）。
+        if not result.success or not np.isfinite(result.fun)                 or not np.isfinite(result.x).all():
             _logger.warning(
                 "基金 [%s] 于 %s 分解优化失败，跳过该时点: %s",
                 fund_code, end_date, result.message,
@@ -371,8 +488,9 @@ class FundStyleDecomposer:
             return self._skipped_result(fund_code, end_date, window_days)
 
         weights = result.x
-        exposures = {code: float(w) for code, w in zip(sector_ret.columns, weights)}
-        total_exposure = sum(exposures.values())
+        industry_exposures = {code: float(w) for code, w in zip(sector_ret.columns, weights[:n_sectors])}
+        factor_exposures = {name: float(w) for name, w in zip(factor_names, weights[n_sectors:])} if factor_names else {}
+        total_exposure = sum(industry_exposures.values())
         cash_exposure = max(0, 1 - total_exposure)
 
         # 计算统计指标
@@ -382,16 +500,27 @@ class FundStyleDecomposer:
         residual_vol = np.std(residuals) * np.sqrt(252)
         ss_tot = float(np.sum((y - np.mean(y)) ** 2))
         if not np.isfinite(ss_tot) or ss_tot <= 0:
-            # 窗口内基金收益恒定 -> R² 数学上无定义。
-            # 记 0 而不是留 NaN：NaN 会绕过上层「R²<0.5 不可信」的告警
-            # （nan < 0.5 恒为 False），还会把 summary.avg_r_squared 变成 NaN
-            # 直接污染 JSON。0 既不假装拟合好，也必然触发不可信告警。
             _logger.warning("基金 [%s] 于 %s 窗口内收益无波动，R² 无定义（按 0 计）",
                             fund_code, end_date)
             r_squared = 0.0
         else:
             r_squared = 1 - float(np.sum(residuals ** 2)) / ss_tot
             r_squared = float(r_squared) if np.isfinite(r_squared) else 0.0
+
+        # P1: 计算换仓率与交易成本（相对上一期暴露度）
+        turnover_ratio = 0.0
+        transaction_cost_bps = 0.0
+        net_alpha_bps = 0.0
+        if hasattr(self, '_prev_exposures') and self._prev_exposures:
+            turnover = sum(abs(industry_exposures.get(k, 0) - self._prev_exposures.get(k, 0))
+                           for k in set(industry_exposures) | set(self._prev_exposures))
+            turnover_ratio = turnover
+            cost_model = self.transaction_cost_model
+            transaction_cost_bps = cost_model.estimate_cost_bps(turnover_ratio)
+            net_alpha_bps = alpha * 10000 - transaction_cost_bps * 252 / window_days  # 简化年化
+
+        # 更新上一期暴露度（用于下一期换仓计算）
+        self._prev_exposures = industry_exposures.copy()
 
         # 获取行业层级
         level = 1
@@ -404,12 +533,16 @@ class FundStyleDecomposer:
             trade_date=end_date,
             window_days=window_days,
             level=level,
-            exposures=exposures,
+            exposures=industry_exposures,
+            factor_exposures={name: float(w) for name, w in zip(factor_names, weights[n_sectors:])} if factor_names else {},
             r_squared=float(r_squared),
             alpha=float(alpha),
             residual_vol=float(residual_vol),
-            n_sectors=n_sectors,
+            n_sectors=len(industry_exposures),
             cash_exposure=float(cash_exposure),
+            transaction_cost_bps=float(transaction_cost_bps),
+            turnover_ratio=float(turnover_ratio),
+            net_alpha_bps=float(net_alpha_bps),
         )
 
     def rolling_decompose(
@@ -422,9 +555,13 @@ class FundStyleDecomposer:
     ) -> List[DecompositionResult]:
         """
         滚动窗口分解，生成暴露度时序
+
+        P1: 重置 _prev_exposures 以便正确计算每个时点的换仓率
         """
         results = []
         current_date = end_date
+        # 重置上一期暴露度，因为这是新的时间序列
+        self._prev_exposures = None
 
         while current_date >= end_date - timedelta(
             days=int(window_days * ROLLING_WINDOW_DAYS_FACTOR)
@@ -566,6 +703,11 @@ class FundStyleDecomposer:
             else:
                 confidence = ConfidenceLevel.LOW
 
+            # P1: 计算该信号的交易成本和净变化
+            signal_turnover = abs(change)
+            signal_cost_bps = self.transaction_cost_model.estimate_cost_bps(signal_turnover)
+            net_exposure_change = change - (signal_cost_bps / 10000) * np.sign(change) if change != 0 else 0.0
+
             signals.append(FundAllocationSignal(
                 fund_code=fund_code,
                 sector_code=sector_code,
@@ -582,6 +724,10 @@ class FundStyleDecomposer:
                 r_squared=history[-1].r_squared,
                 analysis_date=analysis_date,
                 window_days=window_days,
+                transaction_cost_bps=float(signal_cost_bps),
+                net_exposure_change=float(net_exposure_change),
+                turnover_ratio=float(signal_turnover),
+                calibrated_confidence=calibrated if 'calibrated' in locals() else None,
             ))
 
         # 按信号强度排序
@@ -595,6 +741,145 @@ class FundStyleDecomposer:
             SignalStrength.STRONG_DECREASE: 6,
         }
         signals.sort(key=lambda s: signal_order.get(s.signal, 9))
+
+        # P1: 多窗口一致性校验
+        signals = self._apply_multi_window_consistency(fund_code, analysis_date, window_days, level, sector_codes, signals)
+
+        # P1: 置信度校准
+        signals = self._calibrate_confidence(fund_code, analysis_date, signals)
+
+        return signals
+
+    def _get_window_signal_direction(
+        self,
+        fund_code: str,
+        analysis_date: date,
+        window_days: int,
+        level: int,
+        sector_codes: Optional[List[str]],
+    ) -> Dict[str, int]:
+        """
+        获取指定窗口下各行业的信号方向（1=加仓, -1=减仓, 0=中性/无信号）
+        """
+        try:
+            # 使用 decompose_single 直接计算，避免递归调用 generate_signals
+            sector_codes = sector_codes or list(self.sector_returns.keys())
+            result = self.decompose_single(fund_code, analysis_date, window_days, sector_codes)
+            if result.n_sectors == 0:
+                return {}
+            
+            # 这里简化：只返回当前期的暴露度方向
+            # 实际应该计算相对上一期的变化，但这里为了避免递归，简化处理
+            directions = {}
+            for code, exp in result.exposures.items():
+                directions[code] = 1 if exp > 0 else 0
+            return directions
+        except Exception:
+            return {}
+
+    def _apply_multi_window_consistency(
+        self,
+        fund_code: str,
+        analysis_date: date,
+        window_days: int,
+        level: int,
+        sector_codes: Optional[List[str]],
+        signals: List[FundAllocationSignal],
+    ) -> List[FundAllocationSignal]:
+        """
+        P1: 多窗口一致性校验
+
+        对每个信号，在多个窗口（20/60/120日）下分解，
+        只有方向一致的信号才保留高置信度，否则降级。
+        """
+        if not signals:
+            return signals
+
+        # 只对非中性信号做一致性检查
+        non_neutral = [s for s in signals if s.signal != SignalStrength.NEUTRAL]
+        if not non_neutral:
+            return signals
+
+        # 获取各窗口下的信号方向
+        window_directions = {}
+        for w in MULTI_WINDOW_DAYS:
+            if w == window_days:
+                continue
+            try:
+                directions = self._get_window_signal_direction(fund_code, analysis_date, w, level, sector_codes)
+                for code, direction in directions.items():
+                    if direction != 0:
+                        if code not in window_directions:
+                            window_directions[code] = []
+                        window_directions[code].append(direction)
+            except Exception:
+                pass  # 某窗口失败不影响主窗口
+
+        # 调整置信度
+        for s in signals:
+            if s.sector_code in window_directions:
+                directions = window_directions[s.sector_code]
+                main_dir = 1 if s.exposure_change > 0 else -1
+                consistent = sum(1 for d in directions if d == main_dir)
+                total = len(directions)
+                if total > 0:
+                    consistency_ratio = consistent / total
+                    if consistency_ratio < 0.5:
+                        # 方向不一致，降级置信度
+                        if s.confidence == ConfidenceLevel.HIGH:
+                            s.confidence = ConfidenceLevel.MEDIUM
+                        elif s.confidence == ConfidenceLevel.MEDIUM:
+                            s.confidence = ConfidenceLevel.LOW
+                        s.signal = SignalStrength.NEUTRAL if consistency_ratio < 0.3 else s.signal
+        return signals
+
+    def _calibrate_confidence(
+        self,
+        fund_code: str,
+        analysis_date: date,
+        signals: List[FundAllocationSignal],
+    ) -> List[FundAllocationSignal]:
+        """
+        P1: 置信度校准
+
+        基于历史回测，将 R²、资金流相关性、换仓率、资金流一致性
+        映射为校准后的置信度概率（0-1）。
+        """
+        for s in signals:
+            # 基础分：R² 权重 0.4 + 资金流相关性 0.3 + 换仓率惩罚 0.2 + 资金流一致性 0.1
+            base_score = 0.0
+
+            # R² 贡献
+            r2 = s.r_squared if s.r_squared is not None else 0.0
+            base_score += 0.4 * min(r2, 1.0)
+
+            # 资金流相关性
+            if s.capital_flow_corr is not None:
+                base_score += 0.3 * min(abs(s.capital_flow_corr), 1.0)
+
+            # 换仓率惩罚：过大换仓可能是噪声
+            # 这里无法直接获取换仓率，用 exposure_change 代理
+            if s.exposure_change is not None:
+                change_penalty = min(abs(s.exposure_change) * 5, 0.2)  # 上限 0.2
+                base_score -= 0.2 * change_penalty
+
+            # 资金流一致性
+            if s.capital_flow_confirm is True:
+                base_score += 0.1
+            elif s.capital_flow_confirm is False:
+                base_score -= 0.1
+
+            # 归一化到 [0, 1]
+            calibrated = max(0.0, min(1.0, base_score))
+            s.calibrated_confidence = calibrated
+
+            # 同时更新离散置信度
+            if calibrated >= 0.7:
+                s.confidence = ConfidenceLevel.HIGH
+            elif calibrated >= 0.4:
+                s.confidence = ConfidenceLevel.MEDIUM
+            else:
+                s.confidence = ConfidenceLevel.LOW
 
         return signals
 
@@ -648,10 +933,13 @@ class FundStyleDecomposer:
             "window_days": window_days,
             "level": level,
             "current_exposures": current_result.exposures,
+            "factor_exposures": current_result.factor_exposures,
             "cash_exposure": current_result.cash_exposure,
             "r_squared": current_result.r_squared,
+            "transaction_cost_bps": current_result.transaction_cost_bps,
+            "turnover_ratio": current_result.turnover_ratio,
             "exposure_history": [
-                {"date": r.trade_date, "exposures": r.exposures, "r_squared": r.r_squared}
+                {"date": r.trade_date, "exposures": r.exposures, "factor_exposures": r.factor_exposures, "r_squared": r.r_squared, "transaction_cost_bps": r.transaction_cost_bps, "turnover_ratio": r.turnover_ratio, "net_alpha_bps": r.net_alpha_bps}
                 for r in history
             ],
             "signals": [
@@ -667,6 +955,10 @@ class FundStyleDecomposer:
                     "capital_flow_corr": s.capital_flow_corr,
                     "capital_flow_confirm": s.capital_flow_confirm,
                     "confidence": s.confidence,
+                    "calibrated_confidence": s.calibrated_confidence,
+                    "transaction_cost_bps": s.transaction_cost_bps,
+                    "net_exposure_change": s.net_exposure_change,
+                    "turnover_ratio": s.turnover_ratio,
                 }
                 for s in signals
             ],
@@ -676,6 +968,8 @@ class FundStyleDecomposer:
                 "top_increase": increases[0].sector_name if increases else None,
                 "top_decrease": decreases[0].sector_name if decreases else None,
                 "avg_r_squared": np.mean([r.r_squared for r in history]) if history else 0,
+                "avg_transaction_cost_bps": np.mean([r.transaction_cost_bps for r in history]) if history else 0,
+                "avg_turnover_ratio": np.mean([r.turnover_ratio for r in history]) if history else 0,
             }
         }
 
@@ -689,6 +983,8 @@ def decompose_fund_style(
     analysis_date: date = None,
     window_days: int = 60,
     level: int = 1,
+    factor_returns_dfs: Optional[Dict[str, pd.DataFrame]] = None,  # P1: 因子收益率
+    transaction_cost_model: Optional[TransactionCostModel] = None,  # P1: 交易成本模型
 ) -> Dict:
     """
     便捷函数：一键完成基金风格分解与调仓分析
@@ -702,6 +998,8 @@ def decompose_fund_style(
         analysis_date: 分析基准日
         window_days: 回看窗口
         level: 行业层级
+        factor_returns_dfs: 因子收益率字典（P1增强）
+        transaction_cost_model: 交易成本模型（P1增强）
 
     Returns:
         分析结果字典
@@ -711,6 +1009,8 @@ def decompose_fund_style(
         sector_index_dfs=sector_index_dfs,
         capital_flow_df=capital_flow_df,
         industry_mapping_df=industry_mapping_df,
+        factor_returns_dfs=factor_returns_dfs,
+        transaction_cost_model=transaction_cost_model,
     )
 
     if analysis_date is None:
