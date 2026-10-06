@@ -69,12 +69,12 @@
 
   "accounts": [
     {
-      "account_id": "xueqiu:dyp-1240335488",
+      "account_id": "xueqiu:dyp-1247347556",
       "investor_code": "dyp_0001",
       "platform": "xueqiu",
       "account_name": "大道无形我有型",
-      "account_uid": "1240335488",
-      "home_url": "https://xueqiu.com/u/1240335488",
+      "account_uid": "1247347556",
+      "home_url": "https://xueqiu.com/u/1247347556",
       "is_enabled": true,
       "note": "雪球 UID 为公开常识性信息；若同步结果异常先核对此处"
     },
