@@ -27,7 +27,27 @@ __all__ = [
     "FACTOR_CATEGORIES",
     "divide",
     "log_positive",
+    "pass_through",
 ]
+
+
+def pass_through(column):
+    """
+    取输入帧的一列作为因子值（原样透传，不改口径）
+
+    这是最常用的因子构造方式：直接取 PIT 帧中的某一列作为因子值。
+    6 大因子分类（quality/momentum/value/growth/dividend/risk）全都复用它，
+    因此放在基础层避免重复定义。
+
+    Args:
+        column (str): 因子值对应的列名
+
+    Returns:
+        callable: (frame) -> frame[column].astype("float64")
+    """
+    def _compute(frame):
+        return frame[column].astype("float64")
+    return _compute
 
 # 因子分类（V2 需求 §7 的六个子域）
 FACTOR_CATEGORIES = (

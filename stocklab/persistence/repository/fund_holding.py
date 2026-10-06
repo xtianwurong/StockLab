@@ -181,15 +181,6 @@ class FundIndustryExposureRepository(BaseRepository):
             """, [fund_code, level, fund_code, level]
         ).fetchdf()
 
-    def find_report_dates(self, fund_code: str) -> List[date]:
-        conn = self._db.get_connection()
-        rows = conn.execute(
-            f"SELECT DISTINCT report_date FROM {self._TABLE_NAME} WHERE fund_code = ? ORDER BY report_date DESC",
-            [fund_code]
-        ).fetchall()
-        return [row[0] for row in rows]
-
-
 class FundIndustryExposureDailyRepository(BaseRepository):
     """基金行业暴露日线表（线性插值后的每日数据）"""
 

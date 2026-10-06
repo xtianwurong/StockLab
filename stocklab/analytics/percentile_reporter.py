@@ -24,6 +24,7 @@ StockLab - 历史估值分位报告渲染器 (stocklab.analytics.percentile_repo
 
 import logging
 import unicodedata
+from stocklab.analytics import visual_width, pad_text
 
 from stocklab.analytics.valuation_percentile import (
     VALUATION_INDICATOR_PB,
@@ -68,6 +69,14 @@ class ValuationPercentileReporter:
     历史估值分位报告渲染器
     """
 
+    # 兼容性包装：旧代码/测试可能直接调用这些私有方法
+    def _visual_width(self, text):
+        return visual_width(text)
+
+    def _pad(self, text, visual_width):
+        return pad_text(text, visual_width)
+
+
     def format_console_report(self, ts_code, results, source_note=""):
         """
         渲染控制台文本报告
@@ -85,9 +94,9 @@ class ValuationPercentileReporter:
         lines.append(" " + ts_code + " 历史估值分位")
         lines.append("=" * _REPORT_WIDTH)
         if source_note:
-            lines.append(self._pad("取数通路", 12) + source_note)
+            lines.append(pad_text("取数通路", 12) + source_note)
         lines.append("")
-        lines.append(self._pad("分位口径", 12) + "(区间内低于当前值的样本数 / 有效样本总数) x 100%")
+        lines.append(pad_text("分位口径", 12) + "(区间内低于当前值的样本数 / 有效样本总数) x 100%")
         lines.append(" " * 12 + "亏损期(PE<=0)不计入样本")
 
         available = self._filter_available(results)
@@ -99,27 +108,27 @@ class ValuationPercentileReporter:
         lines.append("")
         lines.append("-" * _REPORT_WIDTH)
         lines.append(
-            self._pad("指标", _COL_INDICATOR)
-            + self._pad("当前值", _COL_CURRENT)
-            + self._pad("历史分位", _COL_PERCENTILE)
-            + self._pad("样本数", _COL_SAMPLE)
-            + self._pad("区间中位数", _COL_MEDIAN)
+            pad_text("指标", _COL_INDICATOR)
+            + pad_text("当前值", _COL_CURRENT)
+            + pad_text("历史分位", _COL_PERCENTILE)
+            + pad_text("样本数", _COL_SAMPLE)
+            + pad_text("区间中位数", _COL_MEDIAN)
             + "档位"
         )
         lines.append("-" * _REPORT_WIDTH)
 
         for item in available:
             lines.append(
-                self._pad(self.indicator_label(item.indicator), _COL_INDICATOR)
-                + self._pad(self._format_number(item.current_value), _COL_CURRENT)
-                + self._pad("%.1f%%" % item.percentile, _COL_PERCENTILE)
-                + self._pad(str(item.sample_count), _COL_SAMPLE)
-                + self._pad(self._format_number(item.median_value), _COL_MEDIAN)
+                pad_text(self.indicator_label(item.indicator), _COL_INDICATOR)
+                + pad_text(self._format_number(item.current_value), _COL_CURRENT)
+                + pad_text("%.1f%%" % item.percentile, _COL_PERCENTILE)
+                + pad_text(str(item.sample_count), _COL_SAMPLE)
+                + pad_text(self._format_number(item.median_value), _COL_MEDIAN)
                 + item.level
             )
 
         lines.append("-" * _REPORT_WIDTH)
-        lines.append(self._pad("计算区间", 12) + available[0].interval_text)
+        lines.append(pad_text("计算区间", 12) + available[0].interval_text)
         lines.append("")
         lines.append("解读：分位越低表示当前估值相对历史越便宜。")
         lines.append("      分位 <= 30% 判为相对低位，>= 70% 判为相对高位。")
@@ -226,28 +235,3 @@ class ValuationPercentileReporter:
             return _EMPTY_TEXT
         return "%.2f" % value
 
-    def _pad(self, text, visual_width):
-        """
-        按视觉宽度右侧补空格，使中英文混排的列能够对齐
-
-        Args:
-            text (str): 待补齐的文本
-            visual_width (int): 目标视觉列数
-
-        Returns:
-            str: 补齐后的文本；已超宽时原样返回
-        """
-        current_width = self._visual_width(text)
-        if current_width >= visual_width:
-            return text
-        return text + " " * (visual_width - current_width)
-
-    def _visual_width(self, text):
-        """计算字符串的视觉列数：东亚全角字符按 2 列计"""
-        width = 0
-        for char in text:
-            if unicodedata.east_asian_width(char) in ("W", "F"):
-                width += 2
-            else:
-                width += 1
-        return width

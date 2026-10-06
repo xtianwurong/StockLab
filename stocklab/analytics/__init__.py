@@ -1,5 +1,8 @@
+#!/usr/bin/env python3
 """
-StockLab 统计分析层 (stocklab.analytics)
+==============================================================================
+StockLab - 统计分析层 (stocklab.analytics)
+==============================================================================
 
 【模块职责】
    对已取到的数据表做统计聚合与派生计算，产出不可变的统计结果实体，
@@ -23,6 +26,10 @@ StockLab 统计分析层 (stocklab.analytics)
    新增输出形态应另写渲染器并在本文件导出，不要给既有渲染器加格式开关。
 """
 
+# 先导入工具模块（无循环依赖）
+from .text_utils import visual_width, pad_text
+
+# 再导入分析器与渲染器
 from .fund_attribution import (
     AttributionConfig,
     AttributionResult,
@@ -91,4 +98,6 @@ __all__ = [
     "AttributionResult",
     "BrinsonAttribution",
     "FundAttributionEngine",
+    "visual_width",
+    "pad_text",
 ]

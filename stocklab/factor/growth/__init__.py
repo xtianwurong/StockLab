@@ -21,13 +21,7 @@ from stocklab.factor.registry import register
 __all__ = []
 
 
-def _pass_through(column):
-    """取输入帧的一列作为因子值（原样透传，不改口径）"""
-
-    def _compute(frame):
-        return frame[column].astype("float64")
-
-    return _compute
+from stocklab.factor.base import pass_through as _pass_through
 
 
 def _fcf_growth(frame):

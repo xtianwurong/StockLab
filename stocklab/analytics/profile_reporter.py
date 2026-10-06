@@ -25,6 +25,7 @@ StockLab - 市盈率分布报告渲染器 (stocklab.analytics.profile_reporter)
 import logging
 import os
 import unicodedata
+from stocklab.analytics import visual_width, pad_text
 
 from stocklab.analytics.valuation_distribution import (
     PE_MIN_REASONABLE_SAMPLE_COUNT,
@@ -51,6 +52,13 @@ class ValuationDistributionReporter:
     """
     市盈率分布文本报告渲染器
     """
+
+    # 兼容性包装：旧代码/测试可能直接调用这些私有方法
+    def _visual_width(self, text):
+        return visual_width(text)
+
+    def _pad(self, text, visual_width):
+        return pad_text(text, visual_width)
 
     def __init__(self, title="A 股全市场市盈率分布统计"):
         """
@@ -200,7 +208,7 @@ class ValuationDistributionReporter:
         lines.append("-" * _REPORT_WIDTH)
         lines.append("【分位数分布】（由低到高，反映分布形态）")
         for item in profile.quantiles:
-            lines.append("  " + self._pad(item[0], 8) + self._pad(self._ratio_text(item[1]), 14)
+            lines.append("  " + pad_text(item[0], 8) + pad_text(self._ratio_text(item[1]), 14)
                          + self._render_quantile_note(item[0], profile))
         lines.append("")
 
@@ -230,9 +238,9 @@ class ValuationDistributionReporter:
             count_text = "%d 只" % bucket.stock_count
             lines.append(
                 "  "
-                + self._pad(bucket.label, 10)
-                + self._pad(count_text, 10)
-                + self._pad("%.1f%%" % (ratio * 100), 8)
+                + pad_text(bucket.label, 10)
+                + pad_text(count_text, 10)
+                + pad_text("%.1f%%" % (ratio * 100), 8)
                 + self._render_ratio_bar(ratio)
             )
         lines.append("")
@@ -243,15 +251,15 @@ class ValuationDistributionReporter:
             return
         lines.append("-" * _REPORT_WIDTH)
         lines.append("【分交易所对比】")
-        lines.append("  " + self._pad("交易所", 10) + self._pad("有效样本", 10)
-                     + self._pad("中位数", 12) + self._pad("最小值", 12) + "最大值")
+        lines.append("  " + pad_text("交易所", 10) + pad_text("有效样本", 10)
+                     + pad_text("中位数", 12) + pad_text("最小值", 12) + "最大值")
         for item in profile.market_distributions:
             lines.append(
                 "  "
-                + self._pad(item.market, 10)
-                + self._pad("%d 只" % item.valid_pe_count, 10)
-                + self._pad(self._ratio_text(item.median_pe), 12)
-                + self._pad(self._ratio_text(item.min_pe), 12)
+                + pad_text(item.market, 10)
+                + pad_text("%d 只" % item.valid_pe_count, 10)
+                + pad_text(self._ratio_text(item.median_pe), 12)
+                + pad_text(self._ratio_text(item.min_pe), 12)
                 + self._ratio_text(item.max_pe)
             )
         lines.append("")
@@ -267,8 +275,8 @@ class ValuationDistributionReporter:
             code_text = "%d. %s %s" % (index + 1, entry.ts_code, entry.name)
             lines.append(
                 "  "
-                + self._pad(code_text, 34)
-                + self._pad(entry.market, 8)
+                + pad_text(code_text, 34)
+                + pad_text(entry.market, 8)
                 + self._ratio_text(entry.pe_value)
             )
         lines.append("")
@@ -286,7 +294,7 @@ class ValuationDistributionReporter:
 
     def _field(self, label, value):
         """渲染一行「标签 + 值」，标签列宽对齐"""
-        return self._pad(label, 16) + value
+        return pad_text(label, 16) + value
 
     def _ratio_text(self, value):
         """把市盈率数值格式化为带「倍」后缀的文本；None 显示为占位符"""
@@ -317,28 +325,3 @@ class ValuationDistributionReporter:
             filled_length = _BAR_WIDTH
         return "#" * filled_length + "." * (_BAR_WIDTH - filled_length)
 
-    def _pad(self, text, visual_width):
-        """
-        按视觉宽度右侧补空格，使中英文混排的列能够对齐
-
-        Args:
-            text (str): 待补齐的文本
-            visual_width (int): 目标视觉列数
-
-        Returns:
-            str: 补齐后的文本；已超宽时原样返回
-        """
-        current_width = self._visual_width(text)
-        if current_width >= visual_width:
-            return text
-        return text + " " * (visual_width - current_width)
-
-    def _visual_width(self, text):
-        """计算字符串的视觉列数：东亚全角字符按 2 列计"""
-        width = 0
-        for char in text:
-            if unicodedata.east_asian_width(char) in ("W", "F"):
-                width += 2
-            else:
-                width += 1
-        return width
