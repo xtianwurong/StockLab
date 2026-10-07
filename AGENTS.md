@@ -173,6 +173,82 @@ data/stocklab.duckdb  本地数据仓库（git 忽略 .wal）
 
 ---
 
+## Skill 路由与使用规则（改码前必过）
+
+> 本节是**加载门禁**，不是建议：触发词命中却不加载对应 Skill → **不许改代码**。
+
+### 路由表
+
+| 任务涉及 | 必须加载（Skill ID） |
+|---|---|
+| `tests/`、`pytest`、测试、单元测试、集成测试、fixture、`conftest.py`、mock、patch、parametrization、coverage、测试隔离、异步测试、测试失败、测试重构 | `python-testing-patterns` |
+| A股、股票、股票代码、行情、OHLCV、日K、基本面、PE、PB、市值、股票数据 | `alphaear-stock` |
+
+同时命中（例：「测试金融数据」「给 A 股数据加 pytest 测试」）→ **两个都加载**。
+
+### Skill Check（修改代码前输出）
+
+```text
+Skill Check
+
+Required Skills:
+- python-testing-patterns
+
+Loaded Skills:
+- python-testing-patterns
+
+Status:
+PASS
+```
+
+- Required 中有未加载的 → `Status: FAIL` → **停止改码**，告诉用户缺哪个 Skill
+- 加载失败必须如实报 `Required Skill: xxx` + `Status: NOT LOADED`，**不许假装已用**
+
+### 加载真实性
+
+**只有 `skill` 工具真的取回了 SKILL.md 正文，才能写 `Loaded: YES`。**
+以下一律不算：已安装、文件存在、名字匹配、出现在可用列表里。
+（`skill` 返回体带 `Base directory:` 行即为实证。）
+
+### Skill Usage（任务结束输出）
+
+```text
+Skill Usage
+
+Skill:
+python-testing-patterns
+
+Loaded:
+YES
+
+Applied:
+YES
+```
+
+多个 Skill 分别列出。
+
+### 优先级与按需加载
+
+```text
+本文件（项目级） → StockLab 专属 Skill → 领域 Skill → 通用工程 Skill
+```
+
+**只在任务相关时加载，不全量加载**：改 README 不必加载金融 Skill；修 pytest 只要 `python-testing-patterns`；
+设计 A 股 PE 数据模型只要 `alphaear-stock`。其余 skill 按各自 `description` 自行判断相关性，不强制。
+
+### Skill 不得驱动架构变更
+
+金融 Skill 只提供**金融领域知识 / 数据含义 / 金融数据使用方法**；架构由本文件与项目代码决定。
+未经用户允许，**不因 Skill 推荐而**：换数据源、换数据库、改数据模型、加外部 API、
+加第三方金融数据服务、改生产依赖。
+
+### 最小修改原则
+
+理解代码 → 判断所需 Skill → 加载 → Skill Check → **最小化修改** → 跑测试 → Skill Usage。
+**不为用 Skill 而重构无关代码。**
+
+---
+
 ## Agent Skills（**不入库**，换机器须重装）
 
 **18 个 skill 全部集中在 `.opencode/skills/`**（OpenCode 原生项目级目录，已实测移动后重扫并取回正文）。
