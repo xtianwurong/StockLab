@@ -26,13 +26,16 @@
     padding: var(--rhythm-3) var(--rhythm-4);
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
+    /* 过渡保留给 .alerted 的告警描边切换 */
     transition: box-shadow var(--dur-base) var(--ease-out),
                 border-color var(--dur-base) var(--ease-out),
                 transform var(--dur-base) var(--ease-out);
   }
-  .watch-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  /* 这张卡整体不是按钮（portfolio.js 用普通 div 生成，只有内部的
+     关闭键与底部链接可点），hover 抬升会谎称整卡可点 —— 去掉。
+     可点击的卡片在全站统一抬升，见 analysis.html .metric-card 的注释。 */
   .watch-card.alerted { border-color: var(--warning-500); }
   .watch-head {
     display: flex;
@@ -52,12 +55,12 @@
     border-radius: 50%;
     background: var(--bg-hover);
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: var(--font-md);
     line-height: 1;
     cursor: pointer;
     flex: none;
   }
-  .watch-close:hover { background: var(--danger-500); color: #fff; }
+  .watch-close:hover { background: var(--danger-500); color: var(--danger-contrast); }
 
   .watch-metrics {
     display: grid;

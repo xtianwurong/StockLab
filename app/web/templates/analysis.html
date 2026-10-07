@@ -46,7 +46,7 @@
   .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
   .hero-label { font-size: var(--font-sm); color: var(--text-muted); }
   .hero-value {
-    font-size: 52px; font-weight: 700; line-height: 1.02;
+    font-size: var(--font-5xl); font-weight: 700; line-height: 1.02;
     letter-spacing: -0.035em; font-family: var(--font-mono); margin-top: var(--space-2);
   }
   .hero-row { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
@@ -96,7 +96,15 @@
                 box-shadow var(--dur-fast) var(--ease-out),
                 transform var(--dur-fast) var(--ease-out);
   }
-  .metric-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+  /* 可点击卡片的统一抬升配方，与 indices .index-card / commodities .cm-card 一致：
+     描边转强 + 阴影抬一档 + 上移 1px。
+     :not(.na) —— 指标不可用时 app.js 给的是 cursor:default，不可点就不抬；
+     :not(.primary) —— 选中态靠 accent 描边 + 强调环表达，hover 不得把它盖掉。 */
+  .metric-card:not(.na):not(.primary):hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
   .metric-card.primary { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
   .metric-card.na { opacity: 0.6; cursor: default; }
   .metric-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
@@ -120,14 +128,14 @@
   .mc-grid { display: grid; grid-template-columns: minmax(196px, 230px) minmax(0, 1fr); gap: var(--rhythm-4); align-items: center; }
   .mc-rank-box { padding: var(--rhythm-3); border-radius: var(--radius-sm); background: var(--bg-subtle); }
   .mc-rank-label { font-size: var(--font-xs); color: var(--text-muted); }
-  .mc-rank-value { font-size: 27px; font-weight: 700; font-family: var(--font-mono); line-height: 1.12; margin-top: 2px; letter-spacing: -0.02em; }
+  .mc-rank-value { font-size: var(--font-4xl); font-weight: 700; font-family: var(--font-mono); line-height: 1.12; margin-top: 2px; letter-spacing: -0.02em; }
   .mc-rank-sub { font-size: var(--font-xs); color: var(--text-faint); margin-top: 3px; }
   .mc-dist-title { font-size: var(--font-xs); color: var(--text-muted); margin-bottom: var(--space-2); }
   .mc-bars { display: flex; align-items: flex-end; gap: 2px; height: 92px; padding-bottom: 2px; border-bottom: 1px solid var(--border-color); }
-  .mc-bar { position: relative; flex: 1; min-width: 0; border-radius: 3px 3px 0 0; background: var(--bg-inset); }
+  .mc-bar { position: relative; flex: 1; min-width: 0; border-radius: var(--radius-xs) var(--radius-xs) 0 0; background: var(--bg-inset); }
   .mc-bar.is-self { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .mc-bar-count { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 10px; font-family: var(--font-mono); color: var(--text-faint); white-space: nowrap; }
-  .mc-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-faint); margin-top: 3px; }
+  .mc-bar-count { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: var(--font-2xs); font-family: var(--font-mono); color: var(--text-faint); white-space: nowrap; }
+  .mc-axis { display: flex; justify-content: space-between; font-size: var(--font-2xs); color: var(--text-faint); margin-top: 3px; }
   .mc-list { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--rhythm-4); padding-top: var(--rhythm-3); border-top: 1px solid var(--border-subtle); }
   .mc-chip { display: inline-flex; align-items: baseline; gap: var(--space-1); padding: 3px var(--space-2); border-radius: var(--radius-xs); background: var(--bg-subtle); font-size: var(--font-xs); white-space: nowrap; }
   .mc-chip-k { color: var(--text-muted); }
@@ -238,7 +246,7 @@
       <section class="card card-pad hero-card" id="hero-card">
         <div class="hero-top">
           <div>
-            <div class="hero-label">主指标 · <span id="hero-name">-</span> 历史分位</div>
+            <div class="hero-label">主指标：<span id="hero-name">-</span> 历史分位</div>
             <div class="hero-row">
               <span class="hero-value" id="hero-value">-</span>
               <span id="hero-badge"></span>

@@ -49,7 +49,7 @@
     font-weight: 650;
     color: var(--text-sub);
     margin-bottom: var(--rhythm-2);
-    text-transform: uppercase;
+    /* 标题是中文（调仓概览 / 信号强度 …），uppercase 是空操作 */
     letter-spacing: 0.05em;
   }
 
@@ -103,7 +103,7 @@
   .fa-overview-card {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius);
     padding: var(--rhythm-3);
   }
   .fa-overview-card.primary {
@@ -122,7 +122,8 @@
   .fa-overview-label {
     font-size: var(--font-xs);
     color: var(--text-muted);
-    text-transform: uppercase;
+    /* 数据字段名（持仓市值 / 成本 …）是中文，uppercase 是空操作；
+       这类标签是数据本身的一部分（没有它数字无法解读），保留，只去大写 */
     letter-spacing: 0.05em;
   }
   .fa-overview-value {
@@ -212,7 +213,7 @@
     font-weight: 600;
     color: var(--text-sub);
     font-size: var(--font-xs);
-    text-transform: uppercase;
+    /* 表头是中文（行业 / 当前暴露度 …），uppercase 是空操作 */
     letter-spacing: 0.05em;
   }
   .fa-signals-table tr:hover td {
@@ -275,16 +276,14 @@
     gap: var(--space-3);
     margin-top: var(--rhythm-3);
   }
+  /* 这张卡不是按钮（fund_analysis.js 用普通 div 生成，无 cursor、无 click 绑定），
+     hover 抬升与描边会谎称整卡可点 —— 连同只为该状态存在的 transition 一起去掉。
+     可点击的卡片在全站统一抬升，见 analysis.html .metric-card 的注释。 */
   .fa-holding-card {
     background: var(--bg-sub);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: var(--rhythm-2) var(--rhythm-3);
-    transition: all var(--dur-fast);
-  }
-  .fa-holding-card:hover {
-    border-color: var(--border-strong);
-    transform: translateY(-1px);
   }
   .fa-holding-name {
     font-weight: 600;

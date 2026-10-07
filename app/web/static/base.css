@@ -49,24 +49,33 @@ html.shell-collapsed .shell {
   padding: 0 var(--space-4);
   border-bottom: 1px solid var(--border-color);
   flex: none;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+/* 品牌是个回首页的 <a>，必须给得起 hover，否则看不出可点 */
+.sidebar-brand:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
 }
 .brand-mark {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
-  color: #fff;
+  /* 用 accent-contrast 而非字面 #fff：暗色下渐变翻转成浅蓝，
+     白字压在浅蓝上只有 2.7:1；accent-contrast 两个主题都是「对底高对比」 */
+  color: var(--accent-contrast);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--font-md);
   font-weight: 700;
   flex: none;
   box-shadow: var(--shadow-sm);
 }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
 .brand-name { font-size: var(--font-lg); font-weight: 700; letter-spacing: -0.01em; }
-.brand-sub { font-size: 10.5px; color: var(--text-faint); letter-spacing: 0.06em; }
+/* 副题已改为中文（投研工作台），汉字自带等宽网格，字距只会把它拆散 */
+.brand-sub { font-size: var(--font-2xs); color: var(--text-faint); }
 
 .sidebar-nav {
   flex: 1;
@@ -77,17 +86,18 @@ html.shell-collapsed .shell {
 .nav-group-label {
   padding: 0 var(--space-3);
   margin-bottom: var(--space-2);
-  font-size: 10.5px;
+  font-size: var(--font-2xs);
   font-weight: 650;
   color: var(--text-faint);
+  /* 分组名是中文（分析 / 估值 / 工具），uppercase 对汉字是空操作，
+     属于照抄英文模板的痕迹；字距才是这里真正起分组作用的东西 */
   letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 .nav-item {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 9px var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   color: var(--text-sub);
   font-size: var(--font-md);
@@ -121,7 +131,7 @@ html.shell-collapsed .nav-item-label,
 html.shell-collapsed .nav-group-label,
 html.shell-collapsed .sidebar-foot { display: none; }
 html.shell-collapsed .sidebar-brand { justify-content: center; padding: 0; }
-html.shell-collapsed .nav-item { justify-content: center; padding: 10px 0; }
+html.shell-collapsed .nav-item { justify-content: center; padding: var(--space-2) 0; }
 
 /* ---------- 顶栏 ---------- */
 .topbar {
@@ -173,7 +183,7 @@ html.shell-collapsed .nav-item { justify-content: center; padding: 10px 0; }
   height: 7px;
   border-radius: 50%;
   background: var(--text-faint);
-  margin-right: 6px;
+  margin-right: var(--space-1);
   vertical-align: 1px;
 }
 .status-dot.ok { background: var(--success-500); }
@@ -260,7 +270,7 @@ html.shell-collapsed .nav-item { justify-content: center; padding: 10px 0; }
   .shell .nav-group-label,
   .shell .sidebar-foot { display: none; }
   .shell .sidebar-brand { justify-content: center; padding: 0; }
-  .shell .nav-item { justify-content: center; padding: 10px 0; }
+  .shell .nav-item { justify-content: center; padding: var(--space-2) 0; }
 }
 
 /* ==========================================================================
@@ -293,12 +303,15 @@ html.shell-collapsed .nav-item { justify-content: center; padding: 10px 0; }
   content: "";
   width: 3px;
   height: 15px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
   flex: none;
 }
 
 .section-desc { font-size: var(--font-sm); color: var(--text-muted); }
+/* .section-hint 曾被 fund_analysis.html:517 使用却全站无定义 → 整段裸渲染。
+   与 .section-desc 同义，保留两个名字是因为页面里两者都已出现。 */
+.section-hint { font-size: var(--font-sm); color: var(--text-muted); }
 
 /* ==========================================================================
    4. 页脚
@@ -316,10 +329,8 @@ html.shell-collapsed .nav-item { justify-content: center; padding: 10px 0; }
 /* ==========================================================================
    5. 动效降级
    ========================================================================== */
-
-   全站唯一的持续动效是外壳折叠时 grid-template-columns 的过渡；
-   系统声明「减少动态效果」时把它关掉，否则折叠会有一次拖影。
-*/
+/* 全站唯一的持续动效是外壳折叠时 grid-template-columns 的过渡；
+   系统声明「减少动态效果」时把它关掉，否则折叠会有一次拖影。 */
 @media (prefers-reduced-motion: reduce) {
   .shell { transition: none; }
   .funnel-fill { transition: none; }
@@ -328,10 +339,8 @@ html.shell-collapsed .nav-item { justify-content: center; padding: 10px 0; }
 /* ==========================================================================
    6. 打印
    ========================================================================== */
-
-   打印场景基本只有「把报表或表格带出去」，所以交互控件整块去掉。
-   侧边栏与顶栏都是外壳，必须一并隐藏，否则每张纸左边都印一列无用导航。
-*/
+/* 打印场景基本只有「把报表或表格带出去」，所以交互控件整块去掉。
+   侧边栏与顶栏都是外壳，必须一并隐藏，否则每张纸左边都印一列无用导航。 */
 @media print {
   .sidebar,
   .topbar,

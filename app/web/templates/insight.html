@@ -12,7 +12,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    padding: 1px 7px;
+    padding: 1px var(--space-2);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-full);
     font-size: var(--font-xs);
@@ -97,14 +97,21 @@
     gap: var(--space-2);
     padding: var(--rhythm-4);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
     background: var(--bg-card);
     cursor: pointer;
     text-align: left;
     font-family: inherit;
     transition: all var(--dur-fast) var(--ease-out);
   }
-  .investor-card:hover { border-color: var(--accent); }
+  /* 与其它页可点击卡片同一套配方（indices / commodities / analysis）。
+     :not(.active) —— 选中态已有 accent 描边 + 浅底，hover 不得覆盖它。 */
+  .investor-card:not(.active):hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
   .investor-card.active {
     border-color: var(--accent);
     background: var(--accent-soft);
@@ -166,7 +173,7 @@
 
   .quote-tags { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: var(--space-3); }
   .tag {
-    padding: 1px 7px;
+    padding: 1px var(--space-2);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     background: var(--bg-subtle);
@@ -187,8 +194,8 @@
     color: var(--text-faint);
   }
   .no-source { color: var(--warning-700); font-weight: 600; }
-  .link-plain { color: var(--accent); text-decoration: none; }
-  .link-plain:hover { text-decoration: underline; }
+  .link-plain { color: var(--accent); text-decoration: none; transition: color var(--dur-fast) var(--ease-out); }
+  .link-plain:hover { color: var(--accent-hover); text-decoration: underline; }
 
   .expand-btn {
     padding: 0;
@@ -199,7 +206,10 @@
     font-size: var(--font-xs);
     font-weight: 600;
     cursor: pointer;
+    /* 与 .link-plain 同理：cursor:pointer 必须给得起 hover，否则看不出可点 */
+    transition: color var(--dur-fast) var(--ease-out);
   }
+  .expand-btn:hover { color: var(--accent-hover); }
 
   @media (max-width: 760px) {
     .insight-filters { grid-template-columns: 1fr; }

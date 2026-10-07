@@ -134,9 +134,9 @@
   color: var(--accent-contrast);
   animation: sl-spin 0.7s linear infinite;
 }
-.btn-primary.is-loading::after {
-  color: #fff;
-}
+/* 曾经这里压了一条 `color: #fff` 覆盖上面的 accent-contrast：
+   暗色下 .btn-primary 底是浅蓝 #60a5fa，白转圈只有 2.5:1，几乎看不见。
+   该规则与基规则唯一区别就是变差，直接删掉。 */
 @keyframes sl-spin {
   to {
     transform: rotate(360deg);
@@ -249,6 +249,8 @@ html[data-theme="dark"] .select {
   width: 16px;
   height: 16px;
   border-radius: 50%;
+  /* 刻意留字面白：滑块必须永远比轨道亮。改用 var(--gray-0) 会在暗色下
+     变成近黑压在 #334155 轨道上，直接看不见。 */
   background: #fff;
   box-shadow: var(--shadow-sm);
   transition: transform var(--dur-base) var(--ease-spring);
@@ -261,6 +263,13 @@ html[data-theme="dark"] .select {
 }
 .switch input:focus-visible + .switch-track {
   box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* .switch 自身 cursor:pointer，必须给得起 hover 反馈，否则和静态文本没区别 */
+.switch:hover .switch-track {
+  background: var(--gray-400);
+}
+.switch:hover input:checked + .switch-track {
+  background: var(--accent-hover);
 }
 
 /* ==========================================================================
@@ -317,6 +326,33 @@ html[data-theme="dark"] .select {
 }
 .message.show {
   display: flex;
+}
+
+/* 四档语义样式。
+   common.js 的 showMessage() 只会写 `message show <kind>`，kind 取值就是下面
+   四个（全站调用点：error 24 / info 11 / warning 4 / success 1）。
+   曾经这里一条都没有 —— .message 只有 padding 和 transparent 边框，
+   于是「保存失败」这类红字提示渲染成普通正文，用户根本看不出是错误。
+   字色用 *-on-soft 而非 -700：数字档位方向两主题翻转，-700 在暗色下只有 3.34:1。 */
+.message.info {
+  background: var(--info-50);
+  border-color: var(--info-500);
+  color: var(--info-on-soft);
+}
+.message.success {
+  background: var(--success-50);
+  border-color: var(--success-500);
+  color: var(--success-on-soft);
+}
+.message.warning {
+  background: var(--warning-50);
+  border-color: var(--warning-500);
+  color: var(--warning-on-soft);
+}
+.message.error {
+  background: var(--danger-50);
+  border-color: var(--danger-500);
+  color: var(--danger-on-soft);
 }
 
 /* ==========================================================================
@@ -490,7 +526,8 @@ html[data-theme="dark"] .tab.active {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   background: var(--gray-800);
-  color: #f1f5f9;
+  /* 令牌而非字面 #f1f5f9：暗色主题在下面 542 行整块覆盖，这里只需亮色口径 */
+  color: var(--gray-50);
   font-size: var(--font-sm);
   font-weight: 400;
   line-height: var(--leading-normal);
@@ -750,7 +787,7 @@ html[data-theme="dark"] .tooltip-bubble {
   font-size: var(--font-base);
 }
 .empty-state-icon {
-  font-size: 34px;
+  font-size: var(--font-4xl);
   line-height: 1;
   margin-bottom: var(--space-3);
   opacity: 0.5;
@@ -844,7 +881,7 @@ html[data-theme="dark"] .tooltip-bubble {
   background: var(--bg-subtle);
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 15px;
+  font-size: var(--font-lg);
   line-height: 1;
   transition: background-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
@@ -898,7 +935,7 @@ html[data-theme="dark"] .theme-toggle .icon-sun {
   top: 50%;
   width: 3px;
   height: 13px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--text-main);
   box-shadow: 0 0 0 2px var(--bg-card);
   transform: translate(-50%, -50%);
@@ -909,7 +946,7 @@ html[data-theme="dark"] .theme-toggle .icon-sun {
 .tempbar-scale {
   display: flex;
   justify-content: space-between;
-  font-size: 10.5px;
+  font-size: var(--font-2xs);
   color: var(--text-faint);
   margin-top: 4px;
 }
@@ -923,7 +960,7 @@ html[data-theme="dark"] .theme-toggle .icon-sun {
 .legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   font-size: var(--font-xs);
   color: var(--text-muted);
   white-space: nowrap;
@@ -931,12 +968,12 @@ html[data-theme="dark"] .theme-toggle .icon-sun {
 .legend-swatch {
   width: 9px;
   height: 9px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   flex: none;
 }
 .legend-range {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--font-2xs);
   color: var(--text-faint);
 }
 

@@ -74,6 +74,14 @@ html[data-theme="light"] {
   --info-600: #0e7490;
   --info-700: #155e75;
 
+  /* 软底（-50）上的文字色。数字档位方向两主题**翻转**：亮色 -50 最浅、字越深越好；
+     暗色 -50 最深、字越亮越好。因此不存在单一 -N 档两主题通吃
+     （实测 danger -700 暗色仅 3.34:1）。亮色一律取最深端。 */
+  --danger-on-soft: var(--danger-700);
+  --info-on-soft: var(--info-700);
+  --success-on-soft: var(--success-700);
+  --warning-on-soft: var(--warning-700);
+
   /* ---------- 表面（背景） ---------- */
   --bg-page: #f4f6f9;
   --bg-card: #ffffff;
@@ -87,7 +95,11 @@ html[data-theme="light"] {
   --text-main: #0f172a;
   --text-sub: #334155;
   --text-muted: #475569;   /* Slate 600: 对 bg-page #f4f6f9 达 4.8:1，满足 WCAG AA 正文对比度 */
-  --text-faint: #64748b;   /* Slate 500: 次要/辅助文本，3.5:1（大号文本 3:1 通过） */
+  --text-faint: #5d6d83;   /* Slate 500 #64748b 加深：旧值对 bg-inset 仅 4.23:1、
+                              bg-page 4.40:1，差一点点不过 AA。全站 48 处引用里
+                              47 处是 10–13px 小字，必须 4.5:1。加深后对四种底
+                              page 4.87 / card 5.28 / subtle 5.04 / inset 4.69 全达标，
+                              仍低于 --text-muted 7.58:1，三级层级不塌。 */
   --text-inverse: #ffffff;
   --text-brand: #1d4ed8;
 
@@ -103,6 +115,9 @@ html[data-theme="light"] {
   --accent-soft: #eff6ff;
   --accent-ring: rgba(37, 99, 235, 0.18);
   --accent-contrast: #ffffff;
+  /* 压在 --danger-* 底上的字色。与 accent-contrast 同值但契约分家：
+     accent-contrast 只保证「对 accent 底」高对比，改它不该连带改危险态。 */
+  --danger-contrast: #ffffff;
 
   /* ---------- 七档评级色（低→高：绿→黄→红） ---------- */
   --level-1: #15803d;
@@ -164,7 +179,10 @@ html[data-theme="light"] {
   --font-2xl: 20px;
   --font-3xl: 24px;
   --font-4xl: 30px;
-  --font-5xl: 46px;
+  /* 5xl 是全站唯一的大字时刻：个股页的主估值数字（analysis .hero-value）。
+     原本定义成 46px 却零使用，实际页面写着裸 52px —— 刻度的顶端就该是它，
+     否则这个 token 永远是死的，下一个人还会再写一个字面量。 */
+  --font-5xl: 52px;
   --leading-tight: 1.2;
   --leading-normal: 1.5;
   --leading-relaxed: 1.7;
@@ -259,6 +277,12 @@ html[data-theme="dark"] {
   --info-600: #06b6d4;
   --info-700: #0891b2;
 
+  /* 同上，暗色取最亮端（-500）。四族实测均 >= 4.5:1 */
+  --danger-on-soft: var(--danger-500);
+  --info-on-soft: var(--info-500);
+  --success-on-soft: var(--success-500);
+  --warning-on-soft: var(--warning-500);
+
   /* ---------- 表面 ---------- */
   --bg-page: #080d1a;
   --bg-card: #0f172a;
@@ -272,7 +296,11 @@ html[data-theme="dark"] {
   --text-main: #f1f5f9;
   --text-sub: #cbd5e1;
   --text-muted: #94a3b8;   /* Slate 400: 暗底下提亮，对 bg-card #0f172a 达 6.2:1 */
-  --text-faint: #64748b;   /* Slate 500: 次要文本，对 bg-card 4.1:1（大号文本通过） */
+  --text-faint: #77879d;   /* 提亮自 Slate 500 #64748b：旧值对 bg-card 实测仅 3.75:1，
+                              而全站 48 处引用里 47 处是 10–13px 小字 —— 暗色主题恰恰给
+                              低光环境用，这里必须过 AA 4.5:1。实测对四种底
+                              page 5.30 / card 4.88 / subtle 4.63 / inset 5.14 全达标，
+                              且仍低于 --text-muted 6.96:1，三级层级不塌。 */
   --text-inverse: #0f172a;
   --text-brand: #93c5fd;
 
@@ -288,6 +316,9 @@ html[data-theme="dark"] {
   --accent-soft: #172554;
   --accent-ring: rgba(96, 165, 250, 0.24);
   --accent-contrast: #0b1120;
+  /* 压在 --danger-* 底上的字色。暗色的 danger-500 是浅红 #f87171，
+     白字只有 2.76:1，必须用近黑（6.8:1）。与 accent-contrast 同值但契约分家。 */
+  --danger-contrast: #0b1120;
 
   /* ---------- 七档评级色 ---------- */
   --level-1: #4ade80;
@@ -373,6 +404,12 @@ html[data-theme="dark"] {
     --info-600: #06b6d4;
     --info-700: #0891b2;
 
+    /* 同暗色主题：软底文字取最亮端 */
+    --danger-on-soft: var(--danger-500);
+    --info-on-soft: var(--info-500);
+    --success-on-soft: var(--success-500);
+    --warning-on-soft: var(--warning-500);
+
     --bg-page: #080d1a;
     --bg-card: #0f172a;
     --bg-subtle: #131c31;
@@ -384,7 +421,7 @@ html[data-theme="dark"] {
     --text-main: #f1f5f9;
     --text-sub: #cbd5e1;
     --text-muted: #94a3b8;
-    --text-faint: #64748b;
+    --text-faint: #77879d;   /* 同暗色主题：过 AA 4.5:1 */
     --text-inverse: #0f172a;
     --text-brand: #93c5fd;
 
@@ -398,6 +435,8 @@ html[data-theme="dark"] {
     --accent-soft: #172554;
     --accent-ring: rgba(96, 165, 250, 0.24);
     --accent-contrast: #0b1120;
+    /* 同暗色主题：danger 底是浅红，白字不合格 */
+    --danger-contrast: #0b1120;
 
     --level-1: #4ade80;
     --level-2: #22c55e;
@@ -474,10 +513,10 @@ table th {
   font-variant-numeric: tabular-nums;
 }
 
-/* 键盘可达性：统一焦点环 */
+/* 键盘可达性：统一焦点环（宽度 / 偏移 / 颜色都在第 6 节的令牌里改） */
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
   border-radius: var(--radius-xs);
 }
 
@@ -530,4 +569,42 @@ html.theme-switching *::after {
   --rhythm-8: 32px;
   --rhythm-10: 40px;
   --rhythm-12: 48px;
+}
+
+/* ==========================================================================
+   6. 语义短名与刻度补全
+   ==========================================================================
+   这些变量只在 :root 声明一次即可覆盖三个主题（亮 / 暗 / 跟随系统）——
+   因为它们全部定义在 html 元素上，而三个主题块也都改的是 html 元素，
+   var() 取的是同一元素上胜出的那个色阶声明，主题切换自然跟随。
+
+   【为什么短名取 -600 而不是 -500】
+   --warning / --danger / --success 在模板里同时当「文字色」和「描边色」用，
+   而它们的背景永远是配套的 -50 浅底。实测 -500 压在 -50 上只有 3.3:1（不过
+   WCAG AA），-600 才到 4.7:1 以上。描边用 -600 无副作用。
+   （insight.html 的徽章早已是「-700 字 + -50 底 + -500 描边」这套口径，
+    此处把它抽成全站可用的短名，fund_analysis / commodities 才不会引用到
+    不存在的变量、静默退化成透明。）
+   ========================================================================== */
+:root {
+  --success: var(--success-600);
+  --success-soft: var(--success-50);
+  --warning: var(--warning-600);
+  --warning-soft: var(--warning-50);
+  --danger: var(--danger-600);
+  --danger-soft: var(--danger-50);
+  --info: var(--info-600);
+  --info-soft: var(--info-50);
+
+  /* 同义别名：模板里历史写法与笔误，一并兜住，避免样式静默失效 */
+  --radius-md: var(--radius);
+  --bg-sub: var(--bg-subtle);
+
+  /* 字号刻度补全：表格 / 徽章里的最小一级辅助文字（原为游离的 10px·10.5px） */
+  --font-2xs: 10px;
+
+  /* 焦点环 —— 全站键盘可达性的唯一定义处（tokens.css 第 4 节消费它） */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--accent);
 }
