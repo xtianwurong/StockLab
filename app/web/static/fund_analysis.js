@@ -103,6 +103,8 @@
     busy = isLoading;
     btnAnalyze.disabled = isLoading;
     btnRefresh.disabled = isLoading;
+    btnAnalyze.setAttribute("aria-busy", isLoading ? "true" : "false");
+    btnRefresh.setAttribute("aria-busy", isLoading ? "true" : "false");
     loadingState.classList.toggle("hidden", !isLoading);
     if (!isLoading) {
       emptyState.classList.add("hidden");
@@ -361,7 +363,7 @@
           sectors.push(code);
         }
       });
-    }
+    });
 
     // 取前 10 大行业（按最后一期暴露度）
     var lastExposures = history[history.length - 1].exposures || {};

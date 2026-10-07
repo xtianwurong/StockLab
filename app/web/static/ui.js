@@ -781,9 +781,11 @@
     if (loading) {
       button.classList.add("is-loading");
       button.disabled = true;
+      button.setAttribute("aria-busy", "true");
     } else {
       button.classList.remove("is-loading");
       button.disabled = false;
+      button.removeAttribute("aria-busy");
     }
   }
 
