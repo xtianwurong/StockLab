@@ -175,20 +175,30 @@ data/stocklab.duckdb  本地数据仓库（git 忽略 .wal）
 
 ## Agent Skills（**不入库**，换机器须重装）
 
-三个安装位置共 17 个 skill，OpenCode 均能自动发现；`.gitignore` 按既有「AI 工具元数据不入库」约定一并忽略（含 `skills-lock.json`）——
+**18 个 skill 全部集中在 `.opencode/skills/`**（OpenCode 原生项目级目录，已实测移动后重扫并取回正文）。
+`.gitignore` 按既有「AI 工具元数据不入库」约定忽略 `.opencode/`、`.agents/`、`skills-lock.json` ——
 **新克隆默认一个都没有且不报错**，需重跑：
 
 ```bash
-npx -y ui-ux-pro-max-cli init --ai opencode          # → .opencode/skills/（7 个）
-npx -y skills add shadcn/ui -y --copy                # → .agents/skills/（2 个）
-npx -y skills add fastapi/fastapi -y --copy          # → .agents/skills/（1 个）
+npx -y ui-ux-pro-max-cli init --ai opencode          # 7 个（含 design/banner-design/brand/slides/design-system/ui-styling）
+npx -y skills add shadcn/ui -y --copy                # 2 个（shadcn、migrate-radix-to-base）
+npx -y skills add fastapi/fastapi -y --copy          # 1 个
 npx -y skills add wshobson/agents -s responsive-design -s tailwind-design-system \
         -s python-design-patterns -s python-testing-patterns \
-        -s architecture-patterns -s code-review-excellence -y --copy
+        -s architecture-patterns -s code-review-excellence -y --copy   # 6 个
+npx -y skills add RKiding/Awesome-finance-skills@alphaear-stock -y --copy  # 1 个
+# ↑ `npx skills add` 固定写 .agents/skills/（已实测 -a opencode 无效），装完必须归一，否则又裂回两个目录：
+[ -d .agents/skills ] && mv .agents/skills/* .opencode/skills/ && rmdir .agents/skills .agents
 ```
 
-> `frontend-design` 在 `.opencode/skill/`（单数），内容与 `anthropics/claude-code` 官方版逐字节一致。
+> **归一的代价（已确认）**：`npx skills list / update / remove` **只扫 `.agents/skills/`**，归一后报空、管不到这 18 个；
+> 更新 = 按上面重装。`skills-lock.json` 只存 source/skillPath/hash、**不存安装路径**，移动它不受影响。
+>
+> `frontend-design` 原在 `.opencode/skill/`（单数）—— 日志证实单复数**都**被扫描（V2 文档漏写），已并入 `.opencode/skills/`。
+> 内容与 `anthropics/claude-code` 官方版逐字节一致。
 > `shadcn` 依赖 `components.json`、`tailwind-design-system` 依赖 Tailwind v4 —— **本项目两样都没有，装了也不触发**，属占位。
+> `alphaear-stock` 是 Agent 的 A/港/美临场查数能力，**不得接入同步链**（绕过 normalization/domain，违反「取数唯一入口」）；
+> 其脚本另需 `yfinance`、`loguru`，按约定**不加入 `requirements.txt`**。
 
 ---
 
