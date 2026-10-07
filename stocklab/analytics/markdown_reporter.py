@@ -30,7 +30,6 @@ from datetime import datetime
 
 from stocklab.analytics.valuation_distribution import (
     PE_MIN_REASONABLE_SAMPLE_COUNT,
-    ValuationDistributionProfile,
 )
 
 _logger = logging.getLogger(__name__)

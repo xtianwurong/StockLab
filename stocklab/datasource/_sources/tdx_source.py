@@ -134,7 +134,7 @@ class TdxDataSource(StockDataSource):
             try:
                 client.close()
             except Exception:
-                pass
+                pass  # 清理连接失败不影响主流程，主错误已在外层记录
             return None
 
     def _request(self, method_name, *args, **kwargs):
@@ -157,7 +157,7 @@ class TdxDataSource(StockDataSource):
             try:
                 client.close()
             except Exception:
-                pass
+                pass  # 清理连接失败不影响主流程，主错误已在外层记录
 
     # ------------------------------------------------------------------
     # StockDataSource 接口

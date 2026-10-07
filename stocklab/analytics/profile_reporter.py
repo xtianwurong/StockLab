@@ -24,12 +24,10 @@ StockLab - 市盈率分布报告渲染器 (stocklab.analytics.profile_reporter)
 
 import logging
 import os
-import unicodedata
-from stocklab.analytics import visual_width, pad_text
+from stocklab.analytics.text_format import visual_width, pad_text
 
 from stocklab.analytics.valuation_distribution import (
     PE_MIN_REASONABLE_SAMPLE_COUNT,
-    ValuationDistributionProfile,
 )
 
 _logger = logging.getLogger(__name__)

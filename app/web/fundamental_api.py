@@ -34,7 +34,6 @@ import re
 from flask import jsonify, request
 
 from app.web import store
-from app.web.webcommon import parse_int_arg
 from stocklab.facade import FundamentalDataFacade
 
 _logger = logging.getLogger("StockLab.Web.FundamentalApi")

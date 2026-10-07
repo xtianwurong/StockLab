@@ -27,7 +27,6 @@ StockLab - 采集器注册表与编排 (stocklab.datasource.insight.collectors)
    否则「平台 A 的 HTML 片段」和「平台 B 的纯文本」永远不会撞上。
 """
 
-import datetime as _dt
 import logging
 
 import pandas as pd

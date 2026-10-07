@@ -33,7 +33,6 @@ StockLab - 投资人观点归一化器 (stocklab.normalization.insight)
 import hashlib
 import html
 import re
-import unicodedata
 
 import pandas as pd
 

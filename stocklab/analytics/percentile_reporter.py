@@ -23,8 +23,7 @@ StockLab - 历史估值分位报告渲染器 (stocklab.analytics.percentile_repo
 """
 
 import logging
-import unicodedata
-from stocklab.analytics import visual_width, pad_text
+from stocklab.analytics.text_format import visual_width, pad_text
 
 from stocklab.analytics.valuation_percentile import (
     VALUATION_INDICATOR_PB,

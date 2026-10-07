@@ -16,7 +16,6 @@ StockLab - 证券基础信息 Repository (stocklab.persistence.repository.securi
 
 import logging
 
-import pandas as pd
 
 from stocklab.domain import SECURITY_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository

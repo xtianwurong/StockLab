@@ -30,8 +30,8 @@ import pytest
 from stocklab.analytics.fund_attribution import (
     AttributionConfig,
     BrinsonAttribution,
-    FundAttributionEngine,
 )
+from stocklab.facade.fund_attribution import FundAttributionEngine
 from stocklab.datasource.benchmark_index import aggregate_industry_weights
 from stocklab.datasource.fund_holding import (
     _extract_apidata_content,

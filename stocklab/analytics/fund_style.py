@@ -23,16 +23,14 @@ StockLab - 基金风格分解与调仓分析 (stocklab.analytics.fund_style)
 
 
 import logging
-import warnings
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Optional, List, Dict, Tuple, Literal
+from typing import Optional, List, Dict, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, Bounds, LinearConstraint
 
-from stocklab.analytics.valuation_percentile import ValuationPercentileAnalyzer
 
 _logger = logging.getLogger(__name__)
 
@@ -176,15 +174,6 @@ class FundAllocationSignal:
     net_exposure_change: Optional[float] = None  # 扣除交易成本后的净变化
     turnover_ratio: float = 0.0                # 换仓率
     calibrated_confidence: Optional[float] = None  # 校准后置信度概率
-
-
-@dataclass
-class FactorReturn:
-    """因子收益率数据"""
-    factor_name: str
-    factor_category: Literal["style", "macro", "industry"]
-    dates: List[date]
-    returns: List[float]  # 日收益率序列
 
 
 class FundStyleDecomposer:
@@ -812,8 +801,8 @@ class FundStyleDecomposer:
                         if code not in window_directions:
                             window_directions[code] = []
                         window_directions[code].append(direction)
-            except Exception:
-                pass  # 某窗口失败不影响主窗口
+            except Exception as e:
+                _logger.warning("窗口 %s 信号方向计算失败，跳过：%s", w, e)  # 某窗口失败不影响主窗口
 
         # 调整置信度
         for s in signals:

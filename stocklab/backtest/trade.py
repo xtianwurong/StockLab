@@ -48,9 +48,9 @@ class Trade:
         slippage=0.0,
         realized_pnl=None,
     ):
-        if side not in ("BUY", "SELL"):
+        if side not in (BUY, SELL):
             raise BacktestError(
-                "未知买卖方向 %r，可选 %s" % (side, ["BUY", "SELL"])
+                "未知买卖方向 %r，可选 %s" % (side, [BUY, SELL])
             )
         if int(qty) <= 0:
             raise BacktestError("成交股数必须为正整数，收到 %r" % (qty,))

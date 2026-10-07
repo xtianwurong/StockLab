@@ -43,7 +43,6 @@ import os
 import sys
 from datetime import date
 
-import pandas as pd
 
 # 将项目根目录加入模块搜索路径（与其它 CLI 一致，否则直接执行会 ModuleNotFoundError）
 sys.path.insert(0, os.path.dirname(

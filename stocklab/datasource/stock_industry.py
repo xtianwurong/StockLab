@@ -11,7 +11,6 @@ StockLab - 股票行业映射数据源 (stocklab.datasource.stock_industry)
 
 
 import logging
-from typing import Optional
 
 import pandas as pd
 
@@ -203,15 +202,3 @@ def _clean_stock_code(raw) -> str:
     if code.isdigit() and len(code) < 6:
         code = code.zfill(6)
     return normalize_ts_code(code)
-
-
-def fetch_stock_industry_mapping_fallback() -> pd.DataFrame:
-    """
-    备用方案：使用 AKShare 的股票信息接口获取行业
-    akshare.stock_individual_info_em 返回行业字段
-    """
-    import akshare as ak
-
-    # 这个接口较慢，仅作备用
-    _logger.warning("使用 fallback 逐只获取行业，极慢，仅用于补全")
-    return pd.DataFrame(columns=list(STOCK_INDUSTRY_MAPPING_COLUMNS))

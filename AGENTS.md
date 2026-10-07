@@ -142,7 +142,7 @@ stocklab/
   normalization/      源表→契约帧唯一改写点（叶子包，不取数不落库）
   datasource/         远端取数（AkShare/BaoStock/腾讯/新浪/通达信通道 + 基本面/生命周期/公告/商品/基金/洞察）
   persistence/        DuckDB 落库（migrations/ + repository/）
-  facade/             统一取数入口（7 个门面）
+  facade/             统一取数入口（7 门面 + 1 归因引擎）
   analytics/          纯统计变换（估值分位/分布/风格/归因/报告）
   fundamental/        财务指标纯派生
   factor/             27 因子 + 预处理（纯计算，显式 register）

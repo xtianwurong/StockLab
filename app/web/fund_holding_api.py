@@ -32,9 +32,8 @@ from flask import jsonify, request
 
 from app.web import store
 from app.web.webcommon import parse_int_arg, parse_date_arg
-from stocklab.analytics import FundAttributionEngine
 from stocklab.datasource import BENCHMARK_INDEX_CODES
-from stocklab.facade import FundHoldingFacade
+from stocklab.facade import FundAttributionEngine, FundHoldingFacade
 
 _logger = logging.getLogger("StockLab.Web.FundHoldingApi")
 

@@ -27,14 +27,13 @@ StockLab - 统计分析层 (stocklab.analytics)
 """
 
 # 先导入工具模块（无循环依赖）
-from .text_utils import visual_width, pad_text
+from .text_format import visual_width, pad_text
 
 # 再导入分析器与渲染器
 from .fund_attribution import (
     AttributionConfig,
     AttributionResult,
     BrinsonAttribution,
-    FundAttributionEngine,
 )
 from .markdown_reporter import ValuationDistributionMarkdownReporter
 from .percentile_reporter import ValuationPercentileReporter
@@ -97,7 +96,6 @@ __all__ = [
     "AttributionConfig",
     "AttributionResult",
     "BrinsonAttribution",
-    "FundAttributionEngine",
     "visual_width",
     "pad_text",
 ]

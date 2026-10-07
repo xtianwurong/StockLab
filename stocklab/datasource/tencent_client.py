@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-from stocklab.common.type_conversion import safe_float, safe_int
+from stocklab.common.type_conversion import safe_float
 
 _logger = logging.getLogger("StockLab.MarketClient")
 

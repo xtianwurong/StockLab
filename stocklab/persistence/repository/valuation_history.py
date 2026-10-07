@@ -24,7 +24,6 @@ StockLab - 历史估值序列 Repository (stocklab.persistence.repository.valuat
 
 import logging
 
-import pandas as pd
 
 from stocklab.domain import VALUATION_HISTORY_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository

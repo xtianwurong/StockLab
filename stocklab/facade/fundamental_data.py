@@ -31,15 +31,12 @@ StockLab - 基本面数据门面 (stocklab.facade.fundamental_data)
 
 import logging
 
-import pandas as pd
 
 from stocklab.persistence import (
     BalanceSheetRepository,
     CashflowStatementRepository,
-    Database,
     FinancialIndicatorRepository,
     IncomeStatementRepository,
-    initialize_database,
 )
 
 _logger = logging.getLogger(__name__)

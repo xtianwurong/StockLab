@@ -12,7 +12,12 @@ StockLab 统一数据取数门面层 (stocklab.facade)
      FundamentalDataFacade  基本面：**纯本地读**，Point-in-Time 安全查询与全市场横截面
      FundAnalysisFacade     基金调仓：**纯本地读**，风格分解+滚动暴露度+资金流佐证
      FundHoldingFacade      基金持仓：**纯本地读**，前十大重仓股→真实行业暴露+RBSA双轨对比
-    BenchmarkDataFacade    基准指数：**缓存优先**，成分权重→行业权重快照（Brinson 归因基准）
+     BenchmarkDataFacade    基准指数：**缓存优先**，成分权重→行业权重快照（Brinson 归因基准）
+
+   外加 1 个取数编排引擎：
+     FundAttributionEngine  Brinson 归因：持仓 + 基准权重 + 区间收益三路取数，
+                            再交给 analytics.BrinsonAttribution 做纯数学分解。
+                            归因数学留在 analytics —— 那一层的契约是零层内依赖、只吃 DataFrame。
 
 【分层约束】
    - 本层可依赖 datasource 与 persistence；
@@ -23,6 +28,7 @@ StockLab 统一数据取数门面层 (stocklab.facade)
 from .benchmark_data import BenchmarkDataFacade
 from .commodity_data import CommodityDataFacade
 from .fund_analysis import FundAnalysisFacade
+from .fund_attribution import FundAttributionEngine
 from .fund_holding import FundHoldingFacade
 from .fundamental_data import FundamentalDataFacade
 from .insight_data import InsightDataFacade
@@ -35,4 +41,6 @@ __all__ = [
     "FundamentalDataFacade",
     "FundAnalysisFacade",
     "FundHoldingFacade",
+    "BenchmarkDataFacade",
+    "FundAttributionEngine",
 ]

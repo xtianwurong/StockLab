@@ -37,7 +37,6 @@ import os
 import sys
 from datetime import date, timedelta
 
-import pandas as pd
 
 # 项目根目录加入模块搜索路径（与其它 CLI 一致）
 sys.path.insert(0, os.path.dirname(

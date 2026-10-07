@@ -17,7 +17,6 @@ StockLab - 申万行业指数数据源 (stocklab.datasource.sw_indices)
 
 
 from dataclasses import dataclass
-from typing import Optional
 import logging
 
 import pandas as pd
@@ -26,7 +25,6 @@ from stocklab.domain import (
     SW_INDEX_DAILY_COLUMNS,
     SW_INDUSTRY_MAPPING_COLUMNS,
 )
-from stocklab.domain.contract import require_columns, align_columns
 
 _logger = logging.getLogger(__name__)
 

@@ -16,7 +16,6 @@ StockLab - 每日估值 Repository (stocklab.persistence.repository.daily_valuat
 
 import logging
 
-import pandas as pd
 
 from stocklab.domain import DAILY_VALUATION_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository

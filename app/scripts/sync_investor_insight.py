@@ -65,10 +65,6 @@ from stocklab.datasource.insight import (
     normalize_outcome,
 )
 from stocklab.datasource.insight.manual import DEFAULT_SEED_PATH
-from stocklab.domain import (
-    INVESTOR_ACCOUNT_COLUMNS,
-    INVESTOR_COLUMNS,
-)
 from stocklab.normalization.insight import (
     normalize_investor_accounts,
     normalize_investors,
@@ -570,7 +566,7 @@ def _uid_text(value):
         if pd.isna(value):
             return "（未填）"
     except (TypeError, ValueError):
-        pass
+        pass  # pd.isna 对非数组类型会抛 TypeError/ValueError，忽略走后续 str 兜底
     text = str(value).strip()
     if not text:
         return "（未填）"

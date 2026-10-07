@@ -17,7 +17,6 @@ StockLab - 日 K 行情 Repository (stocklab.persistence.repository.daily_price)
 import datetime
 import logging
 
-import pandas as pd
 
 from stocklab.domain import DAILY_PRICE_COLUMNS
 from stocklab.persistence.repository.base import BaseRepository

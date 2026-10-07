@@ -12,7 +12,7 @@ StockLab - 资金流数据源 (stocklab.datasource.capital_flow)
 
 import logging
 from typing import Dict, Literal, Optional, Tuple
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import pandas as pd
 

@@ -28,7 +28,6 @@ import pandas as pd
 
 from stocklab.analytics.fund_style import (
     required_history_days,
-    FundStyleDecomposer,
     decompose_fund_style,
     FundAllocationSignal,
     SignalStrength,

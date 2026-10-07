@@ -34,6 +34,8 @@ from stocklab.domain import (
     INVESTOR_ACCOUNT_COLUMNS,
     INVESTOR_COLUMNS,
     INVESTOR_QUOTE_COLUMNS,
+    # 本模块对外转出这两个编解码助手：洞察原始报文的读写都在 repository 层，
+    # 下游（同步脚本与测试）从这里取比再绕回 domain 更贴近使用场景。
     decode_raw_meta,
     dumps_raw_meta,
 )
@@ -43,6 +45,9 @@ __all__ = [
     "InvestorRepository",
     "InvestorAccountRepository",
     "InvestorQuoteRepository",
+    # 转出自 stocklab.domain，见上方 import 处说明
+    "decode_raw_meta",
+    "dumps_raw_meta",
 ]
 
 
