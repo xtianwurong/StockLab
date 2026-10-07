@@ -12,8 +12,8 @@
 | 仅同步日 K（增量） | `python app/scripts/sync_market_data.py prices --incremental` | 从本地最新交易日次日开始 |
 | 同步历史估值（耗时最长） | `python app/scripts/sync_market_data.py valuation-history --period 近五年` | 需先跑 securities |
 | 启动 Web 分析服务 | `python app/scripts/serve_web.py` | 默认 127.0.0.1:8000，只监听回环 |
-| 离线单测 | `./venv/bin/python -m pytest -m "not integration"` | 跳过联网用例 |
-| 全量测试（含联网） | `./venv/bin/python -m pytest` | 需真实库且未起 serve_web.py |
+| 离线单测（默认） | `./venv/bin/python -m pytest` | `pytest.ini` 的 addopts 已含 `-m "not integration"`，无需手写；约 1061 用例 / 22s |
+| 联网集成测试 | `./venv/bin/python -m pytest -m integration` | 4 个用例，打真实外部源；命令行 `-m` 覆盖 addopts |
 | 只跑单个测试文件 | `./venv/bin/python -m pytest tests/test_sync_cli.py -v` | 无需装包，conftest 已加 pythonpath |
 
 > **环境**：Python 3.14.4 + `venv/`（已在 requirements.txt 锁版）。直接用 `./venv/bin/python`。
@@ -60,10 +60,13 @@
   - `fresh_db` — 给目录 + 跑完迁移的 Database（新库契约类用例用）
   - `app` / `client` — 真实库的 Flask 应用与测试客户端（仅 `test_web_api.py` 用）
 - **Marker**：
-  - `integration` — 打真实外部源，默认跑；离线用 `-m "not integration"`
+  - `integration` — 打真实外部源，**默认被排除**（addopts 的 `-m "not integration"`）；要跑用 `-m integration`
   - `real_db` — 需 `data/stocklab.duckdb`，DuckDB 写锁冲突会在 fixture 里给明确报错
 - **一个用例只验一件事**；注释声称的不变量，**断言必须真的在查**
-- 覆盖率基线 **87%**（`--cov=stocklab --cov=app`），门槛 85%，新代码没配测试就会掉线
+- 覆盖率基线 **语句 86% / 分支 76%**（`--cov=stocklab --cov=app` + `--cov-branch`，全量实测合并口径 83.9%）
+  门槛按**合并口径**取 `--cov-fail-under=83`（勿套语句口径的 85 —— 分支一开，TOTAL 比语句低约 2 分，写 85 会当场失败）
+  新代码没配测试就会掉线
+- `pytest.ini` **必须留在项目根目录**：pytest 从 args 公共祖先向上找 ini，放 `tests/` 时 `pytest`（无参）会完全不读配置 —— integration 不排除、`--strict-markers` 失效、覆盖率不测，**且不报错**
 
 ---
 
@@ -71,7 +74,7 @@
 
 | 现象 | 根因 | 规避 |
 |------|------|------|
-| `Could not set lock` | serve_web.py 正在跑，独占 DuckDB 写连接 | `pkill -f serve_web.py` 再跑测试 |
+| Web 用例直接失败并提示 `pkill -f serve_web.py` | `app` fixture 前置守卫：服务在跑时只复制主库、不复制 `.wal`，快照可能不完整 | `pkill -f serve_web.py` 再跑测试 |
 | `RuntimeError: Working outside of application context` | 直接 import `app.web.store` 而非用 `client` fixture | Web 测试必须用 `client` fixture（自带 app_context） |
 | 历史估值分位算错 | 分位算的是**最新一日**值，而非序列最小值 | 看 `valuation_percentile.py` 实现，别凭直觉 |
 | `/api/market/ranking` 的 `codes` 过滤失效 | 误写成子串匹配 | 精确过滤：传片段（`60051`）必须 0 条 |
@@ -167,6 +170,25 @@ data/stocklab.duckdb  本地数据仓库（git 忽略 .wal）
 ## 版本锁定
 
 `requirements.txt` 用 `==` 全锁（含测试工具），单兵本地工具**不分生产/开发环境**。改版本只改这文件。
+
+---
+
+## Agent Skills（**不入库**，换机器须重装）
+
+三个安装位置共 17 个 skill，OpenCode 均能自动发现；`.gitignore` 按既有「AI 工具元数据不入库」约定一并忽略（含 `skills-lock.json`）——
+**新克隆默认一个都没有且不报错**，需重跑：
+
+```bash
+npx -y ui-ux-pro-max-cli init --ai opencode          # → .opencode/skills/（7 个）
+npx -y skills add shadcn/ui -y --copy                # → .agents/skills/（2 个）
+npx -y skills add fastapi/fastapi -y --copy          # → .agents/skills/（1 个）
+npx -y skills add wshobson/agents -s responsive-design -s tailwind-design-system \
+        -s python-design-patterns -s python-testing-patterns \
+        -s architecture-patterns -s code-review-excellence -y --copy
+```
+
+> `frontend-design` 在 `.opencode/skill/`（单数），内容与 `anthropics/claude-code` 官方版逐字节一致。
+> `shadcn` 依赖 `components.json`、`tailwind-design-system` 依赖 Tailwind v4 —— **本项目两样都没有，装了也不触发**，属占位。
 
 ---
 

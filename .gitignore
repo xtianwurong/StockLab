@@ -23,3 +23,7 @@ data/
 
 # ---- AI 工具元数据（本地记忆，不入库）----
 .workbuddy/
+# Agent Skills：vendor 管理、可按 AGENTS.md「Agent Skills」一节的命令重装
+.opencode/
+.agents/
+skills-lock.json
