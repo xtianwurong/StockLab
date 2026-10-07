@@ -34,7 +34,10 @@
         if (mode === "light" || mode === "dark") {
           document.documentElement.setAttribute("data-theme", mode);
         }
-        if (window.localStorage.getItem("sl-shell-collapsed") === "1") {
+        // 手机端不套 shell-collapsed：那边侧栏是覆盖式抽屉，而这个偏好是
+        // 桌面的「图标窄条」，两者语义不同（见 base.css 的 ≤768 区块）。
+        if (window.localStorage.getItem("sl-shell-collapsed") === "1" &&
+            !window.matchMedia("(max-width: 768px)").matches) {
           document.documentElement.classList.add("shell-collapsed");
         }
       } catch (error) {

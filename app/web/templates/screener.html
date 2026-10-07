@@ -28,7 +28,7 @@
   .rule-card:focus-within { border-color: var(--accent); background: var(--bg-card); }
   .rule-row {
     display: grid;
-    grid-template-columns: minmax(0, 1.5fr) minmax(84px, 1fr) minmax(76px, 1fr) 30px;
+    grid-template-columns: minmax(0, 1.5fr) minmax(84px, 1fr) minmax(76px, 1fr) var(--control-sm);
     gap: var(--space-2);
     align-items: center;
   }
@@ -166,7 +166,7 @@
   @media (max-width: 1024px) {
     .screen-grid { grid-template-columns: 1fr; }
     .panel { position: static; }
-    .rule-row { grid-template-columns: minmax(0, 1fr) minmax(80px, 1fr) 30px; }
+    .rule-row { grid-template-columns: minmax(0, 1fr) minmax(80px, 1fr) var(--control-sm); }
     .rule-row .rule-value { grid-column: 1 / -1; }
   }
 </style>

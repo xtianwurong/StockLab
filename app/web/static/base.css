@@ -273,6 +273,92 @@ html.shell-collapsed .nav-item { justify-content: center; padding: var(--space-2
   .shell .nav-item { justify-content: center; padding: var(--space-2) 0; }
 }
 
+/* ---------- 手机端（≤768px）：侧栏改覆盖式抽屉 ----------
+   ≤1024 那套「图标窄条」是给平板 + 鼠标的：在 375px 屏上它白占 64px，
+   而且折叠态与展开态同为 64px —— 顶栏那个汉堡按钮在这里等于失效。
+   手机上改成真正的抽屉：主栏占满全宽，侧栏默认停在视口外，
+   由顶栏现成的 #btn-collapse 唤出。断点取 768 而非 760/860，
+   是为了跟 insight/fund_analysis 的既有值同档 —— 全站仍是五档。 */
+@media (max-width: 768px) {
+  /* 令牌收紧：
+     --page-x 28→16  直接还给内容区 24px；
+     --font-md 14→16 是硬要求 —— iOS 对 <16px 的输入框会在聚焦时放大整页，
+                       布局当场跳走，不是观感问题是功能问题；
+     --control-md/--control-sm 38/30→44  让按钮与输入框一起满足触控下限
+                       （.btn 与 .btn-icon 各自吃同一个令牌，所以始终是方的）。 */
+  :root {
+    --page-x: 16px;
+    --font-base: 15px;
+    --font-md: 16px;
+    --control-md: 44px;
+    --control-sm: 44px;
+  }
+
+  /* 主栏占满全宽。必须连 shell-collapsed 一起盖：
+     `html.shell-collapsed .shell` 特异性 (0,2,1) 高于裸 `.shell` (0,1,0)，
+     只写 .shell 会被桌面端遗留的折叠偏好压回 64px，内容区当场只剩 64px 宽。 */
+  .shell,
+  html.shell-collapsed .shell { grid-template-columns: minmax(0, 1fr); }
+
+  /* 抽屉：脱离网格贴左，默认藏在视口外。
+     height:auto 而非沿用基础的 100vh —— 手机 100vh 含浏览器工具栏，会溢出底边。 */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    height: auto;
+    z-index: var(--z-overlay);
+    width: min(82vw, 272px);
+    transform: translateX(-100%);
+    transition: transform var(--dur-base) var(--ease-out);
+    box-shadow: var(--shadow-xl);
+  }
+  html.shell-drawer-open .sidebar { transform: none; }
+
+  /* 抽屉内恢复完整标签。
+     `.shell X` (0,2,0) 与 ≤1024 的同名规则等特异性，靠本区块更靠后赢；
+     但 `html.shell-collapsed X` 是 (0,2,1) 更高 —— 必须另写一组带
+     html.shell-collapsed 的 (0,3,1) 才压得住，否则桌面存了折叠偏好、
+     又把窗口缩到手机时，抽屉里会只剩一列图标。 */
+  .shell .brand-text,
+  html.shell-collapsed .shell .brand-text { display: flex; }
+  .shell .nav-item-label,
+  .shell .nav-group-label,
+  .shell .sidebar-foot,
+  html.shell-collapsed .shell .nav-item-label,
+  html.shell-collapsed .shell .nav-group-label,
+  html.shell-collapsed .shell .sidebar-foot { display: block; }
+  .shell .sidebar-brand,
+  html.shell-collapsed .shell .sidebar-brand {
+    justify-content: flex-start;
+    padding: 0 var(--space-4);
+  }
+  .shell .nav-item,
+  html.shell-collapsed .shell .nav-item {
+    justify-content: flex-start;
+    padding: var(--space-2) var(--space-3);
+    min-height: 44px; /* 触控目标下限；导航是手机上最高频的点击对象 */
+  }
+
+  /* 遮罩：盖住顶栏与内容，但落在抽屉之下（--z-overlay=80 → 79）。
+     伪元素的点击事件归属宿主 .shell，所以关抽屉只需在 ui.js 里
+     判断 event.target === shell，不必往 DOM 里塞遮罩节点。 */
+  html.shell-drawer-open .shell::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-overlay) - 1);
+    background: rgba(0, 0, 0, 0.45);
+  }
+  html.shell-drawer-open,
+  html.shell-drawer-open body { overflow: hidden; }
+
+  /* 顶栏：那句「口径 亏损期已剔除」是桌面常驻说明，窄屏让位给搜索框 */
+  .topbar-meta { display: none; }
+  .topbar-search .input { height: 44px; }
+}
+
 /* ==========================================================================
    3. 区块标题 / 卡片
    ========================================================================== */
@@ -334,6 +420,8 @@ html.shell-collapsed .nav-item { justify-content: center; padding: var(--space-2
 @media (prefers-reduced-motion: reduce) {
   .shell { transition: none; }
   .funnel-fill { transition: none; }
+  /* 手机抽屉的滑入滑出（仅 ≤768 生效，桌面无此过渡） */
+  .sidebar { transition: none; }
 }
 
 /* ==========================================================================

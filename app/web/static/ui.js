@@ -830,6 +830,46 @@
   }
 
   /**
+   * 当前是否在手机断点内（与 base.css 的 ≤768 抽屉规则必须同值）
+   *
+   * @returns {boolean} 手机断点内
+   */
+  function isMobileShell() {
+    return window.matchMedia("(max-width: 768px)").matches;
+  }
+
+  /**
+   * 手机抽屉开合（写 <html> 上的 class，对应 base.css 的遮罩与滑出规则）
+   *
+   * @param {boolean} open 是否打开
+   * @returns {void}
+   */
+  function setDrawerOpen(open) {
+    if (open) {
+      document.documentElement.classList.add("shell-drawer-open");
+    } else {
+      document.documentElement.classList.remove("shell-drawer-open");
+    }
+  }
+
+  /**
+   * 导航开合的统一入口：手机切抽屉，其余切图标窄条。
+   *
+   * 两者刻意不共用 shell-collapsed：那个 class 会写进 localStorage，
+   * 手机若也用它，桌面存下的状态会把抽屉默认顶开；
+   * 且 shell-collapsed 在窄屏会隐藏文字标签，抽屉里需要的是完整导航。
+   *
+   * @returns {void}
+   */
+  function toggleShellNav() {
+    if (isMobileShell()) {
+      setDrawerOpen(!document.documentElement.classList.contains("shell-drawer-open"));
+      return;
+    }
+    setShellCollapsed(!isShellCollapsed());
+  }
+
+  /**
    * 绑定侧边栏折叠按钮与快捷键
    *
    * @returns {void}
@@ -838,12 +878,23 @@
     var button = document.getElementById("btn-collapse");
     if (button) {
       button.addEventListener("click", function () {
-        setShellCollapsed(!isShellCollapsed());
+        toggleShellNav();
       });
     }
     shortcut("[", function () {
-      setShellCollapsed(!isShellCollapsed());
+      toggleShellNav();
     }, "折叠/展开导航");
+
+    /* 遮罩是 .shell::after —— 伪元素的点击事件归属宿主，
+       所以点到遮罩时 target 就是 .shell 自身，不必额外插遮罩节点 */
+    var shell = document.getElementById("shell");
+    if (shell) {
+      shell.addEventListener("click", function (event) {
+        if (event.target === shell) {
+          setDrawerOpen(false);
+        }
+      });
+    }
   }
 
   /**
