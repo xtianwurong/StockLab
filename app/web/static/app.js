@@ -86,16 +86,7 @@
    * @param {string} text 文本内容
    * @returns {HTMLElement} 元素
    */
-  function el(tag, className, text) {
-    var node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== undefined && text !== null) {
-      node.textContent = text;
-    }
-    return node;
-  }
+  var el = SL.el;
 
   // ---------- 联想 ----------
 
@@ -494,7 +485,10 @@
    */
   function pickPrimaryIndicator(data) {
     var indicators = data.results.map(function (item) { return item.indicator; });
-    if (indicators.indexOf(primaryIndicator) !== -1) {
+    var current = findResult(data, primaryIndicator);
+    // 只有当前主指标「名次可用」才保留：亏损股的 PE-TTM 分位为 null，
+    // 若仅凭 indicator 名存在就保留，会导致 29% 的标的打开即空白大卡。
+    if (current && current.percentile !== null && current.percentile !== undefined) {
       return;
     }
     var usable = data.results.filter(function (item) {
@@ -633,6 +627,8 @@
     renderHero(lastPayload);
     renderWindows(lastPayload);
     renderMetricCards(lastPayload);
+    renderDetailTable(lastPayload);
+    renderMarketContext(lastPayload);
     renderTrendChart();
   }
 

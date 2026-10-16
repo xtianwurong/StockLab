@@ -177,6 +177,16 @@ class FundInfoRepository(BaseRepository):
             f"SELECT * FROM {self._TABLE_NAME} WHERE fund_type = ?", [fund_type]
         ).fetchdf()
 
+    def search(self, keyword: str) -> pd.DataFrame:
+        """按基金代码或名称模糊搜索（前端联想下拉用）"""
+        pattern = "%" + keyword + "%"
+        conn = self._db.get_connection()
+        return conn.execute(
+            f"SELECT * FROM {self._TABLE_NAME} "
+            "WHERE fund_code ILIKE ? OR fund_name ILIKE ? ORDER BY fund_code",
+            [pattern, pattern],
+        ).fetchdf()
+
     def find_active(self) -> pd.DataFrame:
         conn = self._db.get_connection()
         return conn.execute(

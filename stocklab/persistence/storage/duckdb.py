@@ -17,6 +17,7 @@ StockLab - DuckDB 连接管理模块 (stocklab.persistence.storage.duckdb)
 import logging
 
 import duckdb
+import pandas as pd
 
 from stocklab.persistence.storage.schema import DEFAULT_DB_PATH, initialize_database
 
@@ -24,7 +25,33 @@ _logger = logging.getLogger(__name__)
 
 __all__ = [
     "Database",
+    "register_dataframe",
 ]
+
+
+def register_dataframe(connection, name, frame):
+    """
+    把 DataFrame 注册为 DuckDB 临时视图。
+
+    pandas 3.0 起字符串列默认使用 str 扩展 dtype，DuckDB 的 register 不认识该
+    类型，会抛 NotImplementedException。这里在注册前把这类列降级为 object
+    （两者都承载 Python 字符串，语义一致），仅用于过桥，不改动调用方持有的
+    DataFrame。
+
+    Args:
+        connection (duckdb.DuckDBPyConnection): 目标连接
+        name (str): 临时视图名
+        frame (pd.DataFrame): 待注册的数据表
+    """
+    string_columns = [
+        column for column in frame.columns
+        if isinstance(frame[column].dtype, pd.StringDtype)
+    ]
+    if string_columns:
+        frame = frame.copy()
+        for column in string_columns:
+            frame[column] = frame[column].astype(object)
+    connection.register(name, frame)
 
 
 class Database:

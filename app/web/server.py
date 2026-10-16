@@ -19,6 +19,7 @@ StockLab - Web 服务装配模块 (app.web.server)
   /portfolio                     组合监控页面（自选股 + 分位阈值告警，模板渲染）
   /insight                       投资人观点页面（投资理念 / 宏观判断学习，模板渲染）
   /commodities                   大宗商品页面（价格 / 趋势 / 七档评级，模板渲染）
+  /technical                     技术面与风险页面（均线 / RSI / 波动 / 回撤，模板渲染）
   /favicon.ico                   站点图标（消除每页 404 噪音）
   /static/*                      本地静态资源（含 vendored ECharts，离线可用）
   /api/health                    健康检查
@@ -31,6 +32,7 @@ StockLab - Web 服务装配模块 (app.web.server)
   /api/screener/meta?as_of=      选股器元数据（因子覆盖率 / 算子 / 预置模板）
   /api/screener/run              选股器执行（POST {spec, as_of, sort, order, limit}）
   /api/compare?codes=            多股对比（2~10 只 × 5 指标分位 + 对齐后的估值走势）
+  /api/technical?code=           技术面与风险（均线 / RSI / MACD / 波动 / 回撤 / Beta）
   /api/market/ranking?codes=     全市场排行（codes 参数支持精确指定自选股列表）
   /api/insight/meta              投资人观点元数据（筛选枚举 / 核验状态分布）
   /api/insight/quotes?...        投资人言论多维筛选（keyword / 投资人 / 平台 /
@@ -76,6 +78,7 @@ from app.web import fund_holding_api
 from app.web import insight_api
 from app.web import market_api
 from app.web import screener_api
+from app.web import technical_api
 from app.web.webcommon import StrictJSONProvider
 
 _logger = logging.getLogger("StockLab.Web.Server")
@@ -106,6 +109,11 @@ def create_app(priority=None, db_path=None):
     # 供 api 层按请求取用启动期配置（不引入全局可变量）
     app.config["STOCKLAB_PRIORITY"] = priority
     app.config["STOCKLAB_DB_PATH"] = db_path
+
+    # 静态资源一律走条件请求（ETag/Last-Modified）重新校验：
+    # 本地工具常在运行中改 JS/CSS，浏览器缓存若不校验就会拿到旧脚本，
+    # 表现为「改了没生效」。置 0 = Cache-Control: no-cache，仍复用 304。
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
     # 应答体序列化闸门：NaN / ±inf -> null，保证发出去的都是合法 JSON。
     # 必须在首次 jsonify 之前挂好（实例属性覆盖类属性；app.json 是 __init__
@@ -142,7 +150,11 @@ def create_app(priority=None, db_path=None):
     )
     app.add_url_rule(
         "/fund-holding", "fund_holding",
-        fund_analysis_api.handle_fund_analysis_page, methods=["GET"],
+        fund_analysis_api.handle_fund_holding_page, methods=["GET"],
+    )
+    app.add_url_rule(
+        "/technical", "technical",
+        technical_api.handle_technical_page, methods=["GET"],
     )
     app.add_url_rule("/favicon.ico", "favicon", api.handle_favicon, methods=["GET"])
 
@@ -187,6 +199,12 @@ def create_app(priority=None, db_path=None):
         "/api/compare",
         "compare_api",
         compare_api.handle_compare,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/technical",
+        "technical_api",
+        technical_api.handle_technical,
         methods=["GET"],
     )
     app.add_url_rule(

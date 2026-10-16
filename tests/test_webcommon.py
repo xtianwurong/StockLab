@@ -20,16 +20,19 @@ insight_api 各有一份拷贝，拷贝之间口径并不一致，所以本文�
   ./venv/bin/python -m pytest tests/test_webcommon.py -v
 """
 
+import datetime
 import math
 import os
 import sys
 
+import pandas as pd
 import pytest
 
 if "stocklab" not in sys.modules:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.web.webcommon import (
+    isoformat_dates,
     json_num,
     json_text,
     looks_like_date,
@@ -181,3 +184,31 @@ class TestLooksLikeDate:
     def test_rejects_non_string(self):
         assert looks_like_date(None) is False
         assert looks_like_date(20260101) is False
+
+
+class TestIsoformatDates:
+    """日期序列化边界：flask 默认把 date 写成 RFC-822，前端 formatDate 会把这串
+    原样显示、图表 x 轴也读不到干净日期。这里钉住递归转换与缺失日期 -> None。"""
+
+    def test_datetime_becomes_iso_date(self):
+        assert isoformat_dates(datetime.datetime(2026, 9, 30, 0, 0)) == "2026-09-30"
+
+    def test_date_becomes_iso_date(self):
+        assert isoformat_dates(datetime.date(2026, 9, 30)) == "2026-09-30"
+
+    def test_nat_becomes_none(self):
+        assert isoformat_dates(pd.NaT) is None
+
+    def test_recurses_into_dict_and_list(self):
+        payload = {
+            "report_date": datetime.date(2026, 6, 30),
+            "items": [{"trade_date": datetime.datetime(2026, 1, 1, 0, 0)}],
+        }
+        assert isoformat_dates(payload) == {
+            "report_date": "2026-06-30",
+            "items": [{"trade_date": "2026-01-01"}],
+        }
+
+    def test_leaves_plain_values_untouched(self):
+        payload = {"code": "000001.OF", "weight": 0.12, "missing": None}
+        assert isoformat_dates(payload) == payload

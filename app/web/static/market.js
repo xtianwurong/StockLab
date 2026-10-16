@@ -192,14 +192,13 @@
       return;
     }
 
-    var lowCount = 0;
-    var levelCounts = summary.level_counts || {};
-    ["极度低估", "低估", "正常偏低"].forEach(function (name) {
-      lowCount += levelCounts[name] || 0;
-    });
+    // 直方图是 10 档、每档 10%：<30% = 前三档之和。
+    // 此前误用「极度低估+低估+正常偏低」三档，那覆盖的是 <40%，与标签不符。
+    var histogram = summary.histogram || [];
+    var lowCount = (histogram[0] || 0) + (histogram[1] || 0) + (histogram[2] || 0);
 
     var cards = [
-      { k: "统计标的", v: SL.formatInt(summary.total), sub: "按当前筛选口径" },
+      { k: "统计标的", v: SL.formatInt(summary.total), sub: "市场/搜索口径（不含评级钻取）" },
       { k: "分位可用", v: SL.formatInt(summary.available),
         sub: summary.total ? (100 * summary.available / summary.total).toFixed(1) + "% 覆盖" : "-" },
       { k: "分位中位数", v: SL.formatPercent(summary.median_percentile),

@@ -132,6 +132,29 @@
   }
 
   /**
+   * 解析列表型阈值（「属于」算子的多值输入，逗号分隔）
+   *
+   * @param {string} raw 原始文本
+   * @returns {Array|null} 解析后的列表；空值返回 null
+   */
+  function parseListValue(raw) {
+    if (raw === "" || raw === null || raw === undefined) {
+      return null;
+    }
+    var parts = String(raw).split(/[,，]/);
+    var values = [];
+    for (var i = 0; i < parts.length; i++) {
+      var text = parts[i].trim();
+      if (text === "") {
+        continue;
+      }
+      var num = Number(text);
+      values.push(isNaN(num) ? text : num);
+    }
+    return values.length ? values : null;
+  }
+
+  /**
    * 按名字取因子元数据
    *
    * @param {string} name 因子名
@@ -161,7 +184,12 @@
       }
       var item = { factor: rule.factor, operator: rule.operator };
       if (operatorNeedsValue(rule.operator)) {
-        item.value = rule.value === "" || rule.value === null ? null : Number(rule.value);
+        if (rule.operator === "in") {
+          // 「属于」要的是列表，阈值输入是逗号分隔文本 —— 直接 Number() 会被后端拒为 400
+          item.value = parseListValue(rule.value);
+        } else {
+          item.value = rule.value === "" || rule.value === null ? null : Number(rule.value);
+        }
       }
       rules.push(item);
     }
@@ -255,6 +283,8 @@
     if (!operatorNeedsValue(rule.operator)) {
       valueInput.disabled = true;
       valueInput.placeholder = "无需阈值";
+    } else if (rule.operator === "in") {
+      valueInput.placeholder = "多个值，逗号分隔";
     }
 
     // 删除
@@ -376,7 +406,7 @@
     SL.ui.replaceQuery({
       spec: spec.rules.length ? JSON.stringify(spec) : null,
       as_of: dom.asOf.value || null,
-      pos: dom.chkPositive.checked ? "1" : null
+      pos: dom.chkPositive.checked ? "1" : "0"
     });
   }
 

@@ -239,28 +239,47 @@
     }
     SL.fetchJson("/api/securities?q=" + encodeURIComponent(query), 8000)
       .then(function (data) {
-        var items = data.items || [];
-        dom.suggest.textContent = "";
-        if (!items.length) {
-          dom.suggest.appendChild(SL.el("div", "suggest-empty", "没有匹配的证券"));
-          dom.suggest.className = "suggest open";
-          return;
-        }
-        items.forEach(function (item) {
-          var row = SL.el("div", "suggest-item");
-          row.appendChild(SL.el("span", "suggest-code", item.code));
-          row.appendChild(SL.el("span", "suggest-name", item.name));
-          row.addEventListener("click", function () {
-            addWatch(item.code, item.name);
-            dom.input.value = "";
-            dom.suggest.className = "suggest";
-          });
-          dom.suggest.appendChild(row);
-        });
-        dom.suggest.className = "suggest open";
+        SL.ui.renderSuggest(dom.suggest, data.items || [], function (item) {
+          addWatch(item.code, item.name);
+          dom.input.value = "";
+          dom.suggest.className = "suggest";
+        }, { showMarket: false });
       })
       .catch(function () {
         dom.suggest.className = "suggest";
+      });
+  }
+
+  /**
+   * 解析裸 6 位代码为带交易所后缀的 ts_code 后加入自选
+   *
+   * @param {string} value 6 位数字代码
+   * @returns {void}
+   */
+  function resolveBareCode(value) {
+    SL.fetchJson("/api/securities?q=" + encodeURIComponent(value), 8000)
+      .then(function (data) {
+        var items = data.items || [];
+        var pick = null;
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].code === value || items[i].code.indexOf(value + ".") === 0) {
+            pick = items[i];
+            break;
+          }
+        }
+        if (!pick) {
+          pick = items[0];
+        }
+        if (!pick) {
+          showMessage("没有匹配 " + value + " 的证券", "warning");
+          return;
+        }
+        addWatch(pick.code, pick.name);
+        dom.input.value = "";
+        dom.suggest.className = "suggest";
+      })
+      .catch(function () {
+        showMessage("证券代码解析失败，请稍后重试", "error");
       });
   }
 
@@ -299,28 +318,47 @@
       var pb = responses[1];
 
       // 按 ts_code 合并两个指标，顺序沿用用户添加顺序
+      // 注意：只有 PE 没有 PB、或只有 PB 没有 PE 的标的都很常见，
+      // 合并必须两个方向的空值都补齐，否则该标的对应指标会被整行丢弃。
       var byCode = {};
+      function ensure(row) {
+        if (!byCode[row.ts_code]) {
+          byCode[row.ts_code] = {
+            ts_code: row.ts_code,
+            name: row.name,
+            market: row.market,
+            pe_ttm_current: null,
+            pe_ttm_percentile: null,
+            pe_ttm_level: "-",
+            pe_ttm_median: null,
+            pe_ttm_sample: null,
+            pb_current: null,
+            pb_percentile: null,
+            pb_level: "-",
+            pb_median: null,
+            pb_sample: null
+          };
+        }
+        var target = byCode[row.ts_code];
+        target.name = target.name || row.name;
+        target.market = target.market || row.market;
+        return target;
+      }
       (pe.items || []).forEach(function (row) {
-        byCode[row.ts_code] = {
-          ts_code: row.ts_code,
-          name: row.name,
-          market: row.market,
-          pe_ttm_current: row.current_value,
-          pe_ttm_percentile: row.percentile,
-          pe_ttm_level: row.level,
-          pe_ttm_median: row.median_value,
-          pe_ttm_sample: row.sample_count
-        };
+        var target = ensure(row);
+        target.pe_ttm_current = row.current_value;
+        target.pe_ttm_percentile = row.percentile;
+        target.pe_ttm_level = row.level;
+        target.pe_ttm_median = row.median_value;
+        target.pe_ttm_sample = row.sample_count;
       });
       (pb.items || []).forEach(function (row) {
-        if (!byCode[row.ts_code]) {
-          return;
-        }
-        byCode[row.ts_code].pb_current = row.current_value;
-        byCode[row.ts_code].pb_percentile = row.percentile;
-        byCode[row.ts_code].pb_level = row.level;
-        byCode[row.ts_code].pb_median = row.median_value;
-        byCode[row.ts_code].pb_sample = row.sample_count;
+        var target = ensure(row);
+        target.pb_current = row.current_value;
+        target.pb_percentile = row.percentile;
+        target.pb_level = row.level;
+        target.pb_median = row.median_value;
+        target.pb_sample = row.sample_count;
       });
 
       state.rows = [];
@@ -342,11 +380,9 @@
         state.rows.push(merged);
       });
 
-      // 全市场分位升序 -> 名次即「比多少只更便宜」
+      // 自选内按分位升序的名次（不是全市场名次，见 buildMetricCell 说明）
       state.peRank = rankOf(pe.items || [], "percentile");
       state.pbRank = rankOf(pb.items || [], "percentile");
-      state.peTotal = pe.summary ? pe.summary.available : 0;
-      state.pbTotal = pb.summary ? pb.summary.available : 0;
 
       render();
       saveLocal();
@@ -358,11 +394,11 @@
   }
 
   /**
-   * 把分位升序映射成「名次 / 可用样本数」
+   * 把分位升序映射成「名次 / 可用样本数」（在自选子集内）
    *
-   * 【为何名次可由分位现算】
-   * 分位本身就是「严格低于当前值的样本占比」，在可用样本上做升序位次，
-   * 与分位互为同源；另查一次排名只会多一次全表扫描，没有额外信息。
+   * 【为何名次只能反映自选】
+   * 本页取数带了 codes= 过滤，响应里只有自选的行，名次自然只在自选之间排；
+   * 要拿全市场名次得再查一次不带过滤的排名（全表扫描），故如实标为「自选内」。
    *
    * @param {Array<object>} items 排行项
    * @param {string} field 分位字段名
@@ -566,10 +602,10 @@
       ? (state.peRank || {})[row.ts_code]
       : (state.pbRank || {})[row.ts_code];
     if (rank && rank.total) {
-      var total = indicator === "pe_ttm" ? (state.peTotal || rank.total)
-        : (state.pbTotal || rank.total);
+      // 该名次是在「自选子集」内按分位升序排的，不是全市场名次
+      // （接口带 codes 过滤后 summary 只覆盖自选，拿不到全市场横截面）。
       head.appendChild(SL.el("span", "watch-rank",
-        "全市场 " + rank.rank + "/" + total));
+        "自选内 " + rank.rank + "/" + rank.total));
     }
     cell.appendChild(head);
 
@@ -810,10 +846,13 @@
       if (!value) {
         return;
       }
-      if (/^[0-9]{6}(\.(SH|SZ|BJ))?$/i.test(value)) {
-        addWatch(value.toUpperCase().indexOf(".") === -1 ? value : value.toUpperCase(), "");
+      if (/^[0-9]{6}\.(SH|SZ|BJ)$/i.test(value)) {
+        addWatch(value.toUpperCase(), "");
         dom.input.value = "";
         dom.suggest.className = "suggest";
+      } else if (/^[0-9]{6}$/.test(value)) {
+        // 裸 6 位代码：接口的 codes= 是精确 ts_code 匹配，必须补上交易所后缀
+        resolveBareCode(value);
       } else {
         fetchSuggest(value);
       }

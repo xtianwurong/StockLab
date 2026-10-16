@@ -37,7 +37,8 @@ import pandas as pd
 from flask import jsonify, request
 
 from app.web import store
-from app.web.webcommon import json_num, json_text
+from app.web.webcommon import json_num, json_text, looks_like_date
+from stocklab.facade import FundHoldingFacade
 from stocklab.factor import registry as factor_registry
 from stocklab.research.frame import build_factor_frame
 from stocklab.screener import ScreenError, ScreenPipeline
@@ -187,9 +188,10 @@ def _factor_frame(as_of):
             as_of, None, None, None, store.facade_database()
         )
     except Exception as exc:
-        message = "构造 %s 的因子输入帧失败：%s" % (as_of, str(exc)[:200])
-        _logger.error(message)
-        return None, message
+        # 只把原因写日志，不回给用户：str(exc) 是 "Invalid isoformat string: 'ZZZ'"
+        # 这类内部英文报错，泄漏实现细节且对用户毫无可操作性。
+        _logger.error("构造 %s 的因子输入帧失败: %s", as_of, str(exc)[:200])
+        return None, "构造 %s 的因子输入帧失败，请检查该时点的估值与基础数据是否完整" % as_of
 
     if frame is None or frame.empty:
         message = "本地没有 %s 的可用数据，请先同步估值与基础数据" % as_of
@@ -356,6 +358,48 @@ def _judge(series, operator, threshold):
     return judged & usable
 
 
+def _industry_fallback_map():
+    """
+    取 ts_code -> 申万一级行业名 的兜底映射
+
+    【为何需要兜底】reference.securities.industry 由同步源填入，但真实库常年
+    为空（同步通道未提供「所属行业」）；而 fund.stock_industry_mapping 的申万
+    一级名称是齐全的，用它兜底，结果表的「行业」列与「行业通过率」卡片才能在
+    真实数据下可用，而不是清一色「未分类」。
+
+    Returns:
+        dict: ts_code -> 行业名；取不到时返回空 dict
+    """
+    try:
+        frame = FundHoldingFacade(store.facade_database()).get_stock_industry_mapping()
+    except Exception as exc:                    # noqa: BLE001
+        _logger.warning("行业映射加载失败，行业列将留空: %s", str(exc)[:200])
+        return {}
+    if frame is None or frame.empty or "sw_l1_name" not in frame.columns:
+        return {}
+    return dict(zip(frame["ts_code"], frame["sw_l1_name"]))
+
+
+def _fill_industry_from_mapping(summary):
+    """
+    把 summary 里空白的 industry 用申万一级行业名就地补齐
+
+    Args:
+        summary (pd.DataFrame): 含 ts_code / industry 两列的引擎输出帧
+    """
+    if summary.empty or "industry" not in summary.columns or "ts_code" not in summary.columns:
+        return
+    blank = summary["industry"].isna() | (
+        summary["industry"].astype(str).str.strip() == ""
+    )
+    if not bool(blank.any()):
+        return
+    lookup = _industry_fallback_map()
+    if not lookup:
+        return
+    summary.loc[blank, "industry"] = summary.loc[blank, "ts_code"].map(lookup)
+
+
 def _industry_rows(summary):
     """
     按行业统计通过率（用于「哪些行业最符合这条规则」）
@@ -519,7 +563,10 @@ def handle_screener_meta():
         Response: 200 时含 as_of / as_of_options / factors / categories /
                   operators / presets / universe_size / message
     """
-    as_of = request.args.get("as_of", "").strip() or _latest_as_of()
+    raw_as_of = request.args.get("as_of", "").strip()
+    if raw_as_of and not looks_like_date(raw_as_of):
+        return jsonify({"error": "参数 [as_of] 格式非法，需 YYYY-MM-DD"}), 400
+    as_of = raw_as_of or _latest_as_of()
     dates = store.valuation_dates(limit=60)
     if not as_of:
         return jsonify({
@@ -634,7 +681,10 @@ def handle_screener_run():
         positive_only = True
     spec = _with_positive_only(spec, bool(positive_only))
 
-    as_of = str(payload.get("as_of") or "").strip() or _latest_as_of()
+    raw_as_of = str(payload.get("as_of") or "").strip()
+    if raw_as_of and not looks_like_date(raw_as_of):
+        return jsonify({"error": "参数 [as_of] 格式非法，需 YYYY-MM-DD"}), 400
+    as_of = raw_as_of or _latest_as_of()
     if not as_of:
         return jsonify({"error": "本地没有估值快照数据，无法确定研究时点"}), 400
 
@@ -670,6 +720,14 @@ def handle_screener_run():
         return jsonify({"error": "执行筛选失败，请查看服务日志"}), 500
 
     summary = result.summary
+    # 引擎输出的 summary 只有 ts_code/name/passed/failed_rules/因子，不含 industry，
+    # 而结果表的「行业」列与「行业通过率」卡片都要用它 —— 从因子帧按 ts_code 补回来。
+    if "industry" not in summary.columns and "industry" in frame.columns:
+        summary = summary.merge(
+            frame[["ts_code", "industry"]].drop_duplicates(subset="ts_code"),
+            on="ts_code", how="left",
+        )
+    _fill_industry_from_mapping(summary)
     total = len(summary)
     passed_count = int(summary["passed"].sum()) if "passed" in summary.columns else 0
 

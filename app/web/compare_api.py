@@ -335,6 +335,9 @@ def handle_compare():
                 name: _reporter.indicator_label(name) for name in indicators
             },
             "rows": [],
+            "primary_indicator": primary,
+            "period": period,
+            "interval_text": interval_text,
             "history": {"dates": [], "series": {}},
             "sample_rows": 0,
             "message": "本地没有这些标的的估值历史，请先运行 "

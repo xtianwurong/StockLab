@@ -31,9 +31,8 @@ import pandas as pd
 from flask import jsonify, request
 
 from app.web import store
-from app.web.webcommon import parse_int_arg, parse_date_arg
-from stocklab.datasource import BENCHMARK_INDEX_CODES
-from stocklab.facade import FundAttributionEngine, FundHoldingFacade
+from app.web.webcommon import isoformat_dates, parse_int_arg, parse_date_arg
+from stocklab.facade import BENCHMARK_INDEX_CODES, FundAttributionEngine, FundHoldingFacade
 
 _logger = logging.getLogger("StockLab.Web.FundHoldingApi")
 
@@ -76,11 +75,11 @@ def handle_fund_holding_list():
         if end:
             df = df[df["report_date"] <= end]
 
-        return jsonify({
+        return jsonify(isoformat_dates({
             "code": code,
             "items": df.to_dict(orient="records") if not df.empty else [],
             "count": len(df),
-        })
+        }))
     except Exception:
         _logger.exception("基金持仓历史查询失败 [%s]", code)
         return jsonify({"error": "基金持仓加载失败，请稍后重试"}), 500
@@ -99,13 +98,13 @@ def handle_latest_holding():
             return jsonify({"error": f"未找到基金 {code} 的持仓数据"}), 404
 
         report_date = df["report_date"].iloc[0] if "report_date" in df.columns else None
-        return jsonify({
+        return jsonify(isoformat_dates({
             "code": code,
-            "report_date": str(report_date) if report_date else None,
+            "report_date": report_date,
             "report_type": df["report_type"].iloc[0] if "report_type" in df.columns else None,
             "items": df.to_dict(orient="records"),
             "count": len(df),
-        })
+        }))
     except Exception:
         _logger.exception("基金最新持仓查询失败 [%s]", code)
         return jsonify({"error": "基金持仓加载失败，请稍后重试"}), 500
@@ -131,13 +130,19 @@ def handle_industry_exposure():
             report_date = pd.to_datetime(report_date).date()
         df = facade.get_industry_exposure(code, report_date, level)
 
-        return jsonify({
+        # 未指定报告期时门面会取最新一期；若此时仍回 None，调用方会以为
+        # 「没查到报告期」却收到一整屏数据 —— 把实际使用的那一期回填上去
+        used_date = report_date
+        if used_date is None and not df.empty and "report_date" in df.columns:
+            used_date = df["report_date"].iloc[0]
+
+        return jsonify(isoformat_dates({
             "code": code,
-            "report_date": str(report_date) if report_date else None,
+            "report_date": used_date,
             "level": level,
             "items": df.to_dict(orient="records") if not df.empty else [],
             "count": len(df),
-        })
+        }))
     except Exception:
         _logger.exception("行业暴露查询失败 [%s]", code)
         return jsonify({"error": "行业暴露加载失败，请稍后重试"}), 500
@@ -167,14 +172,14 @@ def handle_industry_exposure_daily():
         until = pd.to_datetime(end).date() if end else None
         df = facade.get_industry_exposure_daily(code, level=level, since=since, until=until)
 
-        return jsonify({
+        return jsonify(isoformat_dates({
             "code": code,
             "level": level,
             "start": start,
             "end": end,
             "items": df.to_dict(orient="records") if not df.empty else [],
             "count": len(df),
-        })
+        }))
     except Exception:
         _logger.exception("行业暴露日线查询失败 [%s]", code)
         return jsonify({"error": "行业暴露日线加载失败"}), 500
@@ -231,7 +236,7 @@ def handle_holding_vs_rbsa():
         if "error" in result:
             return jsonify(result), 400
 
-        return jsonify(result)
+        return jsonify(isoformat_dates(result))
     except Exception:
         _logger.exception("RBSA vs 持仓对比失败 [%s]", code)
         return jsonify({"error": "双轨对比失败，请稍后重试"}), 500
@@ -290,7 +295,7 @@ def handle_fund_attribution():
         )
         if "error" in payload:
             return jsonify(payload), 400
-        return jsonify(payload)
+        return jsonify(isoformat_dates(payload))
     except Exception:
         _logger.exception("基金归因分析失败 [%s]", code)
         return jsonify({"error": "归因分析失败，请稍后重试"}), 500

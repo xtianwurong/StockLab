@@ -1538,7 +1538,7 @@ class TestSyncCli:
         assert summary["quote_count"] == 0
         out = capsys.readouterr().out
         assert "投资人观点库状态" in out
-        assert "1240335488" in out
+        assert "1247347556" in out
         assert "人工录入文件" in out
 
     def test_show_status_flags_unfilled_uid(self, db, capsys):

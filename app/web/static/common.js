@@ -69,6 +69,19 @@
           return data;
         });
       })
+      .catch(function (error) {
+        // 只归一「还没转成业务错误」的异常：带 status 的是服务端已给中文文案的
+        // HTTP 错误，不能覆盖它。超时（AbortError）与断网（TypeError）的原始
+        // message 是 "The operation was aborted." / "Failed to fetch" 这类英文
+        // 技术串，各页面都直接 `error.message || 中文兜底`，会原样显示给用户。
+        if (error && error.status === undefined) {
+          var seconds = Math.round((timeoutMs || 15000) / 1000);
+          error.message = error.name === "AbortError"
+            ? ("请求超时（超过 " + seconds + " 秒），请稍后重试")
+            : "网络请求失败，请确认本地服务仍在运行";
+        }
+        throw error;
+      })
       .finally(function () {
         clearTimeout(timer);
       });
@@ -625,10 +638,11 @@
    */
   function escapeHtml(text) {
     return String(text === null || text === undefined ? "" : text)
-      .replace(/&/g, "&")
-      .replace(/</g, "<")
-      .replace(/>/g, ">")
-      .replace(/"/g,"\u0022");
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   /**

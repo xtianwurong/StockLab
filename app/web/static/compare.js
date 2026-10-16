@@ -221,25 +221,11 @@
     }
     SL.fetchJson("/api/securities?q=" + encodeURIComponent(query), 8000)
       .then(function (data) {
-        var items = data.items || [];
-        dom.suggest.textContent = "";
-        if (!items.length) {
-          dom.suggest.appendChild(SL.el("div", "suggest-empty", "没有匹配的证券"));
-          dom.suggest.className = "suggest open";
-          return;
-        }
-        items.forEach(function (item) {
-          var row = SL.el("div", "suggest-item");
-          row.appendChild(SL.el("span", "suggest-code", item.code));
-          row.appendChild(SL.el("span", "suggest-name", item.name));
-          row.addEventListener("click", function () {
-            addCode(item.code, item.name);
-            dom.input.value = "";
-            dom.suggest.className = "suggest";
-          });
-          dom.suggest.appendChild(row);
-        });
-        dom.suggest.className = "suggest open";
+        SL.ui.renderSuggest(dom.suggest, data.items || [], function (item) {
+          addCode(item.code, item.name);
+          dom.input.value = "";
+          dom.suggest.className = "suggest";
+        }, { showMarket: false });
       })
       .catch(function () {
         dom.suggest.className = "suggest";
@@ -251,11 +237,32 @@
   // ==========================================================================
 
   /**
+   * 主指标排第一、其余保持原序；后端以 indicators[0] 决定 history 画哪条曲线
+   *
+   * @returns {Array<string>} 指标顺序
+   */
+  function orderedIndicators() {
+    var all = (state.result && state.result.indicators) || [];
+    var chosen = state.mainIndicator;
+    if (!all.length || !chosen || all.indexOf(chosen) === -1) {
+      return all;
+    }
+    var ordered = [chosen];
+    all.forEach(function (name) {
+      if (name !== chosen) {
+        ordered.push(name);
+      }
+    });
+    return ordered;
+  }
+
+  /**
    * 请求并渲染对比结果
    *
+   * @param {boolean} [quiet] true 表示指标切换触发的重取，不重复弹提示
    * @returns {void}
    */
-  function run() {
+  function run(quiet) {
     if (state.picked.length < MIN_CODES) {
       showMessage("至少添加 " + MIN_CODES + " 只标的再开始对比。", "warning");
       return;
@@ -268,6 +275,10 @@
     });
     var url = "/api/compare?codes=" + encodeURIComponent(codes.join(",")) +
       "&period=" + encodeURIComponent(dom.period.value);
+    var order = orderedIndicators();
+    if (order.length) {
+      url += "&indicators=" + encodeURIComponent(order.join(","));
+    }
 
     SL.fetchJson(url, 60000).then(function (data) {
       state.result = data;
@@ -288,7 +299,7 @@
       syncUrl();
       if (data.message) {
         showMessage(data.message, "warning");
-      } else {
+      } else if (!quiet) {
         SL.ui.toast.success("已对比 " + data.rows.length + " 只标的");
       }
     }).catch(function (error) {
@@ -387,6 +398,20 @@
   }
 
   /**
+   * 切换主图指标：必须重新取数，否则 history 仍是上一个指标的曲线
+   *
+   * @param {string} indicator 指标名
+   * @returns {void}
+   */
+  function selectIndicator(indicator) {
+    if (state.mainIndicator === indicator) {
+      return;
+    }
+    state.mainIndicator = indicator;
+    run(true);
+  }
+
+  /**
    * 渲染指标切换 tab
    *
    * @param {object} data 接口应答
@@ -399,13 +424,7 @@
         labelOf(indicator));
       tab.type = "button";
       tab.addEventListener("click", function () {
-        if (state.mainIndicator === indicator) {
-          return;
-        }
-        state.mainIndicator = indicator;
-        renderTabs(data);
-        renderCards(data);
-        renderChart(data);
+        selectIndicator(indicator);
       });
       dom.tabs.appendChild(tab);
     });
@@ -510,7 +529,9 @@
         data: data.rows.map(function (row) {
           var values = axes.map(function (indicator) {
             var metric = row.metrics ? row.metrics[indicator] : null;
-            return metric && metric.percentile !== null ? metric.percentile : 0;
+            return metric && metric.percentile !== null && metric.percentile !== undefined
+              ? metric.percentile
+              : null;
           });
           return {
             name: nameOf(row.ts_code),
@@ -544,14 +565,7 @@
       var th = SL.el("th", "ta-r col-indicator" +
         (indicator === state.mainIndicator ? " active" : ""), labelOf(indicator));
       th.addEventListener("click", function () {
-        if (state.mainIndicator === indicator) {
-          return;
-        }
-        state.mainIndicator = indicator;
-        renderTabs(data);
-        renderCards(data);
-        renderChart(data);
-        renderTable(data);
+        selectIndicator(indicator);
       });
       dom.head.appendChild(th);
     });

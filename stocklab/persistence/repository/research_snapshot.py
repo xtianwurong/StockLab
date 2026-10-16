@@ -25,6 +25,7 @@ from stocklab.domain import (
     DataContractError,
 )
 from stocklab.persistence.repository.base import BaseRepository
+from stocklab.persistence.storage.duckdb import register_dataframe
 
 _logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class ResearchSnapshotRepository(BaseRepository):
         column_list = ", ".join(self._COLUMNS)
         conn = self._db.get_connection()
         tmp_table = "_research_snapshots_tmp"
-        conn.register(tmp_table, aligned)
+        register_dataframe(conn, tmp_table, aligned)
         try:
             conn.execute(
                 f"INSERT INTO {self._TABLE_NAME} ({column_list}) "
@@ -147,7 +148,7 @@ class SnapshotResultRepository(BaseRepository):
         column_list = ", ".join(self._COLUMNS)
         conn = self._db.get_connection()
         tmp_table = "_snapshot_results_tmp"
-        conn.register(tmp_table, aligned)
+        register_dataframe(conn, tmp_table, aligned)
         try:
             conn.execute(
                 f"INSERT INTO {self._TABLE_NAME} ({column_list}) "

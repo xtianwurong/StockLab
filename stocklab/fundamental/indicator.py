@@ -75,7 +75,10 @@ def build_financial_indicators(income_df, balance_df):
     total_profit = _numeric(frame, "total_profit")
     income_tax = _numeric(frame, "income_tax").fillna(0.0)
 
-    tax_rate = _safe_divide(income_tax, total_profit).fillna(0.0)
+    # 有效税率 = 所得税 / 利润总额；利润总额 <= 0（亏损）或缺失时取 0。
+    # 不能只挡分母为 0：利润总额为负时比值符号翻转，会算出荒唐的税率，
+    # 进而把 NOPAT 与 roic 一起带偏。
+    tax_rate = _safe_divide(income_tax, total_profit).where(total_profit > 0, 0.0).fillna(0.0)
     nopat = operating_profit * (1.0 - tax_rate)
 
     announce_date = [

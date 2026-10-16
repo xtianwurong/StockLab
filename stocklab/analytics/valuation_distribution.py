@@ -477,7 +477,11 @@ class ValuationDistributionAnalyzer:
 
         merged_df = pd.merge(work_df, identity_df, on=VALUATION_TS_CODE_COLUMN, how="left")
 
-        # 合并失败的证券以自身代码作为名称兜底，保证报告里不会出现空名称
+        # 合并失败的证券以自身代码作为名称兜底，保证报告里不会出现空名称。
+        # securities_df 缺 name 列时 identity_df 里没有该列，合并结果自然也没有，
+        # 先补一列再兜底，否则下面的按名取值会直接 KeyError。
+        if VALUATION_NAME_COLUMN not in merged_df.columns:
+            merged_df[VALUATION_NAME_COLUMN] = merged_df[VALUATION_TS_CODE_COLUMN]
         missing_name = merged_df[VALUATION_NAME_COLUMN].isna()
         merged_df.loc[missing_name, VALUATION_NAME_COLUMN] = merged_df.loc[
             missing_name, VALUATION_TS_CODE_COLUMN

@@ -1,5 +1,5 @@
 {% extends "_layout.html" %}
-{% set active_page = "fund_analysis" %}
+{% set active_page = nav_page | default("fund_analysis") %}
 
 {% block page_title %}基金调仓分析{% endblock %}
 
@@ -444,7 +444,7 @@
       <div class="fa-overview-card">
         <div class="fa-overview-label">分析基准日</div>
         <div class="fa-overview-value" id="ov-date">-</div>
-        <div class="fa-overview-sub">回看 {{ window_days }} 交易日</div>
+        <div class="fa-overview-sub">回看 <span data-window-days>60</span> 交易日</div>
       </div>
       <div class="fa-overview-card">
         <div class="fa-overview-label">拟合优度 (R²)</div>
@@ -471,7 +471,7 @@
     <!-- 暴露度时序图 -->
     <section class="fa-chart-section" id="chart-section" style="display:none">
       <div class="fa-chart-header">
-        <div class="fa-chart-title">行业暴露度时序 (近 {{ window_days }} 交易日)</div>
+        <div class="fa-chart-title">行业暴露度时序 (近 <span data-window-days>60</span> 交易日)</div>
         <div class="fa-chart-tabs">
           <button class="fa-chart-tab active" data-tab="area">面积图</button>
           <button class="fa-chart-tab" data-tab="line">折线图</button>

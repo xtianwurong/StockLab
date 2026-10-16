@@ -50,21 +50,14 @@
   /**
    * 创建元素（统一走 textContent，杜绝 HTML 注入）
    *
+   * 复用 common.js 的 SL.el —— 全站唯一实现（此前 common/ui/app 各有一份）。
+   *
    * @param {string} tag 标签名
    * @param {string} className 类名，可省略
    * @param {string} text 文本，可省略
    * @returns {HTMLElement} 元素
    */
-  function el(tag, className, text) {
-    var node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== undefined && text !== null) {
-      node.textContent = text;
-    }
-    return node;
-  }
+  var el = SL.el;
 
   /**
    * 惰性获取（或创建）全局挂载容器
@@ -547,6 +540,11 @@
     var anchors = findAll("[data-tip]", scope);
     for (var i = 0; i < anchors.length; i++) {
       (function (anchor) {
+        // 幂等：全局初始化已绑一次，页面脚本又调一次不会重复弹两层
+        if (anchor.getAttribute("data-tip-bound") === "1") {
+          return;
+        }
+        anchor.setAttribute("data-tip-bound", "1");
         var text = anchor.getAttribute("data-tip");
         anchor.addEventListener("mouseenter", function () {
           showTooltip(anchor, text);
@@ -898,6 +896,47 @@
   }
 
   /**
+   * 渲染证券联想面板（顶栏 / 多股对比 / 组合监控共用同一套 DOM 结构）
+   *
+   * 【为何集中到一处】
+   *   此前顶栏、多股对比、组合监控各自抄了一遍「空态 + 逐条构建行 + 打开面板」，
+   *   三份的 class 名与转义口径必须永远一致，复制粘贴迟早漂移。这里做成唯一实现。
+   *
+   * @param {HTMLElement} panel 联想容器（class 含 suggest）
+   * @param {Array<object>} items 后端返回的 items（{code, name, market}）
+   * @param {Function} onPick 点击某一条时的回调，接收该 item
+   * @param {object} [opts] 可选项
+   *   showMarket {boolean} 是否展示交易所后缀，默认 true
+   *   emptyText  {string}  空态文案，默认「没有匹配的证券」
+   * @returns {void}
+   */
+  function renderSuggest(panel, items, onPick, opts) {
+    var options = opts || {};
+    var showMarket = options.showMarket !== false;
+
+    panel.textContent = "";
+    if (!items || !items.length) {
+      panel.appendChild(el("div", "suggest-empty", options.emptyText || "没有匹配的证券"));
+      panel.className = "suggest open";
+      return;
+    }
+
+    items.forEach(function (item) {
+      var row = el("div", "suggest-item");
+      row.appendChild(el("span", "suggest-code", item.code));
+      row.appendChild(el("span", "suggest-name", item.name));
+      if (showMarket && item.market) {
+        row.appendChild(el("span", "suggest-market", item.market));
+      }
+      row.addEventListener("click", function () {
+        onPick(item);
+      });
+      panel.appendChild(row);
+    });
+    panel.className = "suggest open";
+  }
+
+  /**
    * 顶栏全局证券搜索：联想 + 回车直达个股页
    *
    * 【为何放在顶栏】
@@ -928,26 +967,9 @@
       }
       SL.fetchJson("/api/securities?q=" + encodeURIComponent(query), 8000)
         .then(function (data) {
-          var items = data.items || [];
-          suggest.textContent = "";
-          if (!items.length) {
-            suggest.appendChild(el("div", "suggest-empty", "没有匹配的证券"));
-            suggest.className = "suggest open";
-            return;
-          }
-          items.forEach(function (item) {
-            var row = el("div", "suggest-item");
-            row.appendChild(el("span", "suggest-code", item.code));
-            row.appendChild(el("span", "suggest-name", item.name));
-            if (item.market) {
-              row.appendChild(el("span", "suggest-market", item.market));
-            }
-            row.addEventListener("click", function () {
-              window.location.href = "/?code=" + encodeURIComponent(item.code);
-            });
-            suggest.appendChild(row);
+          renderSuggest(suggest, data.items || [], function (item) {
+            window.location.href = "/?code=" + encodeURIComponent(item.code);
           });
-          suggest.className = "suggest open";
         })
         .catch(function () {
           suggest.className = "suggest";
@@ -1006,6 +1028,7 @@
     find: find,
     findAll: findAll,
     el: el,
+    renderSuggest: renderSuggest,
     debounce: debounce,
     sleep: sleep,
     toast: toast,
@@ -1034,13 +1057,17 @@
   window.SL = SL;
 
   // 外壳与顶栏属于布局层能力，所有页面自动装配
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () {
-      initShell();
-      initGlobalSearch();
-    });
-  } else {
+  function bootstrapShell() {
     initShell();
     initGlobalSearch();
+    // 静态 [data-tip]（说明性文字）全站统一绑定，避免各页脚本各自为政：
+    // 此前只有 3 个页面调用过 bindTooltips，其余页面的提示形同虚设。
+    bindTooltips(document);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootstrapShell);
+  } else {
+    bootstrapShell();
   }
 })();

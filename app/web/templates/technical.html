@@ -1,0 +1,166 @@
+{% extends "_layout.html" %}
+{% set active_page = nav_page | default("technical") %}
+
+{% block page_title %}技术面与风险{% endblock %}
+
+{% block page_css %}
+<style>
+  /* ---------- 筛选条 ---------- */
+  .tech-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--rhythm-3);
+  }
+  .tech-form .field { min-width: 140px; }
+  .tech-form .field-code { min-width: 200px; }
+
+  /* ---------- 图表 ---------- */
+  #price-chart { width: 100%; height: 420px; }
+  #rsi-chart { width: 100%; height: 220px; }
+  #dd-chart { width: 100%; height: 200px; }
+
+  /* ---------- 指标表 ---------- */
+  .tech-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--rhythm-3);
+  }
+  .tech-metric {
+    padding: var(--rhythm-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    background: var(--bg-subtle);
+  }
+  .tech-metric-k { font-size: var(--font-xs); color: var(--text-faint); }
+  .tech-metric-v {
+    margin-top: 2px;
+    font-family: var(--font-mono);
+    font-size: var(--font-xl);
+    font-weight: 680;
+    letter-spacing: -0.01em;
+  }
+  .tech-metric-v.pos { color: var(--rise); }
+  .tech-metric-v.neg { color: var(--fall); }
+  /* stat-v 是全局统计卡样式，tech 页的 JS 会按正负给它加 pos/neg；
+     没有这两条规则时 signClass() 的着色在统计卡上静默失效（指标格却有颜色）。 */
+  .stat-v.pos { color: var(--rise); }
+  .stat-v.neg { color: var(--fall); }
+
+  @media (max-width: 900px) {
+    #price-chart { height: 320px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="page-head-main">
+    <div class="page-title">技术面与风险</div>
+    <div class="page-desc">
+      在日 K 收盘价上计算均线、<span class="term" data-tip="相对强弱指标：过去 N 日上涨力度占涨跌总力度之比，取值 0~100。>70 常视为超买，<30 常视为超卖。">RSI</span>、
+      MACD，以及年化收益/波动、<span class="term" data-tip="夏普比率＝(年化收益 − 无风险利率) ÷ 年化波动，衡量每承担一单位波动获得的超额回报。">夏普</span>、
+      最大回撤与相对基准的 Beta。全部指标只用到当日及之前的数据，无未来函数。
+    </div>
+  </div>
+</div>
+
+<!-- 筛选 -->
+<section class="card section">
+  <div class="card-pad">
+    <div class="tech-form">
+      <div class="field field-code">
+        <label class="field-label" for="tech-code">证券代码 / 名称</label>
+        <input class="input" id="tech-code" type="text" autocomplete="off" placeholder="如 600519.SH 或 贵州茅台">
+      </div>
+      <div class="field">
+        <label class="field-label" for="tech-start">起始日期</label>
+        <input class="input" id="tech-start" type="date">
+      </div>
+      <div class="field">
+        <label class="field-label" for="tech-end">结束日期</label>
+        <input class="input" id="tech-end" type="date">
+      </div>
+      <div class="field">
+        <label class="field-label" for="tech-benchmark">基准（可选）</label>
+        <input class="input" id="tech-benchmark" type="text" autocomplete="off" placeholder="如 000300.SH">
+      </div>
+      <button class="btn btn-primary" id="btn-analyze" type="button">分析</button>
+    </div>
+    <div class="field-hint" style="margin-top:var(--space-2)">
+      基准留空则只算绝对风险；填基准后额外给出 Beta / 年化 Alpha（需本地已有该基准行情）。
+    </div>
+  </div>
+</section>
+
+<div class="message" id="message"></div>
+
+<!-- 概览 -->
+<section class="stat-grid section hidden" id="stat-grid">
+  <div class="stat-card"><span class="stat-k">最新收盘</span><span class="stat-v" id="stat-close">-</span></div>
+  <div class="stat-card"><span class="stat-k">区间年化收益</span><span class="stat-v" id="stat-return">-</span></div>
+  <div class="stat-card"><span class="stat-k">年化波动</span><span class="stat-v" id="stat-vol">-</span></div>
+  <div class="stat-card"><span class="stat-k">夏普比率</span><span class="stat-v" id="stat-sharpe">-</span></div>
+  <div class="stat-card"><span class="stat-k">最大回撤</span><span class="stat-v" id="stat-dd">-</span></div>
+  <div class="stat-card"><span class="stat-k">RSI(14)</span><span class="stat-v" id="stat-rsi">-</span></div>
+</section>
+
+<!-- 价格与均线 -->
+<section class="card section hidden" id="price-card">
+  <div class="card-head">
+    <div>
+      <div class="card-title" id="price-title">价格与均线</div>
+      <div class="card-hint" id="price-hint">-</div>
+    </div>
+  </div>
+  <div class="card-pad"><div id="price-chart"></div></div>
+</section>
+
+<div class="split-even">
+  <!-- 风险指标 -->
+  <section class="card section hidden" id="risk-card">
+    <div class="card-head">
+      <div class="card-title">风险指标</div>
+      <div class="card-hint">无风险利率按 2% 年化折算</div>
+    </div>
+    <div class="card-pad">
+      <div class="tech-metrics" id="risk-metrics"></div>
+    </div>
+  </section>
+
+  <!-- 动量 -->
+  <section class="card section hidden" id="momentum-card">
+    <div class="card-head">
+      <div class="card-title">区间动量</div>
+      <div class="card-hint">各回看窗口的累计收益</div>
+    </div>
+    <div class="card-pad">
+      <div class="tech-metrics" id="momentum-metrics"></div>
+    </div>
+  </section>
+</div>
+
+<!-- RSI -->
+<section class="card section hidden" id="rsi-card">
+  <div class="card-head">
+    <div class="card-title">相对强弱 RSI(14)</div>
+    <div class="card-hint">虚线为 30 / 70 参考线</div>
+  </div>
+  <div class="card-pad"><div id="rsi-chart"></div></div>
+</section>
+
+<!-- 回撤 -->
+<section class="card section hidden" id="dd-card">
+  <div class="card-head">
+    <div>
+      <div class="card-title">回撤曲线</div>
+      <div class="card-hint" id="dd-hint">-</div>
+    </div>
+  </div>
+  <div class="card-pad"><div id="dd-chart"></div></div>
+</section>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="/static/technical.js"></script>
+{% endblock %}

@@ -67,6 +67,7 @@ SLIPPAGE_MODEL = "sqrt"    # 滑点模型：linear / sqrt / power
 MAX_TURNOVER = 0.5         # 单期最大换仓率（防异常）
 CONFIDENCE_CALIBRATION_WINDOW = 252  # 置信度校准回看窗口（交易日）
 MULTI_WINDOW_DAYS = [20, 60, 120]    # 多窗口一致性检查（交易日）
+SIGNAL_DIRECTION_STEP_DAYS = 5       # 多窗口方向校验的前后期间隔（自然日），与 rolling_decompose 的步长一致
 CASH_POSITION_SOURCE = "holding"     # 现金仓位来源：holding / nav / fixed
 
 
@@ -283,6 +284,10 @@ class FundStyleDecomposer:
                 if c in df.columns:
                     ret_col = c
                     break
+            if ret_col is None:
+                # 三个候选列都不在：跳过该因子，而不是 df[None] 抛 KeyError
+                _logger.warning("因子收益表 [%s] 缺少收益列（return/factor_return/close），跳过", name)
+                continue
             if ret_col == "close":
                 df["factor_return"] = df["close"].pct_change()
             elif ret_col != "factor_return":
@@ -402,33 +407,45 @@ class FundStyleDecomposer:
         factor_names = []
         X_factors = []
         if self.factor_returns:
-            # 统一转换为 Timestamp 以便比较（fund_ret.index 是 Timestamp）
             fund_ret_ts = fund_ret.index
             for fname in self.factor_returns:
-                if fname in self.factor_returns:
-                    f_ret = self.factor_returns[fname].set_index("trade_date")["factor_return"]
-                    # 将 factor 的 trade_date (date) 转为 Timestamp 以便与 fund_ret 对齐
-                    f_ret.index = pd.to_datetime(f_ret.index)
-                    common = fund_ret_ts.intersection(f_ret.index)
-                    if len(common) >= MIN_ALIGNMENT_OBSERVATIONS:
-                        f_aligned = f_ret.loc[common].tail(window_days)
-                        if len(f_aligned) >= MIN_ALIGNMENT_OBSERVATIONS:
-                            factor_names.append(fname)
-                            X_factors.append(f_aligned.values)
+                f_ret = self.factor_returns[fname].set_index("trade_date")["factor_return"]
+                # 将 factor 的 trade_date (date) 转为 Timestamp 以便与 fund_ret 对齐
+                f_ret.index = pd.to_datetime(f_ret.index)
+                # reindex 到行业矩阵的日期：缺失处记 NaN，随后连同整行一并剔除。
+                # 不做 reindex 会因行数不等在 column_stack 处报 ValueError，
+                # 或行数恰好相等而行序不同时逐行错位——后者更隐蔽，会静默污染回归。
+                f_aligned = f_ret.reindex(fund_ret_ts)
+                if f_aligned.notna().sum() >= MIN_ALIGNMENT_OBSERVATIONS:
+                    factor_names.append(fname)
+                    X_factors.append(f_aligned)
 
-        # 合并行业 + 因子矩阵
         if X_factors:
-            X = np.column_stack([X_industry] + X_factors)
-            feature_names = list(sector_ret.columns) + factor_names
-            n_features = X.shape[1]
-            n_industry = n_sectors
-        else:
+            factor_frame = pd.concat(X_factors, axis=1)
+            factor_frame.columns = factor_names
+            complete = factor_frame.notna().all(axis=1)
+            factor_frame = factor_frame[complete]
+            if len(factor_frame) >= MIN_ALIGNMENT_OBSERVATIONS:
+                # 行业矩阵同步收缩到因子完整的日期，保证两侧严格同索引
+                fund_ret = fund_ret.loc[factor_frame.index]
+                sector_ret = sector_ret.loc[factor_frame.index]
+                y = fund_ret["fund_return"].values
+                X_industry = sector_ret.values
+                n_sectors = X_industry.shape[1]
+                X = np.column_stack([X_industry, factor_frame.values])
+                feature_names = list(sector_ret.columns) + factor_names
+            else:
+                # 因子可用样本不足：退回纯行业分解，而不是带着 NaN 硬算
+                factor_names = []
+                X_factors = []
+
+        if not X_factors:
+            y = fund_ret["fund_return"].values
+            X_industry = sector_ret.values
+            n_sectors = X_industry.shape[1]
             X = X_industry
             feature_names = list(sector_ret.columns)
-            n_industry = n_sectors
-            n_features = n_sectors
 
-        y = fund_ret["fund_return"].values
         n_features = X.shape[1]
 
         # 数值闸门
@@ -469,7 +486,7 @@ class FundStyleDecomposer:
             options={"maxiter": 1000, "ftol": 1e-9}
         )
 
-        if not result.success or not np.isfinite(result.fun)                 or not np.isfinite(result.x).all():
+        if not result.success or not np.isfinite(result.fun) or not np.isfinite(result.x).all():
             _logger.warning(
                 "基金 [%s] 于 %s 分解优化失败，跳过该时点: %s",
                 fund_code, end_date, result.message,
@@ -716,7 +733,7 @@ class FundStyleDecomposer:
                 transaction_cost_bps=float(signal_cost_bps),
                 net_exposure_change=float(net_exposure_change),
                 turnover_ratio=float(signal_turnover),
-                calibrated_confidence=calibrated if 'calibrated' in locals() else None,
+                calibrated_confidence=None,
             ))
 
         # 按信号强度排序
@@ -749,21 +766,37 @@ class FundStyleDecomposer:
     ) -> Dict[str, int]:
         """
         获取指定窗口下各行业的信号方向（1=加仓, -1=减仓, 0=中性/无信号）
+
+        【为什么取「变化量」而不是「暴露度水平」】
+          行业暴露度经 decompose_single 约束在 [0, 1]，恒 >= 0。若按水平取符号
+          （exp > 0 → 1），返回值永远只有 0/1、永远得不到 -1；下游拿它和
+          减仓信号的 -1 比对，一致性恒为 0，于是**所有减仓信号**都会被降级成
+          中性。方向必须来自前后两期的暴露度之差，与主窗口的 exposure_change 同义。
         """
+        sector_codes = sector_codes or list(self.sector_returns.keys())
         try:
-            # 使用 decompose_single 直接计算，避免递归调用 generate_signals
-            sector_codes = sector_codes or list(self.sector_returns.keys())
-            result = self.decompose_single(fund_code, analysis_date, window_days, sector_codes)
-            if result.n_sectors == 0:
+            current = self.decompose_single(
+                fund_code, analysis_date, window_days, sector_codes
+            )
+            if current.n_sectors == 0:
                 return {}
-            
-            # 这里简化：只返回当前期的暴露度方向
-            # 实际应该计算相对上一期的变化，但这里为了避免递归，简化处理
+            previous = self.decompose_single(
+                fund_code,
+                analysis_date - timedelta(days=SIGNAL_DIRECTION_STEP_DAYS),
+                window_days,
+                sector_codes,
+            )
+            if previous.n_sectors == 0:
+                return {}
             directions = {}
-            for code, exp in result.exposures.items():
-                directions[code] = 1 if exp > 0 else 0
+            for code, exposure in current.exposures.items():
+                if code not in previous.exposures:
+                    continue
+                delta = exposure - previous.exposures[code]
+                directions[code] = 1 if delta > 0 else (-1 if delta < 0 else 0)
             return directions
-        except Exception:
+        except Exception as error:
+            _logger.warning("窗口 %d 暴露度变化方向计算失败，跳过：%s", window_days, error)
             return {}
 
     def _apply_multi_window_consistency(
@@ -808,7 +841,9 @@ class FundStyleDecomposer:
         for s in signals:
             if s.sector_code in window_directions:
                 directions = window_directions[s.sector_code]
-                main_dir = 1 if s.exposure_change > 0 else -1
+                main_dir = 1 if s.exposure_change > 0 else (-1 if s.exposure_change < 0 else 0)
+                if main_dir == 0:
+                    continue
                 consistent = sum(1 for d in directions if d == main_dir)
                 total = len(directions)
                 if total > 0:

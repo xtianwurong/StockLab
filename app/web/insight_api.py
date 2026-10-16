@@ -177,7 +177,8 @@ def handle_insight_meta():
             "verification_summary": meta["summary"],
             "verification_hint": _VERIFICATION_HINT,
             "themes": [] if meta["themes"] is None else [
-                {"theme": row["theme"], "count": _as_int(row["quote_count"])}
+                {"value": row["theme"], "label": row["theme"],
+                 "count": _as_int(row["quote_count"])}
                 for row in meta["themes"].to_dict("records")
             ],
             "account_count": meta["counts"]["account"],

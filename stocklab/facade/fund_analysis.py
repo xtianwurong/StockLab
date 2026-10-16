@@ -86,11 +86,13 @@ class FundAnalysisFacade:
         """获取完整行业映射表"""
         return self._mapping_repo.find_all()
 
-    def get_fund_list(self, fund_type: str = None, status: str = "active") -> pd.DataFrame:
-        """获取基金列表"""
+    def get_fund_list(self, fund_type: str = None, keyword: str = None) -> pd.DataFrame:
+        """获取基金列表（keyword 优先做代码/名称模糊搜索，其次按类型，最后全量）"""
+        if keyword:
+            return self._fund_info_repo.search(keyword)
         if fund_type:
             return self._fund_info_repo.find_by_type(fund_type)
-        return self._fund_info_repo.find_by_code("")  # 空字符串返回全部
+        return self._fund_info_repo.find_all()
 
     def get_fund_info(self, fund_code: str) -> pd.DataFrame:
         return self._fund_info_repo.find_by_code(fund_code)

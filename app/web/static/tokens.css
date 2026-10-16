@@ -559,16 +559,16 @@ html.theme-switching *::after {
   --content-max: 1680px;
   --page-x: 28px;
 
-  /* 垂直韵律：区块间距统一走这几档，避免各页各写各的 */
-  --rhythm-1: 4px;
-  --rhythm-2: 8px;
-  --rhythm-3: 12px;
-  --rhythm-4: 16px;
-  --rhythm-5: 20px;
-  --rhythm-6: 24px;
-  --rhythm-8: 32px;
-  --rhythm-10: 40px;
-  --rhythm-12: 48px;
+  /* 垂直韵律：与 --space-* 同刻度，此处只做别名，避免两套数值各自漂移 */
+  --rhythm-1: var(--space-1);
+  --rhythm-2: var(--space-2);
+  --rhythm-3: var(--space-3);
+  --rhythm-4: var(--space-4);
+  --rhythm-5: var(--space-5);
+  --rhythm-6: var(--space-6);
+  --rhythm-8: var(--space-8);
+  --rhythm-10: var(--space-10);
+  --rhythm-12: var(--space-12);
 }
 
 /* ==========================================================================

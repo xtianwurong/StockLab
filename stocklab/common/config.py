@@ -142,8 +142,8 @@ def load_data_source_priority(config_path="config.ini"):
     读取取数优先级策略 (config.ini 的 [data_source] 段)
 
     【为什么单独成函数】
-       load_ini_config 的返回值签名已被 generate_sector_trend.py 等调用方按 4 元组解包，
-       不可改动；本函数独立读取，避免破坏既有接口。
+       load_ini_config 的返回值签名已被 app/dashboard/sector_trend.py 等调用方
+       按 4 元组解包，不可改动；本函数独立读取，避免破坏既有接口。
 
     Args:
         config_path (str, optional): 配置文件路径，默认 "config.ini"

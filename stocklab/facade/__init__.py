@@ -25,7 +25,7 @@ StockLab 统一数据取数门面层 (stocklab.facade)
    - 上层（dashboard / 入口脚本）应经由本层取数，不直接拼接两层。
 """
 
-from .benchmark_data import BenchmarkDataFacade
+from .benchmark_data import BENCHMARK_INDEX_CODES, BenchmarkDataFacade
 from .commodity_data import CommodityDataFacade
 from .fund_analysis import FundAnalysisFacade
 from .fund_attribution import FundAttributionEngine
@@ -43,4 +43,5 @@ __all__ = [
     "FundHoldingFacade",
     "BenchmarkDataFacade",
     "FundAttributionEngine",
+    "BENCHMARK_INDEX_CODES",
 ]

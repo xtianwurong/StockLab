@@ -28,7 +28,7 @@ import logging
 import duckdb
 
 from stocklab.domain import align_columns, DataContractError
-from stocklab.persistence.storage.duckdb import Database
+from stocklab.persistence.storage.duckdb import Database, register_dataframe
 
 _logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class BaseRepository:
         select_list = ", ".join(self._COLUMNS)
         conn = self._db.get_connection()
         tmp_table = f"_{self._TABLE_NAME.replace('.', '_')}_tmp"
-        conn.register(tmp_table, aligned)
+        register_dataframe(conn, tmp_table, aligned)
 
         try:
             conflict_str = ", ".join(conflict_columns)
@@ -174,7 +174,7 @@ class BaseRepository:
         conflict_str = ", ".join(conflict_columns)
         conn = self._db.get_connection()
         tmp_table = f"_{table_name.replace('.', '_')}_tmp"
-        conn.register(tmp_table, aligned)
+        register_dataframe(conn, tmp_table, aligned)
         try:
             conn.execute(
                 f"INSERT INTO {table_name} ({column_list}) "

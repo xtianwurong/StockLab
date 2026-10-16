@@ -190,6 +190,7 @@ def handle_market_ranking():
         return jsonify({
             "indicator": indicator,
             "indicator_label": _reporter.indicator_label(indicator),
+            "indicator_labels": _indicator_labels(),
             "summary": {"total": 0, "available": 0, "level_counts": {}, "histogram": []},
             "items": [],
             "total": 0,

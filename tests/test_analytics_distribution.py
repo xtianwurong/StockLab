@@ -324,6 +324,18 @@ def test_analyze_securities_without_ts_code(valuation_df):
     assert result.valid_pe_count == 4
 
 
+def test_analyze_securities_without_name_column(valuation_df):
+    """回归：证券表有 ts_code 但缺 name 列时，必须用代码兜底而不是 KeyError"""
+    securities = pd.DataFrame({
+        "ts_code": ["600519.SH", "000001.SZ"],
+        "market": ["SH", "SZ"],
+    })
+    result = ValuationDistributionAnalyzer().analyze(valuation_df, securities)
+    names = {entry.name for entry in result.lowest_pe_entries}
+    assert names, "应产出极值标的"
+    assert all(name for name in names), "缺列时名称必须回落到代码，不能为空"
+
+
 def test_analyze_drops_stale_identity_columns(valuation_df, securities_df):
     """估值表里若已带同名列，合并前必须先剔除，否则会出现 _x / _y 后缀"""
     frame = valuation_df.copy()

@@ -29,6 +29,7 @@ import pandas as pd
 
 from stocklab.analytics.fund_style import (
     FundStyleDecomposer,
+    DecompositionResult,
     decompose_fund_style,
     FundAllocationSignal,
     SignalStrength,
@@ -375,6 +376,85 @@ class TestFundStyleDecomposer:
 
         # R² 应该很低（随机数据无相关性）
         assert result["r_squared"] < 0.5
+
+
+class TestWindowSignalDirection:
+    """回归：多窗口方向必须取「前后两期暴露度之差」，不能按暴露度水平取符号
+
+    【背景】暴露度被约束在 [0, 1] 恒非负，若按水平取符号就永远得不到 -1，
+    下游与减仓信号（-1）比对恒不一致，会把所有减仓信号误降级为中性。
+    """
+
+    def _build_decomposer(self, setup_data):
+        return FundStyleDecomposer(
+            fund_nav_df=setup_data["fund_nav"],
+            sector_index_dfs=setup_data["sector_indices"],
+            capital_flow_df=setup_data["capital_flow"],
+            industry_mapping_df=setup_data["mapping"],
+        )
+
+    def test_direction_comes_from_exposure_change(self, setup_data):
+        """减仓行业的窗口方向必须是 -1（而非 0/1）"""
+        decomposer = self._build_decomposer(setup_data)
+        analysis_date = setup_data["fund_nav"]["nav_date"].iloc[-1]
+        add_code, cut_code = "801010.SI", "801020.SI"
+
+        def fake_decompose(fund_code, end_date, window_days, sector_codes=None):
+            if end_date == analysis_date:
+                exposures = {add_code: 0.5, cut_code: 0.2}
+            else:
+                exposures = {add_code: 0.4, cut_code: 0.4}
+            return DecompositionResult(
+                fund_code=fund_code,
+                trade_date=end_date,
+                window_days=window_days,
+                level=1,
+                exposures=exposures,
+                n_sectors=len(exposures),
+            )
+
+        decomposer.decompose_single = fake_decompose
+        directions = decomposer._get_window_signal_direction(
+            "000001.OF", analysis_date, 20, 1, [add_code, cut_code]
+        )
+
+        assert directions[add_code] == 1
+        assert directions[cut_code] == -1
+
+    def test_multi_window_downgrades_inconsistent_signal(self, setup_data):
+        """三个非主窗口方向与主窗口相反时，信号被降级为中性"""
+        decomposer = self._build_decomposer(setup_data)
+        analysis_date = setup_data["fund_nav"]["nav_date"].iloc[-1]
+        code = "801010.SI"
+
+        def fake_direction(fund_code, adate, window, level, sector_codes):
+            return {code: 1}  # 与主窗口的减仓方向（-1）全部相反
+
+        decomposer._get_window_signal_direction = fake_direction
+        signal = FundAllocationSignal(
+            fund_code="000001.OF",
+            sector_code=code,
+            sector_name="测试行业",
+            level=1,
+            current_exposure=0.2,
+            exposure_change=-0.05,
+            exposure_change_5d=-0.05,
+            exposure_change_20d=-0.05,
+            signal=SignalStrength.STRONG_DECREASE,
+            capital_flow_corr=None,
+            capital_flow_confirm=None,
+            confidence=ConfidenceLevel.HIGH,
+            r_squared=0.9,
+            analysis_date=analysis_date,
+            window_days=60,
+        )
+
+        result = decomposer._apply_multi_window_consistency(
+            "000001.OF", analysis_date, 60, 1, [code], [signal]
+        )
+
+        assert result[0].signal == SignalStrength.NEUTRAL
+        assert result[0].confidence == ConfidenceLevel.MEDIUM
 
 
 class TestFundAllocationSignal:

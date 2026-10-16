@@ -12,7 +12,7 @@
 | 仅同步日 K（增量） | `python app/scripts/sync_market_data.py prices --incremental` | 从本地最新交易日次日开始 |
 | 同步历史估值（耗时最长） | `python app/scripts/sync_market_data.py valuation-history --period 近五年` | 需先跑 securities |
 | 启动 Web 分析服务 | `python app/scripts/serve_web.py` | 默认 127.0.0.1:8000，只监听回环 |
-| 离线单测（默认） | `./venv/bin/python -m pytest` | `pytest.ini` 的 addopts 已含 `-m "not integration"`，无需手写；约 1061 用例 / 22s |
+| 离线单测（默认） | `./venv/bin/python -m pytest` | `pytest.ini` 的 addopts 已含 `-m "not integration"`，无需手写；约 1130 用例 / 22s |
 | 联网集成测试 | `./venv/bin/python -m pytest -m integration` | 4 个用例，打真实外部源；命令行 `-m` 覆盖 addopts |
 | 只跑单个测试文件 | `./venv/bin/python -m pytest tests/test_sync_cli.py -v` | 无需装包，conftest 已加 pythonpath |
 
@@ -135,7 +135,7 @@
 ```
 app/scripts/          入口脚本（参数解析 + 调用库，无业务逻辑）
 app/dashboard/        板块走势 HTML 生成
-app/web/              Flask 服务（9 页面：个股/全市场/指数/行业/商品/基金/筛选/对比/组合/理念）
+app/web/              Flask 服务（12 页面：个股/全市场/指数/行业/商品/基金调仓/基金持仓/技术面/理念/筛选/对比/组合）
 stocklab/
   common/             配置/HTTP/类型转换（无业务依赖）
   domain/             列契约 + 异常（叶子包，零依赖）
@@ -143,13 +143,13 @@ stocklab/
   datasource/         远端取数（AkShare/BaoStock/腾讯/新浪/通达信通道 + 基本面/生命周期/公告/商品/基金/洞察）
   persistence/        DuckDB 落库（migrations/ + repository/）
   facade/             统一取数入口（7 门面 + 1 归因引擎）
-  analytics/          纯统计变换（估值分位/分布/风格/归因/报告）
+  analytics/          纯统计变换（估值分位/分布/风格/归因/报告/技术风险）
   fundamental/        财务指标纯派生
   factor/             27 因子 + 预处理（纯计算，显式 register）
   screener/           结构化筛选（规则/分组/流水线，spec 往返一致）
   backtest/           回测引擎（T+1、先卖后买、成本三段、涨跌停/停牌推导）
   research/           研究编排（因子帧构建/快照管理，唯一「查库/落库」入口）
-tests/                990 用例，conftest 集中 fixture
+tests/                1130 用例，conftest 集中 fixture
 configs/              insight_sources.json / screen_value.json
 data/stocklab.duckdb  本地数据仓库（git 忽略 .wal）
 ```

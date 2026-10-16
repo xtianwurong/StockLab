@@ -99,9 +99,28 @@
         state.indicator = indicator;
         renderTabs();
         loadList();
+        // 详情已打开时，指标切换必须同步刷新详情，否则卡片仍是旧指标的图与数值
+        if (state.selected) {
+          loadDetail(state.selected, indexName(state.selected));
+        }
       });
       indicatorTabs.appendChild(tab);
     });
+  }
+
+  /**
+   * 按指数代码取名称
+   *
+   * @param {string} code 指数代码
+   * @returns {string} 指数名称（找不到时回退为代码）
+   */
+  function indexName(code) {
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].index_code === code) {
+        return items[i].index_name;
+      }
+    }
+    return code;
   }
 
   /**
@@ -245,7 +264,8 @@
       return SL.buildTrendOption({
         history: data.history,
         indicatorMeta: meta,
-        primary: state.indicator
+        primary: state.indicator,
+        singleAxis: true
       });
     };
     detailChart = SL.renderChart(chartDom, rebuild(), rebuild);

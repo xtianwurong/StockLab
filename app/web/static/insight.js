@@ -353,6 +353,9 @@
       .finally(function () {
         state.busy = false;
         ui.setLoading(btnReload, false);
+        // busy 清零后重算分页按钮：否则 updatePager 在 busy=true 时跑，
+        // 会把「上一页/下一页」永远锁死
+        updatePager();
       });
   }
 
@@ -408,7 +411,12 @@
     showMessage("正在加载投资人观点库…", "info");
 
     loadMeta()
-      .then(loadQuotes)
+      .then(function () {
+        // 放行 loadQuotes（它自带 busy 守卫）：否则 busy 仍为 true，首屏与
+        // 「刷新」的言论请求会被直接 return 掉，永远加载不出来
+        state.busy = false;
+        return loadQuotes();
+      })
       .catch(function (error) {
         showMessage(error.message || "加载失败，请稍后重试", "error");
       })

@@ -5,8 +5,9 @@ StockLab - Web 层横切公共模块 (app.web.webcommon)
 ==============================================================================
 
 【模块职责】
-  只放**多个接口模块长得一模一样**的横切逻辑，四类：
+  只放**多个接口模块长得一模一样**的横切逻辑，五类：
     - json_num / json_text            DataFrame 单元格 -> JSON 安全值
+    - isoformat_dates                 应答里的 date/datetime -> ISO 串
     - StrictJSONProvider              整帧应答的 NaN/±inf -> null（最后闸门）
     - parse_int_arg / parse_paging    整数查询参数的格式与范围校验
     - looks_like_date                 严格 YYYY-MM-DD 校验
@@ -39,6 +40,7 @@ StockLab - Web 层横切公共模块 (app.web.webcommon)
 ==============================================================================
 """
 
+import datetime
 import math
 import re
 
@@ -50,6 +52,8 @@ from flask.json.provider import DefaultJSONProvider
 __all__ = [
     "json_num",
     "json_text",
+    "json_int",
+    "isoformat_dates",
     "StrictJSONProvider",
     "parse_int_arg",
     "parse_date_arg",
@@ -126,6 +130,64 @@ def json_text(value):
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def json_int(value, default=0):
+    """
+    把可能为 NaN/None 的计数转成 JSON 安全的整数
+
+    Args:
+        value: 单元格原始值（None / NaN / numpy 标量 / 数字字符串）
+        default (int): 缺失或非法时的回退值，默认 0
+
+    Returns:
+        int: 安全整数
+
+    Examples:
+        >>> json_int(float("nan"))
+        0
+        >>> json_int(None, -1)
+        -1
+        >>> json_int("42")
+        42
+    """
+    if value is None:
+        return default
+    if isinstance(value, float) and value != value:  # NaN
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def isoformat_dates(value):
+    """
+    把应答里的 date / datetime 递归转成 ISO 串（YYYY-MM-DD）
+
+    【为什么需要】
+      flask 默认 JSON provider 把 date / datetime 序列化成 RFC-822
+      （"Wed, 30 Sep 2026 00:00:00 GMT"），前端 formatDate 会把这串原样
+      打到界面上，图表的 x 轴与卡片也读不到干净日期。基金各页统一在
+      序列化边界上把日期字段转成 ISO 串。
+
+    Args:
+        value: 任意嵌套结构（dict / list / date / datetime / 其他）
+
+    Returns:
+        结构相同、日期已转成 ISO 串（缺失日期转 None）的新结构
+    """
+    if isinstance(value, datetime.datetime):
+        if value is pd.NaT or pd.isna(value):
+            return None
+        return value.date().isoformat()
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: isoformat_dates(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [isoformat_dates(item) for item in value]
+    return value
 
 
 class StrictJSONProvider(DefaultJSONProvider):

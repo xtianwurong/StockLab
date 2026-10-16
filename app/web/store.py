@@ -42,7 +42,7 @@ import threading
 import duckdb
 import pandas as pd
 
-from app.web.webcommon import json_num, json_text
+from app.web.webcommon import json_num, json_text, json_int
 from stocklab.facade import MarketDataFacade
 
 _logger = logging.getLogger("StockLab.Web.Store")
@@ -703,8 +703,8 @@ def load_industry_valuation(industry_level, stat_date=None):
         results.append({
             "industry_code": json_text(row.industry_code),
             "industry_name": json_text(row.industry_name),
-            "company_count": int(row.company_count or 0),
-            "priced_company_count": int(row.priced_company_count or 0),
+            "company_count": json_int(row.company_count),
+            "priced_company_count": json_int(row.priced_company_count),
             "pe_weighted": json_num(row.pe_weighted, 4),
             "pe_median": json_num(row.pe_median, 4),
             "pe_arithmetic": json_num(row.pe_arithmetic, 4),

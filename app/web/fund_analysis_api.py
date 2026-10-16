@@ -34,13 +34,14 @@ import pandas as pd
 from flask import jsonify, render_template, request
 
 from app.web import store
-from app.web.webcommon import parse_date_arg, parse_int_arg
+from app.web.webcommon import isoformat_dates, parse_date_arg, parse_int_arg
 from stocklab.facade import FundAnalysisFacade
 
 _logger = logging.getLogger("StockLab.Web.FundAnalysisApi")
 
 __all__ = [
     "handle_fund_analysis_page",
+    "handle_fund_holding_page",
     "handle_fund_list",
     "handle_fund_info",
     "handle_fund_nav",
@@ -58,21 +59,35 @@ _MAX_WINDOW_DAYS = 250
 _VALID_LEVELS = (1, 2)
 _DEFAULT_WINDOW_DAYS = 60
 _DEFAULT_LEVEL = 1
+# fund.fund_info.status 的全部取值（见 stocklab/datasource/fund.py 的写入口径）
+_VALID_FUND_STATUSES = ("active", "terminated")
 
 
 def handle_fund_analysis_page():
-    """GET /fund-analysis —— 页面"""
-    return render_template("fund_analysis.html")
+    """GET /fund-analysis —— 基金调仓分析页面"""
+    return render_template("fund_analysis.html", nav_page="fund_analysis")
+
+
+def handle_fund_holding_page():
+    """GET /fund-holding —— 基金持仓与行业暴露页面"""
+    return render_template("fund_holding.html", nav_page="fund_holding")
 
 
 def handle_fund_list():
-    """GET /api/fund/list?type=股票型 —— 基金列表"""
+    """GET /api/fund/list?type=混合型-偏股&q=华夏&status=active —— 基金列表（type 精确筛选 / q 代码或名称模糊搜索 / status 状态筛选）"""
     fund_type = request.args.get("type")
+    keyword = (request.args.get("q") or "").strip()
     status = request.args.get("status", "active")
+    # status 是等值过滤：非法值会静默筛成 0 条，用户看到的是「没有这只基金」
+    # 而不是「参数写错了」——必须显式拒绝。空串 = 不按状态过滤（含已清盘）。
+    if status and status not in _VALID_FUND_STATUSES:
+        return jsonify({
+            "error": "参数 [status] 非法，合法值: %s" % " / ".join(_VALID_FUND_STATUSES)
+        }), 400
 
     try:
         facade = _facade()
-        df = facade.get_fund_list(fund_type=fund_type)
+        df = facade.get_fund_list(fund_type=fund_type, keyword=keyword)
         if status:
             df = df[df["status"] == status] if "status" in df.columns else df
 
@@ -97,7 +112,7 @@ def handle_fund_info():
         if df.empty:
             return jsonify({"error": f"未找到基金: {code}"}), 404
 
-        return jsonify(df.to_dict(orient="records")[0])
+        return jsonify(isoformat_dates(df.to_dict(orient="records")[0]))
     except Exception:
         _logger.exception("基金信息查询失败 [%s]", code)
         return jsonify({"error": "基金信息加载失败，请稍后重试"}), 500
@@ -120,11 +135,11 @@ def handle_fund_nav():
     try:
         facade = _facade()
         df = facade.get_fund_nav(code, start, end)
-        return jsonify({
+        return jsonify(isoformat_dates({
             "code": code,
             "items": df.to_dict(orient="records") if not df.empty else [],
             "count": len(df),
-        })
+        }))
     except Exception:
         _logger.exception("基金净值查询失败 [%s]", code)
         return jsonify({"error": "基金净值加载失败，请稍后重试"}), 500
@@ -259,7 +274,13 @@ def handle_fund_allocation():
         if "error" in result:
             return jsonify(result), 400
 
-        return jsonify(result)
+        # 分解结果里没有基金名称，页首概览卡需要它来显示「代码 + 名称」，
+        # 这里从 fund_info 补一条（取不到就留空，不影响其余字段）
+        info = facade.get_fund_info(code)
+        if not info.empty and "fund_name" in info.columns:
+            result["fund_name"] = info.iloc[0]["fund_name"]
+
+        return jsonify(isoformat_dates(result))
     except Exception:
         _logger.exception("基金调仓分析失败 [%s]", code)
         return jsonify({"error": "调仓分析失败，请稍后重试"}), 500
@@ -290,13 +311,13 @@ def handle_allocation_history():
     try:
         facade = _facade()
         df = facade.get_allocation_history(code, analysis_date, window_days, level)
-        return jsonify({
+        return jsonify(isoformat_dates({
             "code": code,
             "date": analysis_date,
             "window_days": window_days,
             "level": level,
             "items": df.to_dict(orient="records") if not df.empty else [],
-        })
+        }))
     except Exception:
         _logger.exception("历史分析结果查询失败 [%s]", code)
         return jsonify({"error": "历史分析加载失败"}), 500

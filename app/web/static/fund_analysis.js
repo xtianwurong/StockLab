@@ -99,6 +99,111 @@
     return SL.escapeHtml(text);
   }
 
+  // 信号 / 置信度的中文字面量 -> CSS 类名后缀（模板里定义的是英文键）
+  var SIGNAL_CLASS = {
+    "大幅加仓": "signal-strong-increase",
+    "适度加仓": "signal-moderate-increase",
+    "轻微加仓": "signal-slight-increase",
+    "持仓稳定": "signal-neutral",
+    "轻微减仓": "signal-slight-decrease",
+    "适度减仓": "signal-moderate-decrease",
+    "大幅减仓": "signal-strong-decrease",
+    "STRONG_INCREASE": "signal-strong-increase",
+    "MODERATE_INCREASE": "signal-moderate-increase",
+    "SLIGHT_INCREASE": "signal-slight-increase",
+    "NEUTRAL": "signal-neutral",
+    "SLIGHT_DECREASE": "signal-slight-decrease",
+    "MODERATE_DECREASE": "signal-moderate-decrease",
+    "STRONG_DECREASE": "signal-strong-decrease"
+  };
+
+  var CONFIDENCE_CLASS = {
+    "高": "fa-confidence-high",
+    "中": "fa-confidence-medium",
+    "低": "fa-confidence-low",
+    "HIGH": "fa-confidence-high",
+    "MEDIUM": "fa-confidence-medium",
+    "LOW": "fa-confidence-low"
+  };
+
+  function signalClass(value) {
+    return SIGNAL_CLASS[value] || "signal-neutral";
+  }
+
+  function confidenceClass(value) {
+    return CONFIDENCE_CLASS[value] || "fa-confidence-low";
+  }
+
+  /**
+   * 按当前图表 tab 调整 series 形态（面积 / 折线 / 堆叠）
+   *
+   * @param {object} option ECharts option
+   * @returns {object} 调整后的 option
+   */
+  function applyChartTab(option) {
+    if (!option || !option.series) {
+      return option;
+    }
+    var tab = state.activeChartTab;
+    option.series.forEach(function (s) {
+      if (tab === "stacked") {
+        s.stack = "total";
+        s.areaStyle = { opacity: 0.85 };
+        s.lineStyle = { width: 1 };
+      } else if (tab === "line") {
+        delete s.stack;
+        delete s.areaStyle;
+        s.lineStyle = { width: 1.8 };
+      } else {
+        delete s.stack;
+        s.areaStyle = { opacity: 0.18 };
+        s.lineStyle = { width: 1.6 };
+      }
+    });
+    return option;
+  }
+
+  /**
+   * 按「显示现金仓位」开关显隐现金卡片
+   *
+   * @returns {void}
+   */
+  function applyCashVisibility() {
+    var card = ovCash.parentElement;
+    if (card) {
+      card.style.display = state.showCash ? "" : "none";
+    }
+  }
+
+  /**
+   * 按「启用资金流佐证」开关显隐资金流两列（相关性 + 佐证）
+   *
+   * @returns {void}
+   */
+  function applyCapitalFlowVisibility() {
+    var table = signalsBody.closest("table");
+    if (!table) {
+      return;
+    }
+    var show = state.useCapitalFlow;
+    var indexes = [6, 7];
+    var heads = table.querySelectorAll("thead th");
+    indexes.forEach(function (i) {
+      if (heads[i]) {
+        heads[i].style.display = show ? "" : "none";
+      }
+    });
+    var rows = signalsBody.querySelectorAll("tr");
+    for (var r = 0; r < rows.length; r++) {
+      var cells = rows[r].querySelectorAll("td");
+      indexes.forEach(function (i) {
+        if (cells[i]) {
+          cells[i].style.display = show ? "" : "none";
+        }
+      });
+    }
+  }
+
   function setLoading(isLoading) {
     busy = isLoading;
     btnAnalyze.disabled = isLoading;
@@ -128,7 +233,9 @@
     }
     clearTimeout(suggestTimer);
     suggestTimer = setTimeout(function () {
-      SL.fetchJson("/api/fund/list?type=" + encodeURIComponent(query), 8000)
+      // q= 是代码/名称模糊搜索；此前传 type= 会被后端当成「基金类型精确匹配」，
+      // 用代码或名称搜索永远返回 0 条。
+      SL.fetchJson("/api/fund/list?q=" + encodeURIComponent(query), 8000)
         .then(function (data) {
           var items = data.items || [];
           fundSuggestList.innerHTML = "";
@@ -214,8 +321,13 @@
         }
       })
       .catch(function (err) {
-        showMessage(err.message || "基金信息查询失败", "error");
-        fundNameDisplay.value = "查询失败";
+        if (err && err.status === 404) {
+          fundNameDisplay.value = "未找到";
+          showMessage(err.message || ("未找到该基金: " + code), "error");
+        } else {
+          fundNameDisplay.value = "查询失败";
+          showMessage(err.message || "基金信息查询失败", "error");
+        }
       });
   }
 
@@ -278,6 +390,8 @@
     state.useCapitalFlow = useCapitalFlowInput.checked;
     state.showCash = showCashInput.checked;
 
+    syncWindowLabels();
+
     // 更新 URL
     updateUrl();
 
@@ -317,11 +431,12 @@
     state.analysisResult = data;
 
     // 概览卡片
-    ovFundName.textContent = data.fund_code + " " + (data.fund_name || "");
+    ovFundName.textContent = data.fund_code + " " + (data.fund_name || state.fundName || "");
     ovFundCode.textContent = data.fund_code;
     ovDate.textContent = formatDate(data.analysis_date);
     ovR2.textContent = formatPercent(data.r_squared, 4);
     ovCash.textContent = formatPercent(data.cash_exposure, 2);
+    applyCashVisibility();
 
     var signals = data.signals || [];
     var incCount = signals.filter(function (s) { return s.exposure_change > 0.005; }).length;
@@ -402,12 +517,12 @@
     var historyData = { dates: dates, series: series };
 
     var rebuild = function () {
-      return SL.buildTrendOption({
+      return applyChartTab(SL.buildTrendOption({
         history: historyData,
         indicatorMeta: {},
         primary: Object.keys(series)[0] || "",
         singleAxis: true,
-      });
+      }));
     };
 
     if (state.exposureChart) {
@@ -429,6 +544,7 @@
       td.textContent = "无显著调仓信号（所有行业环比变化 < 0.5%）";
       tr.appendChild(td);
       signalsBody.appendChild(tr);
+      applyCapitalFlowVisibility();
       return;
     }
 
@@ -467,7 +583,7 @@
       // 信号
       var tdSignal = document.createElement("td");
       var badge = document.createElement("span");
-      badge.className = "signal-badge signal-" + s.signal.toLowerCase().replace(/ /g, "-");
+      badge.className = "signal-badge " + signalClass(s.signal);
       badge.textContent = s.signal;
       tdSignal.appendChild(badge);
       tr.appendChild(tdSignal);
@@ -493,13 +609,15 @@
       // 置信度
       var tdConf = document.createElement("td");
       var badgeConf = document.createElement("span");
-      badgeConf.className = "fa-confidence-badge fa-confidence-" + s.confidence.toLowerCase();
+      badgeConf.className = "fa-confidence-badge " + confidenceClass(s.confidence);
       badgeConf.textContent = s.confidence;
       tdConf.appendChild(badgeConf);
       tr.appendChild(tdConf);
 
       signalsBody.appendChild(tr);
     });
+
+    applyCapitalFlowVisibility();
   }
 
   function renderHoldings(currentExposures, history) {
@@ -556,6 +674,19 @@
   }
 
   // ---------- URL 状态同步 ----------
+  /**
+   * 把当前回看窗口同步到页面上的占位符（概览卡 / 图表标题）
+   *
+   * 这些位置原先由模板变量渲染，但页面处理器不传上下文，实际渲染为空；
+   * 且窗口可被用户改动，静态值本就会过期。统一由 JS 在窗口变化时回填。
+   */
+  function syncWindowLabels() {
+    var nodes = document.querySelectorAll("[data-window-days]");
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].textContent = String(state.windowDays);
+    }
+  }
+
   function updateUrl() {
     var params = new URLSearchParams();
     if (state.fundCode) params.set("code", state.fundCode);
@@ -590,6 +721,7 @@
       industryLevelInput.value = level;
       state.level = parseInt(level, 10);
     }
+    syncWindowLabels();
 
     // 如果 URL 里有完整参数，自动分析
     if (code && date) {
@@ -598,6 +730,16 @@
   }
 
   // ---------- 事件绑定 ----------
+  useCapitalFlowInput.addEventListener("change", function () {
+    state.useCapitalFlow = this.checked;
+    applyCapitalFlowVisibility();
+  });
+
+  showCashInput.addEventListener("change", function () {
+    state.showCash = this.checked;
+    applyCashVisibility();
+  });
+
   btnAnalyze.addEventListener("click", function () {
     if (!busy) analyze();
   });

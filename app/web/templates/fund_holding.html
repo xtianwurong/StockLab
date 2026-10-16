@@ -1,0 +1,219 @@
+{% extends "fund_analysis.html" %}
+{#
+  基金持仓与行业暴露页 (app/web/templates/fund_holding.html)
+
+  继承 fund_analysis.html 只为**复用那一整套 fa-* 样式**（两张表、概览卡、
+  暴露度卡片、图表壳、空态/加载态）。页面正文与脚本全部被下面的 block 覆盖，
+  两个页面在 DOM 上没有任何重叠的 id，互不影响。
+
+  之所以另起模板而不是在原页加 tab：侧栏「基金调仓 / 基金持仓」是两个独立
+  入口，各自要一套不同的参数（持仓页要报告期与回看区间，调仓页要基准日与
+  窗口），塞进同一页只会把两套参数搅在一起。
+#}
+
+{% block page_title %}基金持仓与行业暴露{% endblock %}
+
+{% block page_css %}
+{{ super() }}
+<style>
+  #fh-exposure-chart {
+    width: 100%;
+    height: 380px;
+  }
+  .fh-rbsa-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rhythm-4);
+    padding: var(--rhythm-3) var(--rhythm-4);
+    border-bottom: 1px solid var(--border-color);
+    font-size: var(--font-sm);
+    color: var(--text-sub);
+  }
+  .fh-rbsa-summary b {
+    font-family: var(--font-mono);
+    color: var(--text-main);
+    font-weight: 700;
+    margin-left: var(--space-1);
+  }
+  .fh-hint {
+    font-size: var(--font-xs);
+    color: var(--text-faint);
+    margin-top: var(--space-1);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div class="page-head-main">
+    <div class="page-title">基金持仓与行业暴露</div>
+    <div class="page-desc">
+      读取基金定期报告披露的
+      <span class="term" data-tip="基金季报/半年报/年报披露的前十大重仓股及行业分布">前十大重仓股</span>，
+      汇总真实行业暴露，并与
+      <span class="term" data-tip="Returns-Based Style Analysis，由净值收益率反推的风格暴露">RBSA 反推暴露</span>
+      做双轨对比。结果仅供参考，不构成投资建议。
+    </div>
+  </div>
+</div>
+
+<div class="message section" id="fh-message"></div>
+
+<div class="fa-container">
+  <!-- 侧边栏 -->
+  <aside class="fa-sidebar" id="fh-sidebar">
+    <section class="fa-section">
+      <div class="fa-section-title">基金选择</div>
+      <div class="fa-field">
+        <label>基金代码</label>
+        <div class="field field-code">
+          <input class="input" id="fh-code" type="text" autocomplete="off"
+                 placeholder="代码，如 000001.OF">
+          <div class="suggest" id="fh-suggest"></div>
+        </div>
+      </div>
+      <div class="fa-field">
+        <label>基金名称</label>
+        <input class="input" id="fh-name" type="text" readonly placeholder="自动填充">
+      </div>
+    </section>
+
+    <section class="fa-section">
+      <div class="fa-section-title">查询参数</div>
+      <div class="fa-field">
+        <label>报告期</label>
+        <input class="input" id="fh-date" type="date">
+        <div class="fh-hint">留空则取最新一期披露</div>
+      </div>
+      <div class="fa-field">
+        <label>行业层级</label>
+        <select class="select" id="fh-level">
+          <option value="1">一级行业（31个）</option>
+          <option value="2">二级行业（100+）</option>
+        </select>
+      </div>
+      <div class="fa-field-row">
+        <div class="fa-field">
+          <label>时序起点</label>
+          <input class="input" id="fh-start" type="date">
+        </div>
+        <div class="fa-field">
+          <label>时序终点</label>
+          <input class="input" id="fh-end" type="date">
+        </div>
+      </div>
+      <div class="fh-hint">仅用于「行业暴露时序」图</div>
+    </section>
+
+    <div class="fa-btn-group">
+      <button class="btn btn-primary" id="fh-query" type="button">查询持仓</button>
+      <button class="btn btn-secondary" id="fh-refresh" type="button">刷新</button>
+    </div>
+  </aside>
+
+  <!-- 主区域 -->
+  <main class="fa-main" id="fh-main">
+    <!-- 概览卡片 -->
+    <section class="fa-overview" id="fh-overview" style="display:none">
+      <div class="fa-overview-card primary">
+        <div class="fa-overview-label">基金</div>
+        <div class="fa-overview-value" id="fh-ov-name" style="font-size:var(--font-lg)">-</div>
+        <div class="fa-overview-sub" id="fh-ov-code">-</div>
+      </div>
+      <div class="fa-overview-card">
+        <div class="fa-overview-label">报告期</div>
+        <div class="fa-overview-value" id="fh-ov-report" style="font-size:var(--font-lg)">-</div>
+        <div class="fa-overview-sub" id="fh-ov-report-type">-</div>
+      </div>
+      <div class="fa-overview-card">
+        <div class="fa-overview-label">重仓股数</div>
+        <div class="fa-overview-value" id="fh-ov-count">-</div>
+        <div class="fa-overview-sub">前十大合计</div>
+      </div>
+      <div class="fa-overview-card">
+        <div class="fa-overview-label">前十大权重</div>
+        <div class="fa-overview-value" id="fh-ov-top10">-</div>
+        <div class="fa-overview-sub">占基金净值比</div>
+      </div>
+      <div class="fa-overview-card warning">
+        <div class="fa-overview-label">第一大行业</div>
+        <div class="fa-overview-value" id="fh-ov-top-sector" style="font-size:var(--font-lg)">-</div>
+        <div class="fa-overview-sub" id="fh-ov-top-sector-weight">-</div>
+      </div>
+    </section>
+
+    <!-- 重仓股表 -->
+    <section class="fa-signals-section" id="fh-holdings-section" style="display:none">
+      <div class="fa-signals-header">重仓股明细（最新报告期）</div>
+      <div class="table-wrap">
+        <table class="fa-signals-table">
+          <thead>
+            <tr>
+              <th class="num">#</th>
+              <th>代码</th>
+              <th>名称</th>
+              <th class="num">权重</th>
+              <th class="num">持仓市值（万元）</th>
+            </tr>
+          </thead>
+          <tbody id="fh-holdings-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 行业暴露（报告期） -->
+    <section class="fa-signals-section" id="fh-exposure-section" style="display:none">
+      <div class="fa-signals-header">行业暴露（报告期，按权重降序）</div>
+      <div class="fa-holdings-grid" id="fh-exposure-list" style="padding:0 var(--rhythm-4) var(--rhythm-4)"></div>
+    </section>
+
+    <!-- 行业暴露时序图 -->
+    <section class="fa-chart-section" id="fh-chart-section" style="display:none">
+      <div class="fa-chart-header">
+        <div class="fa-chart-title">行业暴露时序（报告期间线性插值）</div>
+        <div class="fa-chart-tabs" id="fh-chart-tabs">
+          <button class="fa-chart-tab active" data-tab="area" type="button">面积图</button>
+          <button class="fa-chart-tab" data-tab="line" type="button">折线图</button>
+          <button class="fa-chart-tab" data-tab="stacked" type="button">堆叠图</button>
+        </div>
+      </div>
+      <div id="fh-exposure-chart"></div>
+    </section>
+
+    <!-- RBSA 双轨对比 -->
+    <section class="fa-signals-section" id="fh-rbsa-section" style="display:none">
+      <div class="fa-signals-header">RBSA 反推暴露 vs 持仓实测暴露</div>
+      <div class="fh-rbsa-summary" id="fh-rbsa-summary"></div>
+      <div class="table-wrap">
+        <table class="fa-signals-table">
+          <thead>
+            <tr>
+              <th>行业</th>
+              <th class="num">持仓实测</th>
+              <th class="num">RBSA 反推</th>
+              <th class="num">差异</th>
+            </tr>
+          </thead>
+          <tbody id="fh-rbsa-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 空态 -->
+    <div class="fa-empty" id="fh-empty">
+      <div class="fa-empty-title">请输入基金代码后查询</div>
+      <div>支持输入基金代码（如 000001.OF）或中文名称搜索</div>
+    </div>
+
+    <!-- 加载状态 -->
+    <div class="fa-loading hidden" id="fh-loading">
+      <div class="fa-spinner"></div>
+      <span>查询中，请稍候...</span>
+    </div>
+  </main>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="/static/fund_holding.js"></script>
+{% endblock %}

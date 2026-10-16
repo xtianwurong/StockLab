@@ -963,6 +963,93 @@ def test_market_context(client):
     print("  -> 页面要素齐备")
 
 
+# ---------------------------------------------------------------------------
+# 15. 选股器行业列：securities.industry 常为空，须用申万一级映射兜底
+# ---------------------------------------------------------------------------
+class TestScreenerIndustryFallback:
+    """真实库里 reference.securities.industry 常年为空（同步通道未提供「所属行业」），
+    结果表的「行业」列与「行业通过率」卡片会清一色「未分类」。这里钉住兜底：
+    空值用申万一级名称补齐，已有值不得被覆盖。"""
+
+    def test_blank_industry_filled_from_mapping(self, monkeypatch):
+        from app.web import screener_api
+
+        monkeypatch.setattr(
+            screener_api, "_industry_fallback_map",
+            lambda: {"000001.SZ": "银行", "600519.SH": "食品饮料"},
+        )
+        frame = pd.DataFrame({
+            "ts_code": ["000001.SZ", "600519.SH", "300750.SZ"],
+            "industry": ["", "银行", None],
+        })
+
+        screener_api._fill_industry_from_mapping(frame)
+
+        assert frame.loc[0, "industry"] == "银行", "空串应被映射补齐"
+        assert frame.loc[1, "industry"] == "银行", "已有值不得被覆盖"
+        assert pd.isna(frame.loc[2, "industry"]), "映射缺失时保持为空，不得编造"
+
+    def test_missing_industry_column_is_noop(self, monkeypatch):
+        from app.web import screener_api
+
+        monkeypatch.setattr(screener_api, "_industry_fallback_map", lambda: {"000001.SZ": "银行"})
+        frame = pd.DataFrame({"ts_code": ["000001.SZ"], "name": ["平安银行"]})
+
+        screener_api._fill_industry_from_mapping(frame)  # 不应抛错
+
+        assert "industry" not in frame.columns
+
+
+# ---------------------------------------------------------------------------
+# 16. 非法参数必须 400 —— 不得静默回退默认值、不得把内部异常串回给用户
+# ---------------------------------------------------------------------------
+class TestParamValidationNoSilentFallback:
+    """这几处曾把「非法参数」当成「没传参数」（静默换用默认窗口）或当成
+    等值过滤（静默筛成 0 条）。用户看到的是「没有数据」，而不是「参数写错了」
+    —— 与 AGENTS.md 的「垃圾值一律 400」直接相悖。"""
+
+    @pytest.mark.parametrize("query", [
+        "/api/technical?code=600519.SH&start_date=ZZZ",   # 曾静默换默认回看窗口
+        "/api/technical?code=600519.SH&end_date=ZZZ",
+        "/api/screener/meta?as_of=ZZZ",                   # 曾 200 并回 "Invalid isoformat"
+        "/api/fund/list?status=ZZZ",                      # 曾静默筛成 0 条
+    ])
+    def test_invalid_params_are_rejected(self, client, query):
+        response = client.get(query)
+
+        assert response.status_code == 400, "%s 应 400，实为 %s" % (query, response.status_code)
+        assert response.get_json().get("error"), query
+
+    def test_screener_run_rejects_invalid_as_of_without_leaking(self, client):
+        response = client.post("/api/screener/run", json={
+            "spec": {"rules": [{"factor": "pb", "operator": "notna"}]},
+            "as_of": "ZZZ",
+        })
+
+        assert response.status_code == 400
+        message = response.get_json().get("error", "")
+        assert "as_of" in message
+        assert "isoformat" not in message and "Invalid" not in message, \
+            "不得把 Python 异常串回给用户：%r" % message
+
+    def test_valid_status_still_works(self, client):
+        """合法 status 不能被这层校验误伤"""
+        response = client.get("/api/fund/list?status=active")
+
+        assert response.status_code == 200
+        assert "items" in response.get_json()
+
+    def test_factor_frame_error_text_has_no_exception_detail(self, ctx):
+        """帧构造失败时的文案只能是中文说明，不能带 str(exc)"""
+        from app.web import screener_api
+
+        frame, message = screener_api._factor_frame("ZZZ")
+
+        assert frame is None
+        assert message
+        assert "isoformat" not in message and "Invalid" not in message, message
+
+
 if __name__ == "__main__":
     # 保住旧的直接执行入口：委托给 pytest，退出码语义一致
     raise SystemExit(pytest.main([__file__, "-v"]))
