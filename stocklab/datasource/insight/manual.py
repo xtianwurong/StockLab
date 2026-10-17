@@ -110,7 +110,7 @@ class ManualInsightCollector(InsightCollector):
         if not os.path.exists(self._path):
             raise InsightCollectError(
                 "人工录入文件不存在: %s（模板见 %s）"
-                % (self._path, "data/insight_manual.example.json")
+                % (self._path, "configs/insight_manual.example.json")
             )
         try:
             with open(self._path, "r", encoding="utf-8") as handle:

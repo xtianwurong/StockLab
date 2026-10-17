@@ -93,7 +93,7 @@ def create_app(priority=None, db_path=None):
     创建并配置 Flask 应用
 
     Args:
-        priority (str, optional): 取数优先级，None 时由 facade 读 config.ini
+        priority (str, optional): 取数优先级，None 时由 facade 读 config.toml
         db_path (str, optional): 本地 DuckDB 路径，None 时用库层默认值
 
     Returns:

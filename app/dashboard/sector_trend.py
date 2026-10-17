@@ -10,7 +10,7 @@ StockLab - 板块走势对比与 Web 仪表板编排主类 (app.dashboard.sector
 
 import logging
 
-from stocklab.common.config import load_ini_config
+from stocklab.common.config import DEFAULT_CONFIG_PATH, load_config
 from stocklab.facade.market_data import MarketDataFacade
 from app.dashboard.page_generator import SectorWebPageGenerator
 
@@ -26,8 +26,8 @@ class SectorTrendVisualizer:
     板块走势对比与 Web 仪表板编排主类 (Facade)
     """
 
-    def __init__(self, num_months=None, config_path="config.ini"):
-        self.sectors, default_months, self.default_output, http_timeout = load_ini_config(config_path)
+    def __init__(self, num_months=None, config_path=DEFAULT_CONFIG_PATH):
+        self.sectors, default_months, self.default_output, http_timeout = load_config(config_path)
         self.num_months = num_months if num_months is not None else default_months
         self.facade = MarketDataFacade()
         self.generator = SectorWebPageGenerator()
@@ -37,7 +37,7 @@ class SectorTrendVisualizer:
         端到端执行：抓取数据 -> 通过模板渲染生成自包含交互式 HTML
 
         Args:
-            output_filename (str, optional): 输出 HTML 路径，未指定时默认使用 config.ini 配置
+            output_filename (str, optional): 输出 HTML 路径，未指定时默认使用 config.toml 配置
 
         Returns:
             str: 成功生成的 HTML 文件路径；失败返回空字符串

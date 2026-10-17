@@ -307,7 +307,7 @@
       <table>
         <thead>
           <tr>
-            <th>优先级（<code>config.ini</code> <code>[data_source] priority</code>）</th>
+            <th>优先级（<code>config.toml</code> <code>[data_source] priority</code>）</th>
             <th>行为</th>
             <th>适用场景</th>
           </tr>
@@ -329,7 +329,7 @@
       <h3>2.3 使用示例</h3>
       <pre><code>from stocklab.facade import MarketDataFacade
 
-with MarketDataFacade() as facade:          # 优先级取自 config.ini
+with MarketDataFacade() as facade:          # 优先级取自 config.toml
     print(facade.priority)                  # 'local_first' 或 'remote_first'
     df = facade.fetch_daily_prices("600519.SH", "2025-01-01", "2026-09-30")</code></pre>
 
@@ -370,7 +370,7 @@ with MarketDataFacade() as facade:          # 优先级取自 config.ini
       </table>
 
       <div class="callout callout-warn">
-        <strong>优先级取值来源与容错：</strong>显式构造参数 > <code>config.ini [data_source] priority</code> > 默认 <code>local_first</code>；配置文件缺失、段落缺失或取值非法时<strong>记 warning 并回退默认值</strong>，不会静默采用错误策略。合法取值由 <code>stocklab.common.config.DATA_SOURCE_PRIORITIES</code> 单点定义。
+        <strong>优先级取值来源与容错：</strong>显式构造参数 > <code>config.toml [data_source] priority</code> > 默认 <code>local_first</code>；配置文件缺失、段落缺失或取值非法时<strong>记 warning 并回退默认值</strong>，不会静默采用错误策略。合法取值由 <code>stocklab.common.config.DATA_SOURCE_PRIORITIES</code> 单点定义。
       </div>
 
       <div class="callout callout-error">

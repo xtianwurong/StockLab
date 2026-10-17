@@ -32,8 +32,8 @@
    - 上层（dashboard/web）**不直接拼接** datasource 与 persistence
 
 3. **配置只在入口读**
-   - `stocklab.common.config.load_ini_config()` 仅在脚本 `main()` 调用
-   - `persistence` 层**完全不依赖 common**，解析 config.ini 对它无意义
+   - `stocklab.common.config.load_config()` 仅在脚本 `main()` 调用
+   - `persistence` 层**完全不依赖 common**，解析 config.toml 对它无意义
 
 4. **DuckDB 单写连接**
    - `serve_web.py` 运行时独占 `data/stocklab.duckdb` 写连接
@@ -150,7 +150,7 @@ stocklab/
   backtest/           回测引擎（T+1、先卖后买、成本三段、涨跌停/停牌推导）
   research/           研究编排（因子帧构建/快照管理，唯一「查库/落库」入口）
 tests/                1134 用例，conftest 集中 fixture
-configs/              insight_sources.json / screen_value.json
+configs/              insight_sources.json / insight_manual.example.json
 data/stocklab.duckdb  本地数据仓库（git 忽略 .wal）
 ```
 

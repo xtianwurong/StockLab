@@ -68,19 +68,13 @@ def parse_args():
         type=str,
         choices=["local_first", "remote_first"],
         default=None,
-        help="取数优先级；缺省时读取 config.ini 的 [data_source] priority",
+        help="取数优先级；缺省时读取 config.toml 的 [data_source] priority",
     )
     parser.add_argument(
         "--db-path",
         type=str,
         default=None,
         help="本地 DuckDB 文件路径（默认 data/stocklab.duckdb）",
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="config.ini",
-        help="配置文件路径（取数优先级），默认 config.ini",
     )
     return parser.parse_args()
 

@@ -113,7 +113,7 @@ def parse_args(argv=None):
         "--db-path",
         type=str,
         default=None,
-        help="DuckDB 库路径（缺省读 config.ini）",
+        help="DuckDB 库路径（缺省 data/stocklab.duckdb）",
     )
     return parser.parse_args(argv)
 

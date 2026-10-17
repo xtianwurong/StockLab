@@ -15,7 +15,7 @@ StockLab - 统一数据取数门面 (stocklab.facade.market_data)
    注意：此处「外观」指「对外的门面 / 入口」，与界面美观无关。
 
 【取数优先级】
-   由 config.ini 的 [data_source] priority 决定，**策略不写进类名**，
+   由 config.toml 的 [data_source] priority 决定，**策略不写进类名**，
    策略变更（新增缓存层、改为按新鲜度路由）时无需改名：
 
      local_first  : 先查本地库 -> 未命中回退远端 -> 远端结果回写本地
@@ -77,7 +77,7 @@ class MarketDataFacade:
 
         Args:
             priority (str, optional): 取数优先级，"local_first" 或 "remote_first"；
-                                     传 None 时从 config.ini 的 [data_source] 读取
+                                     传 None 时从 config.toml 的 [data_source] 读取
             db_path (str, optional): 本地 DuckDB 文件路径，默认 data/stocklab.duckdb
         """
         self._priority = self._resolve_priority(priority)

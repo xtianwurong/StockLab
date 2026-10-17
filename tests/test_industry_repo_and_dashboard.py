@@ -317,18 +317,21 @@ def test_generate_html_with_one_month(tmp_path):
     assert os.path.exists(result)
 
 
-def test_sector_trend_uses_config(tmp_path, monkeypatch):
-    """SectorTrendVisualizer 应从 config.ini 读板块与默认输出路径"""
-    config = tmp_path / "cfg.ini"
+def test_sector_trend_uses_config(tmp_path):
+    """SectorTrendVisualizer 应从 config.toml 读板块与默认输出路径"""
+    config = tmp_path / "cfg.toml"
     config.write_text("""[settings]
 default_months = 12
-output_html = %s
+output_html = "%s"
 
 [benchmark]
-code = sh000001
+code = "sh000001"
 
-[sectors]
-s1 = sh512480, 半导体, 芯片, #9ecae1
+[[sectors]]
+code = "sh512480"
+name = "半导体"
+sector = "芯片"
+color = "#9ecae1"
 """ % (tmp_path / "out.html"), encoding="utf-8")
 
     from app.dashboard.sector_trend import SectorTrendVisualizer

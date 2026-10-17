@@ -101,7 +101,7 @@ def parse_args(argv: Optional[List[str]] = None):
     parser.add_argument("--skip-holdings", action="store_true", help="不同步持仓")
     parser.add_argument("--skip-flow", action="store_true", help="不同步资金流")
     parser.add_argument("--skip-nav", action="store_true", help="不同步净值")
-    parser.add_argument("--db-path", type=str, default=None, help="DuckDB 库路径（缺省读 config.ini）")
+    parser.add_argument("--db-path", type=str, default=None, help="DuckDB 库路径（缺省 data/stocklab.duckdb）")
     parser.add_argument("--dry-run", action="store_true", help="只打印计划不执行")
     return parser.parse_args(argv)
 

@@ -169,7 +169,7 @@ def parse_args():
         "--db-path",
         type=str,
         default=None,
-        help="DuckDB 库路径（缺省读 config.ini）",
+        help="DuckDB 库路径（缺省 data/stocklab.duckdb）",
     )
     parser.add_argument(
         "--skip-on-failure",

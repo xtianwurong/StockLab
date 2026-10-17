@@ -113,10 +113,10 @@ StockLab/
 │   ├── backtest/          # 回测引擎
 │   └── research/          # 研究编排
 ├── tests/                  # 1061 个测试用例
-├── configs/                # insight_sources.json / screen_value.json
+├── configs/                # insight_sources.json / insight_manual.example.json
 ├── data/                   # stocklab.duckdb（本地数据仓库）
 ├── requirements.txt        # 依赖精确版本锁
-├── config.ini             # 核心配置文件
+├── config.toml            # 核心配置（单一入口：运行参数/优先级/基准/板块清单）
 ├── run.sh                  # Linux/macOS 统一入口
 ├── run.bat                 # Windows 统一入口
 └── AGENTS.md              # Agent 使用规则
@@ -128,7 +128,7 @@ StockLab/
 
 1. **分层单向依赖**: 严格遵守各层级导入关系
 2. **取数唯一入口**: 所有数据获取必须通过 `facade` 层
-3. **配置只在入口读**: `config.ini` 仅在脚本 `main()` 调用
+3. **配置只在入口读**: `config.toml` 仅在脚本 `main()` 调用
 4. **DuckDB 单写连接**: `serve_web.py` 独占写连接
 5. **编码规范**: 无装饰器、无生成器嵌套、无元类等
 6. **测试纪律**: 三层 fixture，标记系统

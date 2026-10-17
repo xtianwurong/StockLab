@@ -2,7 +2,7 @@
 配置解析与归一化边界 (tests/test_config_and_normalization.py)
 
 覆盖三处此前零覆盖的地方：
-  stocklab/common/config.py       —— config.ini 解析、路径查找、非法取值降级
+  stocklab/common/config.py       —— config.toml 解析、路径查找、非法取值降级
   stocklab/normalization/akshare.py —— 估值快照 / 行业估值 / 指数成分归一化
   stocklab/persistence/repository/industry_valuation.py —— 行业表读写与去重
 
@@ -39,7 +39,7 @@ from stocklab.domain import (
 # 一、配置文件路径查找
 # ---------------------------------------------------------------------------
 def test_find_config_path_absolute(tmp_path):
-    target = tmp_path / "cfg.ini"
+    target = tmp_path / "cfg.toml"
     target.write_text("[settings]\n", encoding="utf-8")
     assert cfg.find_config_path(str(target)) == str(target)
 
@@ -47,29 +47,28 @@ def test_find_config_path_absolute(tmp_path):
 def test_find_config_path_relative_falls_back_to_cwd(tmp_path, monkeypatch):
     """相对路径找不到时按当前工作目录解析，而不是静默返回空"""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "cfg.ini").write_text("[settings]\n", encoding="utf-8")
-    assert cfg.find_config_path("cfg.ini").endswith("cfg.ini")
+    (tmp_path / "cfg.toml").write_text("[settings]\n", encoding="utf-8")
+    assert cfg.find_config_path("cfg.toml").endswith("cfg.toml")
 
 
 def test_find_config_path_missing_returns_absolute(tmp_path):
-    result = cfg.find_config_path(str(tmp_path / "nope.ini"))
+    result = cfg.find_config_path(str(tmp_path / "nope.toml"))
     assert os.path.isabs(result), "找不到时也应返回绝对路径，便于报错信息可读"
 
 
 # ---------------------------------------------------------------------------
-# 二、config.ini 解析
+# 二、config.toml 解析
 # ---------------------------------------------------------------------------
 def _write(tmp_path, body):
-    path = tmp_path / "cfg.ini"
+    path = tmp_path / "cfg.toml"
     path.write_text(body, encoding="utf-8")
     return str(path)
 
 
-# load_ini_config 返回 4 元组 (sectors, default_months, default_output, http_timeout)，
+# load_config 返回 4 元组 (sectors, default_months, default_output, http_timeout)，
 # sectors[0] 恒为 benchmark（即使 [benchmark] 段缺失）。
 def _load(tmp_path, body):
-    sectors, months, output, timeout = cfg.load_ini_config(
-        _write(tmp_path, body))
+    sectors, months, output, timeout = cfg.load_config(_write(tmp_path, body))
     return sectors, months, output, timeout
 
 
@@ -85,7 +84,7 @@ def test_load_config_defaults(tmp_path):
 def test_load_config_reads_settings(tmp_path):
     _, months, output, timeout = _load(tmp_path, """[settings]
 default_months = 60
-output_html = output/custom.html
+output_html = "output/custom.html"
 http_timeout = 15
 """)
     assert months == 60
@@ -111,10 +110,8 @@ def test_load_config_ticker_strips_market_prefix(tmp_path):
     假定配置里都写 sh000001 这种带前缀的形式；若真写了 000001 这种 6 位纯数字，
     会被截成 0001。这里把该行为钉住 —— 配置格式要求带前缀，截断反而能暴露填错。
     """
-    sectors, _, _, _ = _load(tmp_path, """[settings]
-
-[benchmark]
-code = sh000001
+    sectors, _, _, _ = _load(tmp_path, """[benchmark]
+code = "sh000001"
 """)
     assert sectors[0].ticker == "000001"
     assert len(sectors[0].code) > 2, "配置里应写带市场前缀的代码"
@@ -122,40 +119,55 @@ code = sh000001
 
 def test_load_config_benchmark_blank_color_falls_back(tmp_path):
     """颜色留空时回落到默认色，而不是生成非法色值"""
-    sectors, _, _, _ = _load(tmp_path, """[settings]
-
-[benchmark]
-color =
+    sectors, _, _, _ = _load(tmp_path, """[benchmark]
+color = ""
 """)
     assert sectors[0].color == "#ffffff"
 
 
 def test_load_config_parses_sectors(tmp_path):
-    body = """[settings]
+    body = """[benchmark]
+code = "sh000001"
 
-[benchmark]
-code = sh000001
+[[sectors]]
+code = "sh512480"
+name = "半导体"
+sector = "芯片"
+color = "#9ecae1"
+tracking_index = "中华半导体芯片"
+fund_manager = "国联安"
+purity_reason = "纯芯片设计"
 
-[sectors]
-s1 = sh512480, 半导体, 芯片, #9ecae1, 中华半导体芯片, 国联安, 纯芯片设计
-s2 = sh515790, 光伏, 光伏, #74c476
-empty_sector =
-malformed_line = 只有一列
+[[sectors]]
+code = "sh515790"
+name = "光伏"
+sector = "光伏"
+color = "#74c476"
+
+# 缺 code 的块必须被跳过（而不是产出一个 code 为空的幻影标的）
+[[sectors]]
+name = "只有名字没有代码"
 """
     sectors, _, _, _ = _load(tmp_path, body)
     codes = [sector.code for sector in sectors]
     assert codes[0] == "sh000001", "benchmark 必须排第一"
     assert "sh512480" in codes and "sh515790" in codes
-    assert len(codes) == 3, "空值与列数不足的行都应被跳过"
+    assert len(codes) == 3, "缺 code 的块应被跳过"
 
 
 def test_load_config_sector_optional_fields(tmp_path):
-    """sectors 行的可选字段缺省时要能补上，不能因少写几列就丢整个标的"""
-    body = """[settings]
+    """sectors 块的可选字段缺省时要能补上，不能因少写几个键就丢整个标的"""
+    body = """[[sectors]]
+code = "sh512480"
+name = "半导体"
+sector = "芯片"
+tracking_index = "中华半导体芯片"
+fund_manager = "国联安"
+purity_reason = "纯芯片设计"
 
-[sectors]
-s1 = sh512480, 半导体, 芯片, #9ecae1, 中华半导体芯片, 国联安, 纯芯片设计
-s2 = sh515790, 光伏, 光伏
+[[sectors]]
+code = "sh515790"
+name = "光伏"
 """
     sectors, _, _, _ = _load(tmp_path, body)
     full = [s for s in sectors if s.code == "sh512480"][0]
@@ -164,16 +176,22 @@ s2 = sh515790, 光伏, 光伏
     assert full.fund_manager == "国联安"
     assert short.tracking_index == "", "缺失的可选字段应为空串"
     assert short.ticker == "515790"
+    assert short.sector == "光伏", "sector 缺省时应回落到 name"
 
 
 def test_load_config_sector_falls_back_to_palette(tmp_path):
-    """sectors 行没写颜色时按调色板轮转分配，保证相邻标的颜色不同"""
-    body = """[settings]
+    """sectors 块没写颜色时按调色板轮转分配，保证相邻标的颜色不同"""
+    body = """[[sectors]]
+code = "sh512480"
+name = "半导体"
 
-[sectors]
-s1 = sh512480, 半导体, 芯片
-s2 = sh515790, 光伏, 光伏
-s3 = sh588000, 科创50, 科创
+[[sectors]]
+code = "sh515790"
+name = "光伏"
+
+[[sectors]]
+code = "sh588000"
+name = "科创50"
 """
     sectors, _, _, _ = _load(tmp_path, body)
     colors = [s.color for s in sectors if not s.is_benchmark]
@@ -181,12 +199,31 @@ s3 = sh588000, 科创50, 科创
 
 
 def test_load_config_comments_are_ignored(tmp_path):
-    """# 与 ; 都应是注释前缀，否则会拼进色值或月份里"""
+    """# 是唯一注释前缀，整行与行尾注释都不能拼进数值里
+
+    注意：TOML 不支持 INI 的 ';' 注释，旧 config.ini 里的分号注释已全部改为 '#'。
+    """
     _, months, _, _ = _load(tmp_path, """[settings]
-; 分号注释
-default_months = 36 ; 行尾注释
+# 整行注释
+default_months = 36 # 行尾注释
 """)
     assert months == 36
+
+
+def test_shipped_config_toml_is_valid():
+    """项目自带的 config.toml 必须能被解析，且板块清单自洽
+
+    这是「用户手改的配置文件」的语法护栏：TOML 写错会让所有入口脚本启动即崩，
+    用一条用例把它钉住，早于任何脚本运行就暴露。
+    """
+    sectors, months, output, timeout = cfg.load_config()
+    assert sectors[0].is_benchmark is True, "benchmark 必须排在首位"
+    assert len(sectors) > 1, "自带配置应至少含一个板块 ETF"
+    assert months > 0 and timeout > 0
+    assert output.endswith(".html")
+    codes = [sector.code for sector in sectors]
+    assert len(codes) == len(set(codes)), "自带配置里不应有重复代码"
+    assert cfg.load_data_source_priority() in cfg.DATA_SOURCE_PRIORITIES
 
 
 # ---------------------------------------------------------------------------
@@ -194,11 +231,11 @@ default_months = 36 ; 行尾注释
 # ---------------------------------------------------------------------------
 def test_priority_missing_file_returns_default(tmp_path):
     assert cfg.load_data_source_priority(
-        str(tmp_path / "nope.ini")) == cfg.DEFAULT_DATA_SOURCE_PRIORITY
+        str(tmp_path / "nope.toml")) == cfg.DEFAULT_DATA_SOURCE_PRIORITY
 
 
 def test_priority_reads_data_source_section(tmp_path):
-    path = _write(tmp_path, "[data_source]\npriority = remote_first\n")
+    path = _write(tmp_path, "[data_source]\npriority = \"remote_first\"\n")
     assert cfg.load_data_source_priority(path) == "remote_first"
 
 
@@ -209,20 +246,20 @@ def test_priority_missing_section_returns_default(tmp_path):
 
 def test_priority_illegal_value_returns_default(tmp_path):
     """非法取值必须降级到默认，而不是原样传下去"""
-    path = _write(tmp_path, "[data_source]\npriority = whatever\n")
+    path = _write(tmp_path, "[data_source]\npriority = \"whatever\"\n")
     assert cfg.load_data_source_priority(path) == cfg.DEFAULT_DATA_SOURCE_PRIORITY
 
 
 def test_priority_parse_error_returns_default(tmp_path):
     """配置损坏时也不能抛异常 —— 优先级只影响取数顺序，不该挡住程序启动"""
-    path = tmp_path / "broken.ini"
+    path = tmp_path / "broken.toml"
     path.write_bytes(b"\xff\xfe\x00broken\x00\x01")
     assert cfg.load_data_source_priority(str(path)) == cfg.DEFAULT_DATA_SOURCE_PRIORITY
 
 
 @pytest.mark.parametrize("value", cfg.DATA_SOURCE_PRIORITIES)
 def test_priority_accepts_all_legal_values(tmp_path, value):
-    path = _write(tmp_path, "[data_source]\npriority = %s\n" % value)
+    path = _write(tmp_path, "[data_source]\npriority = \"%s\"\n" % value)
     assert cfg.load_data_source_priority(path) == value
 
 

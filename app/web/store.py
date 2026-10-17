@@ -97,7 +97,7 @@ _INDICATORS = ("pe_ttm", "pe_static", "pb", "ps", "pcf")
 
 def _make_facade():
     """
-    创建一个新的取数门面（按启动参数或 config.ini 配置）
+    创建一个新的取数门面（按启动参数或 config.toml 配置）
 
     Returns:
         MarketDataFacade: 新建的门面实例
