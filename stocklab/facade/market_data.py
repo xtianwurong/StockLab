@@ -280,7 +280,10 @@ class MarketDataFacade:
         """
         if trade_date:
             return self._valuation_repo.find_by_date(trade_date)
-        latest_date = self._price_repo.get_max_trade_date()
+        # 估值水位线必须取估值表自身的最大交易日，不能用日 K 表：
+        # 两者更新节奏不同（日 K 可领先估值数周），拿日 K 日期查估值必然 miss，
+        # 本地优先缓存形同虚设、每次都回源
+        latest_date = self._valuation_repo.get_max_trade_date()
         if not latest_date:
             return pd.DataFrame()
         return self._valuation_repo.find_by_date(latest_date)
@@ -307,9 +310,11 @@ class MarketDataFacade:
         将 YYYY-MM-DD 压缩为 YYYYMMDD（AkShare 接口要求的日期格式）
 
         Args:
-            date_str (str): 日期字符串
+            date_str (str | datetime.date): 日期
 
         Returns:
             str: 压缩后的日期字符串
         """
-        return date_str.replace("-", "")
+        # 调用方可能传 datetime.date 而非字符串，直接 .replace 会 TypeError；
+        # 统一 str() 后再剥连字符
+        return str(date_str).replace("-", "")

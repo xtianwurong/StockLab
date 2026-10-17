@@ -277,6 +277,34 @@ class TestFundStyleDecomposer:
             assert r.n_sectors == 3
             assert sum(r.exposures.values()) <= 1.0 + 1e-6
 
+    def test_rolling_decompose_is_chronological(self, monkeypatch):
+        """rolling_decompose 必须按**时间正序**调用 decompose_single。
+
+        换仓率 / 交易成本 / net_alpha 依赖 self._prev_exposures；倒序迭代会让
+        最新一期第一个执行（_prev_exposures 仍为 None → 换仓率恒为 0），
+        其余各期则拿「未来一期」当上一期。
+        """
+        empty_nav = pd.DataFrame({"fund_code": [], "nav_date": [], "nav": []})
+        decomposer = FundStyleDecomposer(empty_nav, {})
+
+        seen = []
+
+        class _Result:
+            n_sectors = 1
+
+        def _fake(fund_code, trade_date, window_days, sector_codes):
+            seen.append(trade_date)
+            return _Result()
+
+        monkeypatch.setattr(decomposer, "decompose_single", _fake)
+
+        decomposer.rolling_decompose(
+            "000001.OF", date(2026, 6, 30), window_days=60, step_days=5
+        )
+
+        assert seen == sorted(seen), "必须时间正序（否则最新一期换仓率恒为 0）"
+        assert seen[-1] == date(2026, 6, 30), "最后一期应为 end_date（最新）"
+
     def test_generate_signals(self, setup_data):
         """信号生成测试"""
         decomposer = FundStyleDecomposer(

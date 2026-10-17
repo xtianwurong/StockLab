@@ -110,7 +110,7 @@ _FULLWIDTH = str.maketrans(
 #   600519 前面的「了」被当成单词字符，(?<!\w) 断言失败 -> 一个代码都抽不到。
 #   改为显式写 [0-9A-Za-z.]，只挡真正的数字/字母/小数点，不挡中文。
 _STOCK_CODE = re.compile(
-    r"(?<![0-9A-Za-z.])(?:sh|sz|bj)?([0368][0-9]{5}|00[0-9]{4}|30[0-9]{4})"
+    r"(?<![0-9A-Za-z.])(?:sh|sz|bj)?([0368][0-9]{5})"
     r"(?:\.(?:sh|sz|bj))?(?![0-9A-Za-z.])",
     re.IGNORECASE,
 )
@@ -442,9 +442,9 @@ def normalize_investor_quotes(raw, investor_code=None, platform=None,
             # 空壳条目（"转发微博"/"赞"）：不入库，否则页面上是一行空白
             continue
 
-        content_hash = str(item.get("content_hash") or "").strip()
-        if not content_hash:
-            content_hash = compute_content_hash(content)
+        # 去重哈希一律由正文自行派生，不采信采集器传入的 content_hash ——
+        # 外部可伪造/出错的值会破坏「同文去重」语义（与「假溯源」同类风险）
+        content_hash = compute_content_hash(content)
         if not content_hash:
             continue
 
@@ -564,6 +564,9 @@ def _to_bool(value, default=True):
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
+        # NaN 不是布尔语义：直接 bool(nan) 会是 True，必须按「识别不了」处理
+        if value != value:
+            return default
         return bool(value)
     text = str(value).strip().lower()
     if text in ("1", "true", "yes", "y", "是", "t"):

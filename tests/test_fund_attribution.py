@@ -685,3 +685,53 @@ class TestRepairedExposureApi:
         resp = client.get(path)
         assert resp.status_code == 400, path
         assert "error" in _json(resp), path
+
+
+def test_vs_rbsa_must_not_fall_back_to_future_holding(fresh_db, monkeypatch):
+    """
+    分析日早于该基金最早持仓报告期时：
+      - 必须返回 error（当时没有可见持仓），
+      - 绝不能静默退回 get_latest_report_date() —— 那是分析日**之后**的未来持仓，
+        即前视偏差，正是 as-of 截断要消除的东西。
+    """
+    from datetime import date as _date
+
+    import pandas as pd
+
+    from stocklab.facade.fund_analysis import FundAnalysisFacade
+    from stocklab.facade.fund_holding import FundHoldingFacade
+
+    _db_path, database = fresh_db
+
+    # RBSA 侧给一个「成功」结果，确保流程能走到持仓对照这一步
+    monkeypatch.setattr(
+        FundAnalysisFacade,
+        "analyze_fund_allocation",
+        lambda self, **kwargs: {
+            "current_exposures": {"801010": 0.5, "801020": 0.5},
+            "r_squared": 0.9,
+        },
+    )
+
+    facade = FundHoldingFacade(database)
+    # 分析日之前没有任何「当时可见」的报告期
+    monkeypatch.setattr(
+        facade._holding_repo,
+        "get_latest_report_date_on_or_before",
+        lambda fund_code, as_of: None,
+    )
+    monkeypatch.setattr(
+        facade, "get_report_dates", lambda fund_code: [_date(2026, 6, 30)]
+    )
+
+    exposure_calls = []
+    monkeypatch.setattr(
+        facade,
+        "get_industry_exposure",
+        lambda *args, **kwargs: exposure_calls.append(args) or pd.DataFrame(),
+    )
+
+    result = facade.compare_rbsa_vs_holding("000001.OF", _date(2026, 1, 1))
+
+    assert "error" in result
+    assert exposure_calls == [], "不得退回最新报告期（未来持仓 = 前视偏差）"

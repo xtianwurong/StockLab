@@ -10,23 +10,23 @@ StockLab - 基金 Brinson 归因分析 (stocklab.analytics.fund_attribution)
 【核心公式】
    总超额收益 = 资产配置效应 + 个股选择效应 + 交互效应
 
-   资产配置效应 = Σ (w_p - w_b) * (R_b - R_p)
-   个股选择效应 = Σ w_b * (R_p - R_b)
-   交互效应 = Σ (w_p - w_b) * (R_p - R_b)
+   资产配置效应 = Σ (w_p - w_b) * (R_b_i - R_b_total)
+   个股选择效应 = Σ w_b * (R_p_i - R_b_i)
+   交互效应   = Σ (w_p - w_b) * (R_p_i - R_b_i)
 
    其中：
-     w_p = 组合在行业 i 的权重
-     w_b = 基准在行业 i 的权重
-     R_p = 组合在行业 i 的收益率
-     R_b = 基准在行业 i 的收益率
-     R_p = 组合总收益率 = Σ w_p * R_p
-     R_b = 基准总收益率 = Σ w_b * R_b
+     w_p       = 组合在行业 i 的权重
+     w_b       = 基准在行业 i 的权重
+     R_p_i     = 组合在行业 i 的收益率
+     R_b_i     = 基准在行业 i 的收益率
+     R_p_total = 组合总收益率 = Σ w_p * R_p_i
+     R_b_total = 基准总收益率 = Σ w_b * R_b_i
 
 【两种模型对比】
    Brinson-Fachler (1985):
-     配置效应 = Σ (w_p - w_b) * (R_b - R_p)
-     选择效应 = Σ w_b * (R_p - R_b)
-     交互效应 = Σ (w_p - w_b) * (R_p - R_b)
+     配置效应 = Σ (w_p - w_b) * (R_b_i - R_b_total)
+     选择效应 = Σ w_b * (R_p_i - R_b_i)
+     交互效应 = Σ (w_p - w_b) * (R_p_i - R_b_i)
 
    Brinson-Hood-Beebower (1986):
      配置效应 = Σ (w_p - w_b) * (R_b - R_total)
@@ -147,14 +147,13 @@ class BrinsonAttribution:
 
         # 4. Brinson 分解
         if self.config.model == "brinson-fachler":
-            # Brinson-Fachler 三效应分解
-            allocation = np.sum((w_p - w_b) * (r_b - np.sum(w_b * r_b)))
+            # Brinson-Fachler 三效应分解（基准基准线用已算好的 benchmark_return）
+            allocation = np.sum((w_p - w_b) * (r_b - benchmark_return))
             selection = np.sum(w_b * (r_p - r_b))
             interaction = np.sum((w_p - w_b) * (r_p - r_b))
         else:
             # Brinson-Hood-Beebower 两效应分解
-            total_b_return = np.sum(w_b * r_b)
-            allocation = np.sum((w_p - w_b) * (r_b - total_b_return))
+            allocation = np.sum((w_p - w_b) * (r_b - benchmark_return))
             selection = np.sum(w_p * (r_p - r_b))
             interaction = 0.0
 
@@ -165,12 +164,11 @@ class BrinsonAttribution:
             rp, rb = r_p[i], r_b[i]
 
             if self.config.model == "brinson-fachler":
-                alloc_eff = (wp - wb) * (rb - np.sum(w_b * r_b))
+                alloc_eff = (wp - wb) * (rb - benchmark_return)
                 select_eff = wb * (rp - rb)
                 inter_eff = (wp - wb) * (rp - rb)
             else:
-                total_b = np.sum(w_b * r_b)
-                alloc_eff = (wp - wb) * (rb - total_b)
+                alloc_eff = (wp - wb) * (rb - benchmark_return)
                 select_eff = wp * (rp - rb)
                 inter_eff = 0.0
 

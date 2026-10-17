@@ -12,17 +12,21 @@
 --      而不是拿「当前仍在市的股票」当历史样本（否则产生幸存者偏差）。
 -- ==============================================================================
 
-ALTER TABLE reference.securities ADD COLUMN status VARCHAR;
+ALTER TABLE reference.securities ADD COLUMN IF NOT EXISTS status VARCHAR;
+
+-- 映射需要 list_status 参与；若上一轮已把它丢弃，这里补回一个空列（不覆盖已定的 status），
+-- 使本文件可重复执行（幂等）。映射后仍会把它删掉。
+ALTER TABLE reference.securities ADD COLUMN IF NOT EXISTS list_status VARCHAR;
 
 UPDATE reference.securities
-SET status = CASE list_status
+SET status = COALESCE(status, CASE list_status
     WHEN 'L' THEN 'LISTED'
     WHEN 'D' THEN 'DELISTED'
     WHEN 'P' THEN 'PAUSED'
     ELSE 'LISTED'
-END;
+END);
 
-ALTER TABLE reference.securities DROP COLUMN list_status;
+ALTER TABLE reference.securities DROP COLUMN IF EXISTS list_status;
 
 CREATE TABLE IF NOT EXISTS reference.security_events (
     ts_code    VARCHAR NOT NULL,

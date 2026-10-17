@@ -105,6 +105,10 @@ class BaoStockDataSource(StockDataSource):
 
     def _connect(self):
         """建立与 baostock 服务的网络会话连接"""
+        # 复用同一个 stdout 缓冲：baostock 会往 stdout 打日志，重定向下来避免污染控制台。
+        # 每次连接前清空，否则长跑进程该缓冲会无界增长
+        self._output_buffer.seek(0)
+        self._output_buffer.truncate(0)
         login_result = None
         try:
             with contextlib.redirect_stdout(self._output_buffer):
@@ -113,7 +117,10 @@ class BaoStockDataSource(StockDataSource):
             _logger.warning("%s 登录失败：%s", self.SOURCE_NAME, error)
             return False
 
-        if login_result is None or login_result.error_code != "0":
+        if login_result is None:
+            _logger.warning("%s 登录失败：登录接口无返回", self.SOURCE_NAME)
+            return False
+        if login_result.error_code != "0":
             _logger.warning(
                 "%s 登录失败：%s", self.SOURCE_NAME, login_result.error_msg
             )

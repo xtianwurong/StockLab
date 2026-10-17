@@ -27,9 +27,6 @@ SELL = "SELL"
 # 方向表（中文描述用于日志与测试输出）
 SIDES = {"BUY": "买入", "SELL": "卖出"}
 
-# 委托状态表
-ORDER_STATUS = {"pending": "待撮合", "filled": "已成交", "rejected": "已拒绝"}
-
 
 class BacktestError(Exception):
     """回测入参或运行状态非法（价格缺失/权重越界/可用持仓不足等）"""

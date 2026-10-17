@@ -74,7 +74,7 @@ class BaseRepository:
             update_columns (list): 需要更新的列名列表（必须属于 _COLUMNS）
 
         Returns:
-            int: 实际写入的行数；空数据或契约违约返回 0
+            int: 送入写入的行数（插入与更新各计一行）；空数据 / 契约违约 / 数据库错误返回 0
         """
         if df is None or df.empty:
             _logger.warning("%s: upsert 接收到空数据，跳过写入", self._TABLE_NAME)
@@ -113,13 +113,18 @@ class BaseRepository:
 
         try:
             conflict_str = ", ".join(conflict_columns)
-            update_str = ", ".join(
-                f"{col} = excluded.{col}" for col in update_columns
-            )
+            if update_columns:
+                conflict_action = "DO UPDATE SET " + ", ".join(
+                    f"{col} = excluded.{col}" for col in update_columns
+                )
+            else:
+                # 没有要更新的列时不能拼出空 SET（会成为语法错误被吞掉），
+                # 退化为 DO NOTHING：语义等同「已存在就不动」
+                conflict_action = "DO NOTHING"
             conn.execute(f"""
                 INSERT INTO {self._TABLE_NAME} ({column_list})
                 SELECT {select_list} FROM {tmp_table}
-                ON CONFLICT ({conflict_str}) DO UPDATE SET {update_str}
+                ON CONFLICT ({conflict_str}) {conflict_action}
             """)
             row_count = len(aligned)
             _logger.info("%s 表 UPSERT 完成: %d 条记录", self._TABLE_NAME, row_count)

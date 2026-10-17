@@ -135,6 +135,21 @@ class DailyValuationRepository(BaseRepository):
             [as_of_date],
         ).fetchdf()
 
+    def get_max_trade_date(self):
+        """
+        查询估值表中最新的交易日期
+
+        Returns:
+            str: 最新交易日期 "YYYY-MM-DD"；无数据返回 None
+        """
+        conn = self._db.get_connection()
+        result = conn.execute(
+            f"SELECT MAX(trade_date) FROM {self._TABLE_NAME}"
+        ).fetchone()
+        if result and result[0]:
+            return str(result[0])
+        return None
+
     def count(self):
         """
         查询估值记录总数

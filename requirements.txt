@@ -19,6 +19,10 @@ baostock==0.9.4
 # 数据清洗与时序对齐
 pandas==3.0.6
 
+# 组合优化/约束求解（analytics/fund_style.py 的 RBSA 多因子暴露求解直接用 scipy.optimize）
+# 虽然 scipy 也会随 pandas 传递安装，但本包被代码直接 import，必须显式锁定版本
+scipy==1.18.1
+
 # 腾讯直连 HTTP（实时行情 / 公司名称 / 板块 K 线）
 requests==2.34.2
 

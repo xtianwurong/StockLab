@@ -18,9 +18,9 @@ StockLab - 交易成本 (stocklab.backtest.cost)
      这样成交流水与行情能一一对上。
 """
 
-__all__ = ["CostModel"]
-
 from stocklab.backtest.order import SELL, BacktestError
+
+__all__ = ["CostModel"]
 
 
 class CostModel:
@@ -35,7 +35,7 @@ class CostModel:
     【默认值】
        佣金 0.025%（最低 5 元）、印花税 0.05%（2023-08-28 起的卖出税率）、
        滑点 0（默认不假设冲击成本，需要时显式传入）。
-       过户费（上交所 0.001%）金额量级远低于佣金，暂不建模，见 AGENT.md 注意事项。
+       过户费（上交所 0.001%）金额量级远低于佣金，暂不建模，见 AGENTS.md 注意事项。
     """
 
     def __init__(

@@ -136,19 +136,6 @@ def build_report_dates(years: int = 3, as_of: Optional[date] = None) -> List[Tup
 # HTML 解析
 # ---------------------------------------------------------------------------
 
-# 表头关键词 -> 内部字段名
-_HEADER_ALIASES = {
-    "股票代码": "stock_code",
-    "证券代码": "stock_code",
-    "股票名称": "stock_name",
-    "证券名称": "stock_name",
-    "占净值比例": "weight",
-    "占基金资产净值比例": "weight",
-    "持仓市值": "market_value",
-    "持股数": "shares",
-    "持股数量": "shares",
-}
-
 # 表头关键词 -> 定位列的正则
 _HEADER_PATTERNS = [
     (re.compile(r"股票代码|证券代码"), "stock_code"),

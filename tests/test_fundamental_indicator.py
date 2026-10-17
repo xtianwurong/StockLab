@@ -98,6 +98,30 @@ class TestTaxRate:
         # nopat = 200 * (1 - 25/250) = 180；180 / 4000 = 0.045
         assert abs(result["roic"].iloc[0] - 0.045) < 1e-12
 
+    def test_missing_income_tax_keeps_roic_nan(self):
+        """所得税缺失（利润总额为正）绝不能当成 0% 免税：roic 应为 NaN（宁缺勿错）"""
+        income = pd.DataFrame([
+            _income_row("000001.SZ", "2024-12-31", "2025-03-01",
+                        operating_profit=200.0, total_profit=250.0, income_tax=None),
+        ])
+        balance = pd.DataFrame([_balance_row("000001.SZ", "2024-12-31", "2025-03-20")])
+
+        result = build_financial_indicators(income, balance)
+
+        assert pd.isna(result["roic"].iloc[0])
+
+    def test_missing_total_profit_keeps_roic_nan(self):
+        """利润总额缺失时不得按免税算：roic 应为 NaN"""
+        income = pd.DataFrame([
+            _income_row("000001.SZ", "2024-12-31", "2025-03-01",
+                        operating_profit=200.0, total_profit=None, income_tax=25.0),
+        ])
+        balance = pd.DataFrame([_balance_row("000001.SZ", "2024-12-31", "2025-03-20")])
+
+        result = build_financial_indicators(income, balance)
+
+        assert pd.isna(result["roic"].iloc[0])
+
 
 class TestMarginGuards:
     """分母为零时返回 NaN，不臆造数值"""

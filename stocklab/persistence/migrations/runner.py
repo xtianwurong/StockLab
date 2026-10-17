@@ -96,12 +96,21 @@ class SchemaMigrator:
             for version, name, file_path in pending:
                 with open(file_path, "r", encoding="utf-8") as handle:
                     sql = handle.read()
-                conn.execute(sql)
-                conn.execute(
-                    "INSERT INTO sys.schema_version (version, name, applied_at) "
-                    "VALUES (?, ?, ?)",
-                    [version, name, datetime.datetime.now()],
-                )
+                # 每个迁移连同版本记录放进同一事务：DDL 与版本行要么一起生效、
+                # 要么一起回滚。旧实现逐语句自动提交，多语句迁移中途失败会留下
+                # 半迁移状态（结构已改、版本未记），重跑即报「列已存在」。
+                conn.execute("BEGIN TRANSACTION")
+                try:
+                    conn.execute(sql)
+                    conn.execute(
+                        "INSERT INTO sys.schema_version (version, name, applied_at) "
+                        "VALUES (?, ?, ?)",
+                        [version, name, datetime.datetime.now()],
+                    )
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
                 _logger.info("已应用迁移 %03d_%s", version, name)
 
             if not pending:

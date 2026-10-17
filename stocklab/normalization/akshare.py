@@ -288,7 +288,13 @@ def normalize_index_membership(raw):
     owner = "akshare.index_stock_cons_csindex"
     require_columns(raw, ("成分券代码", "指数代码", "指数名称", "日期"), owner)
 
-    codes = raw["成分券代码"].astype(str).str.zfill(6)
+    # 源若把代码列返回成 float，astype(str) 会得到 "600519.0"；先剥掉 .0 再补零，
+    # 否则 normalize_ts_code 会拿到 "600519.0" 这种垃圾代码
+    codes = (
+        raw["成分券代码"].astype(str)
+        .str.replace(r"\.0$", "", regex=True)
+        .str.zfill(6)
+    )
     data = {
         "ts_code": codes.apply(normalize_ts_code),
         "index_code": str(raw["指数代码"].iloc[0]),

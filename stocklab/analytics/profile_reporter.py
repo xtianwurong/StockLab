@@ -18,7 +18,7 @@ StockLab - 市盈率分布报告渲染器 (stocklab.analytics.profile_reporter)
    因此本模块用 east_asian_width 计算视觉宽度后再补空格，保证列对齐。
 
 【依赖清单】
-   标准库：logging、os、unicodedata
+   标准库：logging、os（排版原语来自 stocklab.analytics.text_format）
 ==============================================================================
 """
 
@@ -93,9 +93,9 @@ class ValuationDistributionReporter:
         self._append_quantiles(lines, profile)
         self._append_bucket_histogram(lines, profile)
         self._append_market_breakdown(lines, profile)
-        self._append_rank_entries(lines, profile, "PE 最低 %d 只" % len(profile.lowest_pe_entries),
+        self._append_rank_entries(lines, "PE 最低 %d 只" % len(profile.lowest_pe_entries),
                                   profile.lowest_pe_entries)
-        self._append_rank_entries(lines, profile, "PE 最高 %d 只" % len(profile.highest_pe_entries),
+        self._append_rank_entries(lines, "PE 最高 %d 只" % len(profile.highest_pe_entries),
                                   profile.highest_pe_entries)
         self._append_footer(lines, profile)
 
@@ -262,7 +262,7 @@ class ValuationDistributionReporter:
             )
         lines.append("")
 
-    def _append_rank_entries(self, lines, profile, title, entries):
+    def _append_rank_entries(self, lines, title, entries):
         """极值榜单区块：带序号、代码、简称、交易所与 PE"""
         if not entries:
             return

@@ -15,9 +15,9 @@ StockLab - 成交记录 (stocklab.backtest.trade)
      买入恒为 None；胜率与盈亏比都建立在它之上，绝不另起一套口径。
 """
 
-__all__ = ["Trade"]
-
 from stocklab.backtest.order import BUY, SELL, BacktestError
+
+__all__ = ["Trade"]
 
 
 class Trade:

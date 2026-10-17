@@ -41,6 +41,8 @@ __all__ = [
     "SignalStrength",
     "ConfidenceLevel",
     "required_history_days",
+    "decompose_fund_style",
+    "TransactionCostModel",
 ]
 
 
@@ -60,12 +62,7 @@ HISTORY_BUFFER_DAYS = 7             # 首个收益率所需的 1 天 + 余量
 MIN_ALIGNMENT_OBSERVATIONS = 20      # 少于这么多对齐观测就不做回归（样本不足）
 
 # P1 增强参数
-FACTOR_CATEGORIES = ("style", "macro", "industry")  # 因子分类：风格/宏观/行业
-DEFAULT_FACTOR_WEIGHTS = {"style": 0.5, "macro": 0.2, "industry": 0.3}  # 默认因子权重
-TRANSACTION_COST_BPS = 15  # 单边换仓成本基点（含佣金+印花税+滑点）
-SLIPPAGE_MODEL = "sqrt"    # 滑点模型：linear / sqrt / power
-MAX_TURNOVER = 0.5         # 单期最大换仓率（防异常）
-CONFIDENCE_CALIBRATION_WINDOW = 252  # 置信度校准回看窗口（交易日）
+TRADING_DAYS_PER_YEAR = 252          # 年化系数（A 股年均交易日）
 MULTI_WINDOW_DAYS = [20, 60, 120]    # 多窗口一致性检查（交易日）
 SIGNAL_DIRECTION_STEP_DAYS = 5       # 多窗口方向校验的前后期间隔（自然日），与 rolling_decompose 的步长一致
 CASH_POSITION_SOURCE = "holding"     # 现金仓位来源：holding / nav / fixed
@@ -235,6 +232,9 @@ class FundStyleDecomposer:
         self.transaction_cost_model = transaction_cost_model or TransactionCostModel()
         self.cash_position = cash_position
         self.cash_position_source = cash_position_source
+        # 上一期暴露度：换仓率/交易成本需要，初始化显式给出，
+        # 非首期判断用「is not None」而不是 hasattr（避免属性缺失的隐式分支）
+        self._prev_exposures = None
 
         # 预处理：计算基金日收益率
         self._prepare_fund_returns()
@@ -246,10 +246,43 @@ class FundStyleDecomposer:
         self._prepare_capital_flow()
 
     def _prepare_fund_returns(self):
-        """计算基金日收益率"""
+        """
+        计算基金日收益率
+
+        口径优先级（**逐基金/逐行**判断，不用整表 any() 切列）：
+          1. change_pct / 100 —— 基金公司官方日增长率，已含分红再投资修正，最准；
+          2. (acc_nav - acc_nav.shift(1)) / nav.shift(1) —— 累计净值是
+             「单位净值 + 累计分红」的**加法**序列，绝不能直接对它 pct_change：
+             那样分母会含累计分红，日收益被按 nav/acc_nav 系统性缩小，进而把
+             RBSA 行业总仓位等比压低、现金仓位抬高。用差分除以昨日单位净值，
+             等价于把当日分红加回，才是正确的单日总回报；
+          3. nav.pct_change() —— 最后兜底（分红除息日会有假跌）。
+
+        【为什么逐基金判断】不同来源可用列不一致（如 pingzhongdata 无累计净值），
+        按整表 notna().any() 切列会让缺该列的那只基金整段被 dropna 丢掉。
+        """
         df = self.fund_nav_df.copy()
         df = df.sort_values(["fund_code", "nav_date"])
-        df["fund_return"] = df.groupby("fund_code")["nav"].pct_change()
+
+        if "change_pct" in df.columns:
+            official = pd.to_numeric(df["change_pct"], errors="coerce") / 100.0
+        else:
+            official = pd.Series(float("nan"), index=df.index)
+
+        if "acc_nav" in df.columns:
+            prev_nav = df.groupby("fund_code")["nav"].shift(1)
+            from_acc = (
+                df["acc_nav"] - df.groupby("fund_code")["acc_nav"].shift(1)
+            ) / prev_nav
+        else:
+            from_acc = pd.Series(float("nan"), index=df.index)
+
+        from_nav = df.groupby("fund_code")["nav"].pct_change()
+
+        fund_return = official.where(official.notna(), from_acc)
+        fund_return = fund_return.where(fund_return.notna(), from_nav)
+
+        df["fund_return"] = fund_return
         self.fund_returns = df.dropna(subset=["fund_return"])
 
     def _prepare_sector_returns(self):
@@ -502,8 +535,8 @@ class FundStyleDecomposer:
         # 计算统计指标
         y_pred = X @ weights
         residuals = y - y_pred
-        alpha = np.mean(residuals) * 252  # 年化
-        residual_vol = np.std(residuals) * np.sqrt(252)
+        alpha = np.mean(residuals) * TRADING_DAYS_PER_YEAR  # 年化
+        residual_vol = np.std(residuals) * np.sqrt(TRADING_DAYS_PER_YEAR)
         ss_tot = float(np.sum((y - np.mean(y)) ** 2))
         if not np.isfinite(ss_tot) or ss_tot <= 0:
             _logger.warning("基金 [%s] 于 %s 窗口内收益无波动，R² 无定义（按 0 计）",
@@ -517,13 +550,13 @@ class FundStyleDecomposer:
         turnover_ratio = 0.0
         transaction_cost_bps = 0.0
         net_alpha_bps = 0.0
-        if hasattr(self, '_prev_exposures') and self._prev_exposures:
+        if self._prev_exposures is not None:
             turnover = sum(abs(industry_exposures.get(k, 0) - self._prev_exposures.get(k, 0))
                            for k in set(industry_exposures) | set(self._prev_exposures))
             turnover_ratio = turnover
             cost_model = self.transaction_cost_model
             transaction_cost_bps = cost_model.estimate_cost_bps(turnover_ratio)
-            net_alpha_bps = alpha * 10000 - transaction_cost_bps * 252 / window_days  # 简化年化
+            net_alpha_bps = alpha * 10000 - transaction_cost_bps * TRADING_DAYS_PER_YEAR / window_days  # 简化年化
 
         # 更新上一期暴露度（用于下一期换仓计算）
         self._prev_exposures = industry_exposures.copy()
@@ -563,21 +596,32 @@ class FundStyleDecomposer:
         滚动窗口分解，生成暴露度时序
 
         P1: 重置 _prev_exposures 以便正确计算每个时点的换仓率
+
+        **按时间正序**逐期分解：decompose_single 依赖 self._prev_exposures 计算
+        换仓率与 net_alpha_bps，因此「上一期」必须是时间上的上一期。若像旧实现那样
+        从 end_date 倒序迭代，最新一期第一个执行（_prev_exposures 还是 None →
+        换仓率/成本/net_alpha 恒为 0），其余各期则拿「未来一期」当上一期，方向相反。
         """
-        results = []
-        current_date = end_date
-        # 重置上一期暴露度，因为这是新的时间序列
         self._prev_exposures = None
 
-        while current_date >= end_date - timedelta(
+        # 先列出 [最早 … end_date] 的时点，再正序调用
+        lower_bound = end_date - timedelta(
             days=int(window_days * ROLLING_WINDOW_DAYS_FACTOR)
-        ):
-            result = self.decompose_single(fund_code, current_date, window_days, sector_codes)
+        )
+        trade_dates = []
+        current_date = end_date
+        while current_date >= lower_bound:
+            trade_dates.append(current_date)
+            current_date -= timedelta(days=step_days)
+        trade_dates.reverse()
+
+        results = []
+        for trade_date in trade_dates:
+            result = self.decompose_single(fund_code, trade_date, window_days, sector_codes)
             if result.n_sectors > 0:
                 results.append(result)
-            current_date -= timedelta(days=step_days)
 
-        return list(reversed(results))  # 时间正序
+        return results  # 已是时间正序
 
     def generate_signals(
         self,
@@ -677,16 +721,29 @@ class FundStyleDecomposer:
                 ].tail(20)
 
                 if len(flow_data) >= 10:
-                    # 暴露度变化序列：只取**确实算到过该行业**的时点，
-                    # 缺席的时点跳过，而不是补 0（补 0 等于伪造一段持仓历史）
-                    exposures = [h.exposures[sector_code] for h in history[-20:]
-                                 if sector_code in h.exposures]
-                    exp_changes = np.diff(exposures) if len(exposures) > 1 else np.array([])
+                    # 暴露度变化与资金流必须按**同一时间区间**配对：旧实现「暴露度取末尾
+                    # N 个、资金流也各取末尾 N 个」，两侧时点并不对应，算出的相关性没有
+                    # 意义。这里按每对相邻时点的日期区间，累加该区间内的净流入 z 分。
+                    exp_points = [(h.trade_date, h.exposures[sector_code])
+                                  for h in history[-20:] if sector_code in h.exposures]
+                    flow_series = pd.Series(
+                        flow_data["flow_zscore"].values,
+                        index=pd.to_datetime(flow_data["trade_date"]),
+                    )
+                    exp_changes, flow_values = [], []
+                    for i in range(1, len(exp_points)):
+                        prev_date, prev_val = exp_points[i - 1]
+                        cur_date, cur_val = exp_points[i]
+                        segment = flow_series[
+                            (flow_series.index > pd.Timestamp(prev_date))
+                            & (flow_series.index <= pd.Timestamp(cur_date))
+                        ]
+                        if segment.empty:
+                            continue
+                        exp_changes.append(cur_val - prev_val)
+                        flow_values.append(float(segment.sum()))
 
-                    flow_values = (flow_data["flow_zscore"].values[-len(exp_changes):]
-                                   if len(exp_changes) else np.array([]))
-
-                    if len(exp_changes) == len(flow_values) and len(exp_changes) > 5:
+                    if len(exp_changes) > 5:
                         corr = np.corrcoef(exp_changes, flow_values)[0, 1]
                         # 任一侧为常数时 corrcoef 给的是 nan/inf，都不能当成结论
                         if np.isfinite(corr):
@@ -866,8 +923,9 @@ class FundStyleDecomposer:
         """
         P1: 置信度校准
 
-        基于历史回测，将 R²、资金流相关性、换仓率、资金流一致性
-        映射为校准后的置信度概率（0-1）。
+        按固定权重把 R²、资金流相关性、换仓率代理、资金流一致性加权成一个
+        0-1 的启发式评分（**并未**基于历史回测做真实概率校准，别当概率读）。
+        评分同时回写离散档位。
         """
         for s in signals:
             # 基础分：R² 权重 0.4 + 资金流相关性 0.3 + 换仓率惩罚 0.2 + 资金流一致性 0.1

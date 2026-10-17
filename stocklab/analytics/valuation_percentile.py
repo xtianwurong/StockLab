@@ -268,7 +268,6 @@ class ValuationPercentileAnalyzer:
         result = history_df.copy()
 
         if "trade_date" in result.columns:
-            result = result.copy()
             # DuckDB DATE 列读回为 datetime64（带时间分量），统一规整为纯日期，
             # 避免下游做字符串格式化时出现 "2026-10-01 00:00:00"
             result["trade_date"] = pd.to_datetime(result["trade_date"]).dt.date

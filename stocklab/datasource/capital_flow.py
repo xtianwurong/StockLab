@@ -52,8 +52,7 @@ SectorType = Literal["sw_level1", "sw_level2", "concept", "industry"]
 
 def fetch_sector_capital_flow(
     sector_type: SectorType,
-    start_date: str,
-    end_date: str = None,
+    trade_date: str = None,
     top_n: int = 100
 ) -> pd.DataFrame:
     """
@@ -61,8 +60,9 @@ def fetch_sector_capital_flow(
 
     Args:
         sector_type: 板块类型
-        start_date: 起始日期 YYYY-MM-DD
-        end_date: 结束日期 YYYY-MM-DD，默认今天
+        trade_date: 这批快照标记的交易日 YYYY-MM-DD，默认今天。
+            东财接口本身只提供「今日」窗口，此参数只用于给快照盖日期戳，
+            不做区间回溯（需要历史区间请走 fetch_sw_capital_flow）。
         top_n: 获取前 N 个板块
 
     Returns:
@@ -70,8 +70,8 @@ def fetch_sector_capital_flow(
     """
     import akshare as ak
 
-    if end_date is None:
-        end_date = date.today().strftime("%Y-%m-%d")
+    if trade_date is None:
+        trade_date = date.today().strftime("%Y-%m-%d")
 
     # 东财口径只覆盖行业/概念/地域三类板块，**没有申万口径**。
     # akshare 1.x 的 sector_type 用中文标签；旧代码传 "sw1"/"concept"/"industry"
@@ -133,9 +133,17 @@ def fetch_sector_capital_flow(
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # 计算衍生字段
-    if "main_net_inflow" in df.columns and "small_net_inflow" in df.columns:
-        df["net_inflow"] = df["main_net_inflow"] + df.get("super_net_inflow", 0) + df.get("large_net_inflow", 0) + df.get("medium_net_inflow", 0) + df.get("small_net_inflow", 0)
+    # 全单净流入 = 超大 + 大 + 中 + 小。主力净流入本身已等于「超大 + 大」，
+    # 再把它加进来会把超大/大重复计一遍（原实现净额系统性偏高约一个主力量级）。
+    net_parts = [
+        df[col] for col in ("super_net_inflow", "large_net_inflow",
+                            "medium_net_inflow", "small_net_inflow")
+        if col in df.columns
+    ]
+    if net_parts:
+        df["net_inflow"] = sum(net_parts)
     else:
+        # 源只给了主力列时退化为该列，至少不凭空造数
         df["net_inflow"] = df.get("main_net_inflow", 0)
 
     # 净流入率 = 净流入 / 成交额（百分比）。源自带的「主力净流入占比」就是这个量纲，
@@ -150,13 +158,19 @@ def fetch_sector_capital_flow(
     # 已经在用模块级 date，函数体内再导入会让整函数把 date 当局部变量，
     # end_date=None 时直接 UnboundLocalError
     from datetime import datetime
-    trade_date = date.today()
+    try:
+        stamp = pd.to_datetime(trade_date).date()
+    except (ValueError, TypeError):
+        stamp = date.today()
     now = datetime.now()
 
     df["sector_type"] = sector_type
-    df["trade_date"] = trade_date
-    df["inflow"] = df.get("main_net_inflow", 0) + df.get("super_net_inflow", 0) + df.get("large_net_inflow", 0)
-    df["outflow"] = df.get("medium_net_inflow", 0) + df.get("small_net_inflow", 0)
+    df["trade_date"] = stamp
+    # 东财该接口返回的是各档「净流入」（可正可负），**没有**总流入/总流出毛额。
+    # 原实现把 main+super+large 当 inflow（= 2×主力，重复计数）、medium+small 当
+    # outflow（其实是净额，不是毛额），都是在造数。按「源不提供的列写 NULL」置空。
+    df["inflow"] = None
+    df["outflow"] = None
     df["main_net_inflow"] = df.get("main_net_inflow", 0)
     df["retail_net_inflow"] = df.get("small_net_inflow", 0)
     df["source"] = CAPITAL_FLOW_SOURCE_AKSHARE
@@ -388,6 +402,6 @@ def fetch_sw_level2_capital_flow(mapping: pd.DataFrame, trade_date=None) -> Tupl
     return fetch_sw_capital_flow(mapping, level=2, trade_date=trade_date)
 
 
-def fetch_concept_capital_flow(start_date: str, end_date: str = None) -> pd.DataFrame:
+def fetch_concept_capital_flow(trade_date: str = None) -> pd.DataFrame:
     """概念板块资金流（东财口径；本机 push2 不可达时返回空表）"""
-    return fetch_sector_capital_flow("concept", start_date, end_date)
+    return fetch_sector_capital_flow("concept", trade_date)

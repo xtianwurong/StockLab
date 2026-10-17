@@ -293,10 +293,13 @@ def test_org_id():
         "orgId 缺失时禁止发起公告查询"
     print("  -> orgId 缺失时跳过该股查询，不拉回全市场数据")
 
-    # 4) 解析失败结果被缓存（不再重复请求 topSearch）
+    # 4) 解析失败不得缓存：一次网络/解析抖动后必须允许重试，
+    #    绝不能把这支股票在整个进程生命周期内永久判死
+    before = len([p for p in transport.posts if "topSearch" in p[0]])
     client.resolve_org_id("600519")
-    assert len([p for p in transport.posts if "topSearch" in p[0]]) == 1
-    print("  -> 失败结果同样缓存，不重复打接口")
+    after = len([p for p in transport.posts if "topSearch" in p[0]])
+    assert after == before + 1, "失败结果被缓存了，后续无法重试"
+    print("  -> 失败结果不缓存，后续调用会重新解析")
 
 def test_dedup():
     """测试去重：同 announcementId 跨页 / 不同 id 同标题同日期"""

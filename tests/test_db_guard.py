@@ -27,8 +27,11 @@ import pytest
 def test_real_db_has_no_test_data():
     """真实库不得含有 source='test/fake/mock...' 的行
 
-    覆盖所有有 source/verification 列且可能被测试写脏的表。
-    表/列不存在忽略（兼容旧库/部分 schema）。
+    两条独立检查：
+      1) 动态发现所有带 source / verification 列的表并扫描（新增表自动纳入，
+         不再依赖手工清单 —— 旧清单曾漏掉 commodity / announcements / fund_info）；
+      2) 行情与估值表**没有 source 列**，无法按 source 识别污染，改用「未来日期」
+         启发式兜底：测试 fixture 常把日期推到很远的未来（2099 之类），真实库不会。
     """
     import duckdb
 
@@ -38,35 +41,46 @@ def test_real_db_has_no_test_data():
     if not os.path.exists(db_path):
         pytest.skip("data/stocklab.duckdb 不存在（CI 首次跑前未初始化）")
 
+    sentinels = "('test','fake','mock','fixture','sample','smoke','demo')"
     con = duckdb.connect(db_path, read_only=True)
     try:
-        tables = [
-            ("fund.nav_history", "source"),
-            ("fund.fund_holding", "source"),
-            ("sw.index_daily", "source"),
-            ("capital.flow_daily", "source"),
-            ("fund.fund_industry_exposure", "source"),
-            ("fund.fund_industry_exposure_daily", "source"),
-            ("fund.allocation_analysis", "source"),
-            ("fundamental.income_statements", "source"),
-            ("fundamental.balance_sheets", "source"),
-            ("fundamental.cashflow_statements", "source"),
-            ("fundamental.financial_indicators", "source"),
-            ("reference.benchmark_industry_weights", "source"),
-        ]
         bad_total = 0
         details = []
-        for table, col in tables:
+
+        # 1) 所有带 source / verification 列的表（含 verification 的 insight 表）
+        tagged = con.execute(
+            "select table_schema || '.' || table_name, column_name "
+            "from information_schema.columns "
+            "where column_name in ('source', 'verification') "
+            "order by 1, 2"
+        ).fetchall()
+        for table, col in tagged:
+            cnt = con.execute(
+                f"select count(*) from {table} "
+                f"where lower(cast({col} as varchar)) in {sentinels}"
+            ).fetchone()[0]
+            if cnt:
+                details.append(f"{table}.{col}={cnt}")
+                bad_total += cnt
+
+        # 2) 无 source 列的行情/估值表：用未来日期兜底
+        horizon = con.execute("select current_date + 30").fetchone()[0]
+        for table in (
+            "market.daily_prices",
+            "market.daily_valuations",
+            "market.industry_valuations",
+            "market.valuation_history",
+        ):
             try:
                 cnt = con.execute(
-                    f"select count(*) from {table} where lower({col}) in "
-                    f"('test','fake','mock','fixture','sample','smoke','demo')"
+                    f"select count(*) from {table} where trade_date > ?", [horizon]
                 ).fetchone()[0]
-                if cnt:
-                    details.append(f"{table}.{col}={cnt}")
-                    bad_total += cnt
             except Exception:
-                pass  # 表/列不存在忽略
+                continue  # 表/列不存在忽略
+            if cnt:
+                details.append(f"{table}.trade_date>{horizon}={cnt}")
+                bad_total += cnt
+
         if bad_total:
             pytest.fail(
                 "真实库 data/stocklab.duckdb 含合成/测试数据残留："

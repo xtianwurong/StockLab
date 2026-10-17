@@ -208,7 +208,10 @@ class CninfoClient:
                     break
 
         if not org_id:
+            # 解析失败绝不写缓存：否则一次网络抖动会把这支股票在整个进程生命周期内
+            # 永久判为「无 orgId」，此后不再重试，该股公告永久缺失
             _logger.warning("CNINFO 未解析到 %s 的 orgId，该股公告查询将跳过", code)
+            return org_id
         CninfoClient._org_id_cache[code] = org_id
         return org_id
 

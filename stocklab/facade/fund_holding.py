@@ -101,6 +101,10 @@ class FundHoldingFacade:
         """
         获取基金在某报告期的真实行业暴露
 
+        report_date=None 表示「取最新一期」，该期**可能晚于调用方的分析日**。
+        做 as-of 对照（RBSA vs 持仓）时必须显式传入 <= 分析日的报告期，
+        否则会引入前视偏差 —— 拿分析日之后的未来持仓去比当期 RBSA。
+
         【Cache-Aside】表里没有就由持仓现算并回写：fund_industry_exposure 是预计算表，
         但没有常驻任务在维护它，直读空表会把「没预计算」包装成「这只基金没有行业暴露」，
         页面上就是一行空白，用户无从分辨是数据缺失还是查询错了。
@@ -207,8 +211,11 @@ class FundHoldingFacade:
         mapped = holding[holding["sector_code"].notna()].copy()
         unmapped = holding[holding["sector_code"].isna()]
         if not unmapped.empty:
-            _logger.warning("基金 %s 有 %d 只股票无行业映射: %s",
-                           fund_code, len(unmapped), unmapped["stock_code"].tolist())
+            dropped = float(unmapped["weight"].sum())
+            _logger.warning(
+                "基金 %s 有 %d 只股票无行业映射（占权重 %.1f%%）: %s",
+                fund_code, len(unmapped), dropped * 100, unmapped["stock_code"].tolist(),
+            )
 
         if mapped.empty:
             return pd.DataFrame()
@@ -293,7 +300,7 @@ class FundHoldingFacade:
         if start_date is None:
             start_date = exposure_df["report_date"].min()
 
-        all_dates = pd.date_range(start_date, end_date, freq="D")
+        all_dates = pd.date_range(start_date, end_date, freq="B")
         trade_dates = [d.date() for d in all_dates]
 
         # 插值不得早于最早报告期：那一天之前我们并不知道组合长什么样，
@@ -367,7 +374,7 @@ class FundHoldingFacade:
                 "correlation": float,  # 两套暴露度的相关性
                 "top_diffs": [...],    # 差异最大的行业
                 "r_squared": float,    # RBSA 拟合优度
-                "coverage": float,     # 持仓映射覆盖率
+                "coverage": float,     # RBSA 行业与持仓行业的重合比例 (∩ / RBSA)
             }
         """
         from stocklab.facade.fund_analysis import FundAnalysisFacade
@@ -377,8 +384,8 @@ class FundHoldingFacade:
         rbsa_result = analysis_facade.analyze_fund_allocation(
             fund_code=fund_code,
             analysis_date=analysis_date,
-            window_days=60,
-            level=1,
+            window_days=window_days,
+            level=level,
         )
 
         if "error" in rbsa_result:
@@ -387,9 +394,21 @@ class FundHoldingFacade:
         rbsa_exposures = rbsa_result.get("current_exposures", {})
         r_squared = rbsa_result.get("r_squared", 0)
 
-        # 2. 持仓实测（取最接近分析日期的报告期）
-        latest_report = self._holding_repo.get_latest_report_date(fund_code)
-        holding_exp = self.get_industry_exposure(fund_code, latest_report, level=1)
+        # 2. 持仓实测（取分析日之前最近可见的报告期，避免用到未来持仓）
+        latest_report = self._holding_repo.get_latest_report_date_on_or_before(
+            fund_code, analysis_date
+        )
+        if latest_report is None:
+            # 分析日早于该基金最早报告期：没有任何「当时可见」的持仓可对照。
+            # 绝不能退化为 get_latest_report_date()（那是分析日**之后**的未来持仓 =
+            # 前视偏差），也不能让返回的 report_date 与真实所用报告期对不上。
+            history = self.get_report_dates(fund_code)
+            earliest = min(history) if history else None
+            return {
+                "error": "分析日 %s 早于该基金最早持仓报告期 %s，无当时可见的持仓可对照"
+                % (analysis_date, earliest if earliest else "（该基金无持仓数据）"),
+            }
+        holding_exp = self.get_industry_exposure(fund_code, latest_report, level=level)
         holding_exposures = dict(zip(holding_exp["sector_code"], holding_exp["weight"])) if not holding_exp.empty else {}
 
         # 3. 对比
@@ -407,7 +426,8 @@ class FundHoldingFacade:
         else:
             correlation = np.nan
 
-        # 持仓映射覆盖率
+        # RBSA 行业被持仓行业覆盖的比例（∩ / RBSA）。注意：这**不是**「持仓映射
+        # 覆盖率」——持仓里有多少权重能映射到行业，由 aggregate_industry_weights 负责
         rbsa_sectors = set(rbsa_exposures.keys())
         holding_sectors = set(holding_exposures.keys())
         coverage = len(rbsa_sectors & holding_sectors) / len(rbsa_sectors) if rbsa_sectors else 0

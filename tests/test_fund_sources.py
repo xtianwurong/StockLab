@@ -343,11 +343,14 @@ class TestCapitalFlowSource:
         assert list(frame.columns) == list(CAPITAL_FLOW_DAILY_COLUMNS)
         assert frame["sector_type"].eq("industry").all()
         assert frame["source"].eq(capital_flow.CAPITAL_FLOW_SOURCE_AKSHARE).all()
-        # 12亿 = 主力(12亿) + 超大单(5亿) + 大单(4亿) + 中单(2亿) + 小单(1亿)
-        assert frame.loc[0, "net_inflow"] == pytest.approx(1200000000 + 500000000
+        # 12亿 = 超大单(5亿) + 大单(4亿) + 中单(2亿) + 小单(1亿)。
+        # 主力净流入本身 = 超大 + 大，绝不能再加进全单合计，否则重复计数
+        assert frame.loc[0, "net_inflow"] == pytest.approx(500000000
                                                           + 400000000 + 200000000 + 100000000)
-        assert frame.loc[0, "inflow"] == pytest.approx(1200000000 + 500000000 + 400000000)
-        assert frame.loc[0, "outflow"] == pytest.approx(200000000 + 100000000)
+        # 东财该接口只有各档「净流入」，没有总流入/总流出毛额 → 契约列留 NULL，
+        # 绝不用 main+super+large（= 2×主力）冒充 inflow
+        assert frame["inflow"].isna().all()
+        assert frame["outflow"].isna().all()
         assert frame.loc[0, "retail_net_inflow"] == pytest.approx(100000000)
         # 净流入率直接用源自带的「主力净流入占比」（百分比）。
         # 早先写的 net_inflow/1e8 把 1 亿当成成交额，量纲既不是百分比也不是小数，

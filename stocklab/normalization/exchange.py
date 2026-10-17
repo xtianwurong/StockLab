@@ -286,9 +286,11 @@ def _calendar_frame(rows, columns, required_date_column):
         return pd.DataFrame(columns=list(columns))
     result = pd.DataFrame(rows)
     result = result[result[required_date_column].notna()]
+    # drop_duplicates(keep="last") 依赖行序：先按 (ts_code, 关键日期) 稳定排序，
+    # 让「保留最后一条」确定性地等于「保留关键日期最新的一条」，不再随上游行序漂移
     return (
-        result.drop_duplicates(subset=["ts_code"], keep="last")
-        .sort_values(by="ts_code")
+        result.sort_values(by=["ts_code", required_date_column])
+        .drop_duplicates(subset=["ts_code"], keep="last")
         .reset_index(drop=True)
     )
 

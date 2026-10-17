@@ -196,7 +196,8 @@ class FundAnalysisFacade:
         """
         P1: 加载因子收益率数据（风格因子 + 宏观因子）
 
-        目前使用内置模拟因子，后续可接入真实因子数据源（如 Barra、Wind、自建因子库）。
+        数据源尚未接入真实因子库：datasource.factor_returns 返回空 dict，
+        因此「多因子分解」不产出，分析自动退化为「仅行业分解」。
         返回: {factor_name: DataFrame(trade_date, factor_return)}
         """
         from stocklab.datasource.factor_returns import fetch_factor_returns
@@ -297,7 +298,6 @@ class FundAnalysisFacade:
 
             if records:
                 df = pd.DataFrame(records)
-                from stocklab.persistence.repository.fund_analysis import FundAllocationAnalysisRepository
                 repo = FundAllocationAnalysisRepository(self._alloc_repo._db)
                 repo.upsert(df)
         except Exception as e:

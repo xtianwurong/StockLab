@@ -85,7 +85,7 @@ def format_number(value):
         value: 数值或 None
 
     Returns:
-        str: 缺失 -> "无数据"；其余用 %.6g（3e12 之类的大数也紧凑）
+        str: None -> "-"；NaN -> "无数据"；其余用 %.6g（3e12 之类的大数也紧凑）
     """
     if value is None:
         return "-"
@@ -174,8 +174,6 @@ class ScreenRule:
         """结构化条件的一行文本，如 `pe_ttm < 20`"""
         if self.operator in ("isna", "notna"):
             return "%s %s" % (self.factor, self.description)
-        if self.operator == "in":
-            return "%s %s %s" % (self.factor, self.operator, self.threshold_text())
         return "%s %s %s" % (self.factor, self.operator, self.threshold_text())
 
     def explain(self, factor_value, passed):

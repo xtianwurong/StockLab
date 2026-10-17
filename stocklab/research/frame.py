@@ -166,8 +166,10 @@ def _universe_frame(database, as_of_date, ts_codes):
         return universe.reset_index(drop=True)
 
     # 指定股票池：严格按给定顺序对齐（查不到的代码保留空行，由筛选器报「无数据」）
+    # set_index("ts_code") 后索引未命名丢失，reset_index() 已还原出 "ts_code" 列，
+    # 无需再 rename（旧代码 rename 的 "index" 列根本不存在，是空操作）
     aligned = universe.set_index("ts_code").reindex(list(ts_codes))
-    return aligned.reset_index().rename(columns={"index": "ts_code"})
+    return aligned.reset_index()
 
 
 def _valuation_frame(database, as_of_date):
@@ -200,7 +202,13 @@ def _prior_year_frame(database, as_of_date, repository_class, columns, suffix):
     Returns:
         pd.DataFrame: ts_code + 改名后的列
     """
-    prior_date = as_of_date - datetime.timedelta(days=365)
+    # 「去年同日」而非机械减 365 天：365 天在闰年附近会漂 1~2 天，
+    # 与「同比」的日历语义不符
+    try:
+        prior_date = as_of_date.replace(year=as_of_date.year - 1)
+    except ValueError:
+        # 2/29 在非闰年不存在：退到 2/28
+        prior_date = as_of_date.replace(year=as_of_date.year - 1, day=28)
     history = repository_class(database).cross_section_as_of(prior_date)
     picked = _pick(history, columns)
     return picked.rename(columns={c: c + suffix for c in columns if c != "ts_code"})

@@ -106,10 +106,7 @@ class ScreenResult:
 
     def to_records(self):
         """把 summary 转成可 JSON 化的记录列表（failed_rules 保持为列表）"""
-        records = []
-        for row in self.summary.to_dict(orient="records"):
-            records.append(row)
-        return records
+        return self.summary.to_dict(orient="records")
 
     def __repr__(self):
         counts = self.counts
@@ -188,28 +185,6 @@ class ScreenPipeline:
             if name not in names:
                 names.append(name)
         return names
-
-    def input_columns(self):
-        """
-        预处理步骤直接引用的**帧列**（分组列、市值列等非因子列）
-
-        Returns:
-            list: 去重后的列名；取数方据此把它们并进因子输入帧
-        """
-        columns = []
-        for step in self._preprocess:
-            for key in ("by", "column"):
-                value = step.get(key)
-                if value and value not in columns:
-                    columns.append(value)
-            targets = step.get("columns")
-            if isinstance(targets, str) and targets != "*" and targets not in columns:
-                columns.append(targets)
-            elif isinstance(targets, (list, tuple)):
-                for target in targets:
-                    if target not in columns:
-                        columns.append(target)
-        return columns
 
     def run(self, frame):
         """

@@ -161,7 +161,7 @@ class InsightCollectorRegistry:
         if key not in PLATFORMS:
             raise ValueError(
                 "平台 %r 不在 PLATFORMS 契约内（%s）—— 新增平台请先改 "
-                "stocklab/domain/insight.py 的 PLATFORNS"
+                "stocklab/domain/insight.py 的 PLATFORMS"
                 % (platform, ", ".join(PLATFORMS))
             )
         self._collectors[key] = collector

@@ -141,12 +141,14 @@ class TencentDataSource(StockDataSource):
 
         quote.turnover_rate = safe_float(fields[38], 0.0)
         quote.pe_ttm = safe_float(fields[39])
-        quote.pb_ratio = safe_float(fields[46])
+        # 字段 46 为 PB：上游偶尔只回 45 列，直接取 fields[46] 会 IndexError，
+        # 必须先判长（守卫 len(fields) < 45 只保证到下标 44）
+        quote.pb_ratio = safe_float(fields[46]) if len(fields) > 46 else None
 
         # 市值换算（单位：亿元 -> 元）
         circ_mv_yi = safe_float(fields[44])
         quote.circulating_market_value = circ_mv_yi * 100000000.0 if circ_mv_yi else 0.0
-        total_mv_yi = safe_float(fields[45])
+        total_mv_yi = safe_float(fields[45]) if len(fields) > 45 else None
         quote.total_market_value = total_mv_yi * 100000000.0 if total_mv_yi else 0.0
 
         # 时间戳格式化: 20260930161500 -> 2026-09-30 16:15:00

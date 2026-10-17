@@ -56,8 +56,13 @@ __all__ = [
     "DEFAULT_SEED_PATH",
 ]
 
-# 默认的录入文件位置（相对项目根）
-DEFAULT_SEED_PATH = os.path.join("data", "insight_manual.json")
+# 项目根目录：本文件位于 stocklab/datasource/insight/，向上 4 层即仓库根
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+
+# 默认的录入文件位置：锚定项目根，而不是 CWD ——
+# 否则换个目录运行脚本会静默指向不存在的相对路径
+DEFAULT_SEED_PATH = os.path.join(_PROJECT_ROOT, "data", "insight_manual.json")
 
 
 class ManualInsightCollector(InsightCollector):

@@ -87,7 +87,7 @@ def fetch_fund_info(fund_code: str) -> pd.DataFrame:
     import akshare as ak
 
     # 去掉后缀
-    code = fund_code.replace(".OF", "").replace(".OF", "")
+    code = fund_code.replace(".OF", "")
 
     try:
         df = ak.fund_individual_basic_info_xq(symbol=code)
@@ -102,7 +102,6 @@ def fetch_fund_info(fund_code: str) -> pd.DataFrame:
     # df 结构：item, value
     info = dict(zip(df["item"], df["value"]))
 
-    from datetime import datetime
     # 雪球返回的 item 名与早期设想不同：是「成立时间」不是「成立日期」，
     # 也没有「基金简称」「基金状态」。字段名写错的后果是 establish_date 恒 None、
     # fund_short_name 恒空 —— 页面上看得到「列表是空的」，但接口是 200。
@@ -296,13 +295,22 @@ def fetch_fund_nav_history(fund_code: str, start_date: str = None, end_date: str
     return pd.DataFrame(columns=list(FUND_NAV_HISTORY_COLUMNS))
 
 
-def _parse_date(date_str: str):
-    """解析各种日期格式"""
+def _parse_date(date_str):
+    """
+    解析各种日期格式
+
+    Args:
+        date_str (str): 形如 "2003-07-12" / "2003/07/12" / "2003年07月12日"
+
+    Returns:
+        datetime.date | None: 解析成功返回 date；空串或无法识别返回 None
+    """
     if not date_str:
         return None
+    text = str(date_str).strip()
     for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y年%m月%d日"):
         try:
-            return date.fromisoformat(date_str) if "-" in date_str else date_str
-        except Exception:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
             continue
     return None

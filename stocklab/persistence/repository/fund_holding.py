@@ -146,6 +146,29 @@ class FundHoldingRepository(BaseRepository):
         ).fetchone()
         return row[0] if row and row[0] else None
 
+    def get_latest_report_date_on_or_before(self, fund_code: str, as_of: date) -> Optional[date]:
+        """
+        取 <= as_of 的最近报告期
+
+        【为什么必须带 as_of】
+          用「最新报告期」对齐历史分析日会用到未来持仓（前视偏差）；此处按
+          as_of 截断，保证对比的是当时真实可见的持仓。
+
+        Args:
+            fund_code (str): 基金代码
+            as_of (datetime.date): 分析时点
+
+        Returns:
+            datetime.date | None: 最近可见报告期
+        """
+        conn = self._db.get_connection()
+        row = conn.execute(
+            f"SELECT MAX(report_date) FROM {self._TABLE_NAME} "
+            "WHERE fund_code = ? AND report_date <= ?",
+            [fund_code, as_of],
+        ).fetchone()
+        return row[0] if row and row[0] else None
+
 
 class FundIndustryExposureRepository(BaseRepository):
     """基金行业暴露表（按报告期）"""

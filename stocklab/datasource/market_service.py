@@ -510,8 +510,9 @@ class MarketService:
         raw = pd.DataFrame()
         for attempt in range(1, self._retry_count + 1):
             try:
-                # 巨潮对高频请求会静默限流（返回 HTTP 200 但数据为空），
-                # 因此每次调用之间保持固定间隔，并对空结果也退避重试
+                # 巨潮对高频请求会静默限流（返回 HTTP 200 但数据为空）：
+                # 空结果重试前先等「基础间隔 + 重试间隔」（限流间隔 + 退避）；
+                # 异常重试则只等重试间隔（见下方 except）
                 if attempt > 1:
                     time.sleep(self._interval_seconds)
                     time.sleep(self._retry_interval_seconds)
