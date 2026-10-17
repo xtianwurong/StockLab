@@ -487,3 +487,241 @@ def test_technical_sign_classes_are_styled():
     for cls in ("pos", "neg"):
         assert re.search(r"\.stat-v\.%s\b" % cls, css), \
             "technical.html 缺少 .stat-v.%s 规则，统计卡的正负着色会静默失效" % cls
+
+
+# ---------------------------------------------------------------------------
+# 十一、个股分析页「运行期」冒烟
+#
+#   HTTP 层只能证明接口 200，证明不了页面能渲染完。appendChild 收到 HTML
+#   字符串会抛 TypeError，而 analyze() 的 .catch 会把它吞成一条错误提示并清空
+#   结果区 —— 从接口侧完全看不出来。这里用最小 DOM（appendChild 严格校验节点）
+#   + fetch 桩，把 app.js 从 init 到渲染整条链真跑一遍。
+# ---------------------------------------------------------------------------
+_PAGE_RUNTIME_HARNESS = r'''
+var APP_JS = "app/web/static/app.js";
+
+function FakeEl(tag) {
+  this.tagName = String(tag || "div").toUpperCase();
+  this.nodeType = 1;
+  this.children = [];
+  this.className = "";
+  this._text = "";
+  this._html = "";
+  this.value = "";
+  this.style = {};
+  this.attributes = {};
+  this.listeners = {};
+  this.parentNode = null;
+  this.isConnected = true;
+  this.classList = {
+    add: function () {}, remove: function () {}, toggle: function () {},
+    contains: function () { return false; }
+  };
+}
+Object.defineProperty(FakeEl.prototype, "textContent", {
+  get: function () { return this._text; },
+  set: function (v) { this._text = v === null || v === undefined ? "" : String(v); this.children = []; }
+});
+Object.defineProperty(FakeEl.prototype, "innerHTML", {
+  get: function () { return this._html; },
+  set: function (v) { this._html = v === null || v === undefined ? "" : String(v); this.children = []; }
+});
+FakeEl.prototype.appendChild = function (child) {
+  if (!child || typeof child !== "object" ||
+      (child.nodeType !== 1 && child.nodeType !== 3 && child.nodeType !== 11)) {
+    throw new TypeError(
+      "Failed to execute 'appendChild' on 'Node': parameter 1 is not of type 'Node'.");
+  }
+  this.children.push(child);
+  child.parentNode = this;
+  return child;
+};
+FakeEl.prototype.insertBefore = function (node) { return this.appendChild(node); };
+Object.defineProperty(FakeEl.prototype, "lastChild", {
+  get: function () { return this.children.length ? this.children[this.children.length - 1] : null; }
+});
+Object.defineProperty(FakeEl.prototype, "firstChild", {
+  get: function () { return this.children.length ? this.children[0] : null; }
+});
+FakeEl.prototype.removeChild = function (child) {
+  var i = this.children.indexOf(child);
+  if (i >= 0) this.children.splice(i, 1);
+  return child;
+};
+FakeEl.prototype.remove = function () { if (this.parentNode) this.parentNode.removeChild(this); };
+FakeEl.prototype.setAttribute = function (k, v) { this.attributes[k] = String(v); };
+FakeEl.prototype.getAttribute = function (k) {
+  return Object.prototype.hasOwnProperty.call(this.attributes, k) ? this.attributes[k] : null;
+};
+FakeEl.prototype.removeAttribute = function (k) { delete this.attributes[k]; };
+FakeEl.prototype.addEventListener = function (t, fn) {
+  (this.listeners[t] = this.listeners[t] || []).push(fn);
+};
+FakeEl.prototype.removeEventListener = function () {};
+FakeEl.prototype.dispatchEvent = function () { return true; };
+FakeEl.prototype.querySelector = function () { return null; };
+FakeEl.prototype.querySelectorAll = function () { return []; };
+FakeEl.prototype.contains = function () { return false; };
+FakeEl.prototype.focus = function () {};
+FakeEl.prototype.select = function () {};
+FakeEl.prototype.click = function () {};
+FakeEl.prototype.getBoundingClientRect = function () {
+  return { top: 0, left: 0, width: 0, height: 0 };
+};
+FakeEl.prototype.cloneNode = function () { return new FakeEl(this.tagName); };
+
+function FakeText(text) { this.nodeType = 3; this.textContent = String(text); }
+
+var ELEMENTS = {};
+function getEl(id) {
+  if (!ELEMENTS[id]) { ELEMENTS[id] = new FakeEl("div"); ELEMENTS[id].id = id; }
+  return ELEMENTS[id];
+}
+
+global.window = {
+  location: { search: "?code=600519.SH", href: "http://127.0.0.1:8000/?code=600519.SH", pathname: "/" },
+  history: { replaceState: function () {} },
+  localStorage: { getItem: function () { return null; }, setItem: function () {}, removeItem: function () {} },
+  addEventListener: function () {},
+  matchMedia: function () {
+    return { matches: false, addEventListener: function () {},
+             addListener: function () {}, removeListener: function () {} };
+  },
+  isSecureContext: false,
+  navigator: { clipboard: null }
+};
+global.document = {
+  readyState: "complete",
+  documentElement: new FakeEl("html"),
+  body: new FakeEl("body"),
+  createElement: function (t) { return new FakeEl(t); },
+  createTextNode: function (t) { return new FakeText(t); },
+  getElementById: getEl,
+  querySelector: function () { return null; },
+  querySelectorAll: function () { return []; },
+  addEventListener: function () {},
+  removeEventListener: function () {},
+  execCommand: function () { return false; }
+};
+global.navigator = window.navigator;
+global.getComputedStyle = function () {
+  return { getPropertyValue: function () { return "#2563eb"; } };
+};
+global.echarts = {
+  getInstanceByDom: function () { return null; },
+  init: function () {
+    return {
+      setOption: function () {}, resize: function () {}, dispose: function () {},
+      dispatchAction: function () {}, on: function () {},
+      getOption: function () { return { series: [] }; }
+    };
+  }
+};
+
+/* /api/percentile 的信封：一个分位可用、一个为 null，覆盖两条渲染分支 */
+var PERCENTILE = {
+  code: "600519.SH", raw_code: "600519",
+  security: { name: "贵州茅台", exchange: "SH", market: "SH", symbol: "600519" },
+  interval_text: "2001-08-28 ~ 2026-10-01（612 个交易日）",
+  sample_rows: 612, priority: "配置文件默认值",
+  results: [
+    { indicator: "pe_ttm", label: "PE-TTM", percentile: 21.5, level: 2, level7: "低估",
+      current_value: 18.2, median_value: 30.1, min_value: 8.9, max_value: 70.2,
+      sample_count: 612, interval_text: "x" },
+    { indicator: "pb", label: "PB", percentile: null, level: 0, level7: "-",
+      current_value: 7.1, median_value: 9.9, min_value: 3.1, max_value: 30.0,
+      sample_count: 500, interval_text: "x" }
+  ],
+  windows: [{ label: "近一年", percentiles: { pe_ttm: 21.5, pb: null }, sample_rows: 240 }],
+  market_context: {
+    pe_ttm: { available: true, total: 3936, rank: 1030, percentile: 26.2,
+      histogram: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], median_percentile: 50.45 },
+    pb: { available: false, total: 0, rank: null, percentile: null,
+      histogram: [], median_percentile: null }
+  }
+};
+
+global.fetch = function (url) {
+  var body;
+  if (String(url).indexOf("/api/health") !== -1) {
+    body = { status: "ok", priority: "配置文件默认值", data_as_of: "2026-10-01", db_path: "x" };
+  } else if (String(url).indexOf("/api/percentile") !== -1) {
+    body = PERCENTILE;
+  } else {
+    body = { items: [] };
+  }
+  return Promise.resolve({
+    ok: true, status: 200,
+    json: function () { return Promise.resolve(body); }
+  });
+};
+
+var fs = require("fs");
+var vm = require("vm");
+["common.js", "charts.js", "ui.js"].forEach(function (name) {
+  vm.runInThisContext(fs.readFileSync("app/web/static/" + name, "utf8"), { filename: name });
+});
+global.SL = window.SL;            /* 浏览器里 window.SL 即全局 SL */
+vm.runInThisContext(fs.readFileSync(APP_JS, "utf8"), { filename: APP_JS });
+
+setTimeout(function () {
+  process.stdout.write(JSON.stringify({
+    message: ELEMENTS["message"] ? ELEMENTS["message"].textContent : "",
+    metricCards: ELEMENTS["metric-grid"] ? ELEMENTS["metric-grid"].children.length : -1,
+    detailRows: ELEMENTS["detail-body"] ? ELEMENTS["detail-body"].children.length : -1,
+    secName: ELEMENTS["sec-name"] ? ELEMENTS["sec-name"].textContent : ""
+  }));
+  process.exit(0);
+}, 80);
+'''
+
+
+@pytest.fixture(scope="module")
+def analysis_page_runtime():
+    result = subprocess.run(
+        ["node", "-e", _PAGE_RUNTIME_HARNESS],
+        cwd=ROOT, capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode != 0:
+        pytest.fail("个股分析页运行期冒烟失败：%s" % (result.stderr or result.stdout)[:800])
+    return json.loads(result.stdout)
+
+
+def test_analysis_page_renders_without_runtime_error(analysis_page_runtime):
+    """页面必须能从 init 一直渲染到明细表，且没有抛错被兜底提示接住"""
+    assert analysis_page_runtime["secName"] == "贵州茅台", "安全头都没渲染出来"
+    assert analysis_page_runtime["message"] == "", \
+        "页面渲染抛错并被兜底提示吞下（结果区被清空）：%r" % analysis_page_runtime["message"]
+    assert analysis_page_runtime["metricCards"] == 2, "指标卡未渲染完（中途抛错）"
+    assert analysis_page_runtime["detailRows"] == 2, "明细表未渲染"
+
+
+def _html_string_helpers():
+    """从共享模块 JSDoc 里解析出「返回 HTML 字符串」的函数名（如 levelBadge）"""
+    helpers = set()
+    for name in ("common.js", "ui.js", "charts.js", "theme.js"):
+        text = open(os.path.join(STATIC, name), encoding="utf-8").read()
+        pattern = r"/\*\*(?:(?!\*/).)*@returns\s*\{string\}(?:(?!\*/).)*\*/\s*function\s+([A-Za-z_]\w*)"
+        for match in re.finditer(pattern, text, re.S):
+            helpers.add(match.group(1))
+    return helpers
+
+
+def test_html_string_helpers_are_not_append_child():
+    """appendChild 只接受节点：levelBadge / tempbar / levelLegend 返回 HTML 字符串，
+    必须走 innerHTML，直接 appendChild 会在运行期抛 TypeError 并中断整块渲染。"""
+    helpers = _html_string_helpers()
+    assert {"levelBadge", "tempbar", "levelLegend"} <= helpers, \
+        "未能从 JSDoc 解析出 HTML 字符串 helper，请检查注释格式：%s" % sorted(helpers)
+
+    offenders = []
+    for name in sorted(os.listdir(STATIC)):
+        if not name.endswith(".js") or name == "echarts.min.js":
+            continue
+        text = open(os.path.join(STATIC, name), encoding="utf-8").read()
+        for helper in sorted(helpers):
+            pattern = r"appendChild\(\s*(?:SL\.)?%s\s*\(" % re.escape(helper)
+            if re.search(pattern, text):
+                offenders.append("%s: appendChild(%s(...))" % (name, helper))
+
+    assert not offenders, "HTML 字符串不能直接 appendChild，应改为 innerHTML：%s" % offenders

@@ -12,7 +12,7 @@
 | 仅同步日 K（增量） | `python app/scripts/sync_market_data.py prices --incremental` | 从本地最新交易日次日开始 |
 | 同步历史估值（耗时最长） | `python app/scripts/sync_market_data.py valuation-history --period 近五年` | 需先跑 securities |
 | 启动 Web 分析服务 | `python app/scripts/serve_web.py` | 默认 127.0.0.1:8000，只监听回环 |
-| 离线单测（默认） | `./venv/bin/python -m pytest` | `pytest.ini` 的 addopts 已含 `-m "not integration"`，无需手写；约 1130 用例 / 22s |
+| 离线单测（默认） | `./venv/bin/python -m pytest` | `pytest.ini` 的 addopts 已含 `-m "not integration"`，无需手写；约 1134 用例 / 24s |
 | 联网集成测试 | `./venv/bin/python -m pytest -m integration` | 4 个用例，打真实外部源；命令行 `-m` 覆盖 addopts |
 | 只跑单个测试文件 | `./venv/bin/python -m pytest tests/test_sync_cli.py -v` | 无需装包，conftest 已加 pythonpath |
 
@@ -149,7 +149,7 @@ stocklab/
   screener/           结构化筛选（规则/分组/流水线，spec 往返一致）
   backtest/           回测引擎（T+1、先卖后买、成本三段、涨跌停/停牌推导）
   research/           研究编排（因子帧构建/快照管理，唯一「查库/落库」入口）
-tests/                1130 用例，conftest 集中 fixture
+tests/                1134 用例，conftest 集中 fixture
 configs/              insight_sources.json / screen_value.json
 data/stocklab.duckdb  本地数据仓库（git 忽略 .wal）
 ```

@@ -588,7 +588,11 @@
 
       var top = el("div", "metric-top");
       top.appendChild(el("span", "metric-name", item.label));
-      top.appendChild(SL.levelBadge(item.percentile, item.level7));
+      // levelBadge 返回的是 HTML 字符串，不是节点：直接 appendChild 会抛
+      // "parameter 1 is not of type 'Node'"，整块指标卡渲染中断。
+      var badge = el("span");
+      badge.innerHTML = SL.levelBadge(item.percentile, item.level7);
+      top.appendChild(badge);
       card.appendChild(top);
 
       card.appendChild(el("div", "metric-percentile", SL.formatPercent(item.percentile)));
